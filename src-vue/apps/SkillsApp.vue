@@ -41,9 +41,10 @@ const shell = useShellStore();
 const bridge = window.openarc?.skill;
 const files = window.openarc?.files;
 
-type Tab = "mine" | "all" | "packs";
+type Tab = "market" | "installed" | "mine" | "packs" | "official";
 type Res = { ok?: boolean; value?: any; error?: string; message?: string; detail?: unknown };
-const tab = ref<Tab>("all");
+const tab = ref<Tab>("market");
+const category = ref<string | null>(null);
 const query = ref("");
 const skills = ref<SkillRecord[]>([]);
 const packs = ref<SkillPack[]>([]);
@@ -93,7 +94,14 @@ async function loadAll() {
   loading.value = false;
 }
 
+const officialSkills = computed(() => skills.value.filter((s) => s.origin === "official"));
 const visible = computed(() => {
+  if (tab.value === "official") return filterSkills(officialSkills.value, query.value);
+  if (tab.value === "installed") return skills.value.filter((s) => s.enabled !== false);
+  if (tab.value === "market") return skills.value;
+  return __visible.value;
+});
+const __visible = computed(() => {
   const base = tab.value === "mine" ? skillsForTab("mine", skills.value) : skillsForTab("installed", skills.value);
   return filterSkills(base, query.value);
 });
@@ -119,6 +127,72 @@ async function select(id: string) {
   else if (!r.ok) detailError.value = errOf(r);
 }
 const instructions = (s: SkillRecord | null) => (s ? (s.source && s.source.instructions) || s.systemPrompt || "" : "");
+
+/* ── 官方技能：复制提示词 / 在对话中试用（TapNow appStore 的两个核心动作） ──
+   提示词只来自本地技能定义（systemPrompt 或 SKILL.md 的 source.instructions 或 v2 分步说明），
+   没有就明确说没有，不用示例文案凑。 */
+const officialNotice = ref("");
+function skillPrompt(s: SkillRecord | null): string {
+  const direct = String(instructions(s) || "").trim();
+  if (direct) return direct;
+  const steps = Array.isArray(s?.v2?.steps) ? s!.v2!.steps! : [];
+  return steps.map((st) => [st.title, st.detail].filter(Boolean).join("：")).filter(Boolean).join("\n").trim();
+}
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "true");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+/** 打开对话并把提示词填进输入框（ChatApp 的 textarea 是 v-model，派发 input 即可写入 draft） */
+function fillChatDraft(text: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const tick = () => {
+      const el = document.querySelector<HTMLTextAreaElement>("[data-chat-input]");
+      if (el && !el.disabled) {
+        el.value = text;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.focus();
+        try { el.setSelectionRange(text.length, text.length); } catch { /* 不支持选区的实现 */ }
+        resolve(true);
+        return;
+      }
+      if (Date.now() - started > 2600) { resolve(false); return; }
+      window.setTimeout(tick, 120);
+    };
+    tick();
+  });
+}
+async function copySkillPrompt(s: SkillRecord) {
+  const prompt = skillPrompt(s);
+  if (!prompt) { officialNotice.value = "这个技能在本地定义里没有提示词，无法复制。"; return; }
+  officialNotice.value = (await copyToClipboard(prompt)) ? "已复制「" + (s.name || s.id) + "」的提示词" : "复制失败：剪贴板不可用";
+}
+async function trySkillInChat(s: SkillRecord) {
+  const prompt = skillPrompt(s);
+  if (!prompt) { officialNotice.value = "这个技能在本地定义里没有提示词，无法带进对话。"; return; }
+  const copied = await copyToClipboard(prompt);
+  shell.activateApp("chat");
+  const filled = await fillChatDraft(prompt);
+  officialNotice.value = filled ? "已在对话里填好提示词（同时复制到剪贴板）" : copied ? "对话窗口没就绪：提示词已复制，粘贴即可" : "对话窗口没就绪，且剪贴板不可用";
+}
+
 const KIND: Record<string, string> = { text: "文本", image: "图片", video: "视频", audio: "音频", "image-edit": "改图", procedure: "流程" };
 const LAYER: Record<string, string> = { preset: "内置", user: "自建", pack: "技能包", workspace: "工作区" };
 const kindText = (s: SkillRecord) => KIND[String(s.kind || "")] || String(s.kind || "技能");
@@ -328,7 +402,7 @@ async function onPick(e: Event) {
   await analyzeMarkdown(await file.text(), file.name);
 }
 
-const title = computed(() => ({ mine: "我的技能", all: "全部技能", packs: "技能包" })[tab.value]);
+const title = computed(() => ({ market: "全部 Skill", installed: "已安装", mine: "我的技能", packs: "技能包", official: "官方技能" })[tab.value]);
 onMounted(() => {
   void loadAll();
   offEvent =
@@ -343,38 +417,28 @@ onBeforeUnmount(() => offEvent?.());
 
 <template>
   <div class="split skills-app" data-skill-center>
-    <nav class="split-side" aria-label="Skill 分类">
-      <label class="ds-search sk-search">
-        <Search :size="14" class="ds-search__icon" />
-        <input v-model="query" class="ds-search__input" type="search" placeholder="搜索技能" aria-label="搜索技能" />
-      </label>
+    <nav class="split-side sk-side" aria-label="Skill 分类">
       <div class="split-section">Skill</div>
-      <button class="split-nav" :aria-current="tab === 'all' ? 'true' : undefined" data-skill-tab="all" @click="tab = 'all'">
-        <Layers :size="16" /> <span class="split-nav-label">全部技能</span><small class="planned-count">{{ skillsForTab("installed", skills).length }}</small>
-      </button>
-      <button class="split-nav" :aria-current="tab === 'mine' ? 'true' : undefined" data-skill-tab="mine" @click="tab = 'mine'">
-        <User :size="16" /> <span class="split-nav-label">我的技能</span><small class="planned-count">{{ mineCount }}</small>
-      </button>
-      <div class="split-section">本机</div>
-      <button class="split-nav" :aria-current="tab === 'packs' ? 'true' : undefined" data-skill-tab="packs" @click="tab = 'packs'">
-        <Package :size="16" /> <span class="split-nav-label">技能包</span><small class="planned-count">{{ packs.length }}</small>
-      </button>
-      <div class="split-section">在线来源</div>
-      <button class="split-nav" :aria-current="onlineOpen ? 'true' : undefined" data-skill-source-nav="modelscope" @click="openOnlineSource">
-        <Globe :size="16" /> <span class="split-nav-label">ModelScope</span><small class="planned-count">未接入</small>
-      </button>
+      <button type="button" class="split-nav" data-skill-tab="market" :aria-current="tab === 'market' ? 'true' : undefined" @click="tab = 'market'"><ShoppingBag :size="16" /> <span class="split-nav-label">市场</span></button>
+      <button type="button" class="split-nav" data-skill-tab="mine" :aria-current="tab === 'mine' ? 'true' : undefined" @click="tab = 'mine'"><User :size="16" /> <span class="split-nav-label">我的技能</span><small class="planned-count">{{ mineCount }}</small></button>
+      <button type="button" class="split-nav" data-skill-tab="installed" :aria-current="tab === 'installed' ? 'true' : undefined" @click="tab = 'installed'"><Package :size="16" /> <span class="split-nav-label">已安装</span><small class="planned-count">{{ skillsForTab("installed", skills).length }}</small></button>
+      <button type="button" class="split-nav" data-skill-tab="official" :aria-current="tab === 'official' ? 'true' : undefined" @click="tab = 'official'"><Sparkles :size="16" /> <span class="split-nav-label">官方技能</span><small class="planned-count">{{ officialSkills.length }}</small></button>
+      <div class="split-section">分类</div>
+      <button v-for="c in ['图像', '视频', '写作', '设计', '效率']" :key="c" type="button" class="split-nav" disabled title="分类过滤没有后端命令（NOT VERIFIED）"><Tag :size="14" /> <span class="split-nav-label">{{ c }}</span></button>
       <p class="planned-note">技能描述做事的方法和步骤；启用技能不会自动获得应用、设备或文件权限。在线技能市场尚未接入。</p>
     </nav>
 
     <div class="split-main sk-main">
-      <div class="pane-toolbar">
+      <div class="pane-toolbar sk-toolbar">
         <strong class="pane-title">{{ title }}</strong>
+        <span class="sk-sub">Skill 描述做事的方法与步骤，安装后不会自动获得应用或设备权限</span>
         <div class="toolbar-spacer" />
         <button class="planned-today sk-btn" data-skill-import @click="openImport"><FileUp :size="13" /> 导入</button>
-        <button class="planned-cta sk-btn" data-skill-new :disabled="!bridge" @click="openEditor(null)"><Plus :size="13" /> 新建技能</button>
+        <button class="planned-cta sk-btn" data-skill-new :disabled="!bridge" @click="openEditor(null)"><Plus :size="13" /> 新建 Skill</button>
       </div>
       <p v-if="message" class="vd-msg sk-msg" role="status">{{ message }}</p>
       <p v-if="failure" class="vd-msg sk-msg err" role="alert">{{ failure }}</p>
+      <p v-if="officialNotice" class="vd-msg sk-msg" role="status" data-skill-official-notice>{{ officialNotice }}</p>
 
       <section v-if="bridge && onlineOpen" class="set-group" data-skill-online-source :data-skill-online-commands="skillCommandCount === null ? '' : String(skillCommandCount)">
         <div class="setting-row">
@@ -432,7 +496,8 @@ onBeforeUnmount(() => offEvent?.());
         <div class="sk-list">
           <p v-if="loading && !skills.length" class="set-cap">正在读取…</p>
           <p v-else-if="!visible.length" class="set-cap">
-            {{ tab === "mine" ? "还没有自建技能。点「新建技能」，或从访达导入一份 Markdown 文档。" : "没有匹配的技能。" }}
+            <template v-if="tab === 'official'">本地技能清单里没有 origin=official 的官方技能（来源：skill/list，本地技能定义）。</template>
+            <template v-else>{{ tab === "mine" ? "还没有自建技能。点「新建技能」，或从访达导入一份 Markdown 文档。" : "没有匹配的技能。" }}</template>
           </p>
           <button
             v-for="s in visible"
@@ -442,8 +507,19 @@ onBeforeUnmount(() => offEvent?.());
             :data-skill-id="s.id"
             @click="select(s.id)"
           >
-            <span class="sk-item-name">{{ s.name || s.id }}</span>
-            <small>{{ originText(s) }} · {{ kindText(s) }}{{ s.enabled === false ? " · 已停用" : "" }}</small>
+            <span class="sk-ico-lg"><Sparkles :size="26" :stroke-width="1.4" /></span>
+            <span class="sk-card-body">
+              <b class="sk-item-name">{{ s.name || s.id }}</b>
+              <small class="sk-desc">{{ s.description || "—" }}</small>
+              <small>{{ originText(s) }} · v{{ s.v2?.version || "—" }}{{ s.enabled === false ? " · 已停用" : "" }}</small>
+              <small v-if="tab === 'mine'">{{ s.v2?.steps?.length || "—" }} 个步骤 · 仅自己可见</small>
+            </span>
+            <span v-if="tab === 'official'" class="sk-inline-actions" data-skill-official-actions>
+              <button data-skill-copy @click.stop="copySkillPrompt(s)">复制提示词</button>
+              <button data-skill-chat @click.stop="trySkillInChat(s)">在对话中试用</button>
+            </span>
+            <span v-else-if="tab !== 'mine'" class="sk-install" :class="{ on: s.enabled !== false }" @click.stop="toggle(s)">{{ s.enabled === false ? "安装" : "已安装" }}</span>
+            <span v-else class="sk-inline-actions"><button @click.stop="select(s.id)">试运行</button><button @click.stop="openEditor(s)">编辑</button></span>
           </button>
         </div>
 
@@ -466,6 +542,18 @@ onBeforeUnmount(() => offEvent?.());
             />
           </header>
           <p v-if="detailError" class="vd-msg sk-msg err">{{ detailError }}</p>
+
+          <div v-if="detail.origin === 'official'" class="sk-block" data-skill-official-detail>
+            <h3>快速使用</h3>
+            <p class="set-cap">
+              提示词来源：<template v-if="skillPrompt(detail)">{{ instructions(detail) ? "本地技能定义（systemPrompt / SKILL.md）" : "本地技能定义的分步说明" }}</template>
+              <template v-else>暂无（本地技能定义没有提示词或分步说明），不能复制或带进对话</template>
+            </p>
+            <div class="sk-official-actions">
+              <button class="planned-today sk-btn" data-skill-detail-copy :disabled="!skillPrompt(detail)" @click="copySkillPrompt(detail)">复制提示词</button>
+              <button class="planned-cta sk-btn" data-skill-detail-chat :disabled="!skillPrompt(detail)" @click="trySkillInChat(detail)">在对话中试用</button>
+            </div>
+          </div>
 
           <div v-if="detail.v2 && detail.v2.steps && detail.v2.steps.length" class="sk-block">
             <h3>步骤</h3>
@@ -509,7 +597,7 @@ onBeforeUnmount(() => offEvent?.());
             <span v-else class="set-cap">内置技能不能修改或删除，可以停用。</span>
           </footer>
         </section>
-        <section v-else class="sk-detail sk-detail-empty">
+        <section v-else style="display:none" class="sk-detail sk-detail-empty">
           <Sparkles :size="28" />
           <p>选择一个技能查看说明、运行或导出。</p>
         </section>
@@ -558,3 +646,59 @@ onBeforeUnmount(() => offEvent?.());
     </DsDialog>
   </div>
 </template>
+<style scoped>
+
+.sk-side { flex: 0 0 210px; width: 210px; }
+.sk-side .split-nav { height: 32px; min-height: 32px; }
+.sk-main { padding: 0 !important; margin-left: -8px !important; }
+.sk-toolbar { height: 52px; min-height: 52px; margin: 0; padding: 0 20px; border-bottom: 0.5px solid var(--line); }
+.sk-sub { color: var(--muted); font-size: var(--fs-micro); margin-left: 10px; }
+.sk-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 16px 20px; align-content: start; }
+.sk-item { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 96px; padding: 12px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.sk-ico-lg { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: rgb(var(--text-rgb) / 0.07); color: var(--muted); }
+.sk-card-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sk-card-body b { font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.sk-card-body small { color: var(--muted); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sk-desc { color: var(--muted); }
+.sk-install { height: 26px; padding: 0 10px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.08); font-size: var(--fs-micro); white-space: nowrap; }
+.sk-install.on { background: transparent; color: var(--muted); }
+
+.sk-side { flex: 0 0 210px !important; width: 210px !important; margin-right: 0 !important; }
+.sk-side .split-nav { height: 32px; min-height: 32px; }
+.sk-side .split-section:first-child { padding-top: 18px; }
+.sk-main, .skills-app .split-main { padding: 0 !important; margin-left: -8px !important; }
+.sk-toolbar { height: 52px !important; min-height: 52px !important; margin: 0 !important; padding: 0 20px !important; display: flex; align-items: center; border-bottom: 0.5px solid var(--line); }
+.sk-list { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; padding: 8px 24px !important; align-content: start; }
+.sk-item { display: grid !important; grid-template-columns: 52px minmax(0, 1fr) auto !important; align-items: center !important; gap: 10px !important; min-height: 112px !important; padding: 12px !important; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.sk-ico-lg { width: 52px !important; height: 52px !important; flex: none; border-radius: 14px; display: grid; place-items: center; background: rgb(var(--text-rgb) / 0.07); color: var(--muted); }
+.sk-install { height: 26px; padding: 0 10px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.08); font-size: var(--fs-micro); white-space: nowrap; justify-self: end; }
+
+
+
+.sk-main, .skills-app .split-main { margin-left: 0 !important; }
+.sk-split { display: block !important; }
+.sk-list { width: 100% !important; box-sizing: border-box; }
+.sk-item { align-items: start !important; padding-top: 14px !important; }
+.sk-install { align-self: start; margin-top: 0; }
+.sk-toolbar [data-skill-import] { height: 30px !important; padding: 0 12px !important; }
+
+.sk-item { padding: 14px !important; }
+.sk-install { width: 64px; justify-self: end; text-align: center; }
+.sk-toolbar [data-skill-import] { width: 72px !important; }
+.sk-toolbar { gap: 8px; }
+
+.sk-detail { position: absolute; top: 52px; right: 0; bottom: 0; width: 380px; z-index: 20; background: rgb(var(--content-rgb) / 0.98); box-shadow: var(--elevation-2); overflow: auto; }
+.sk-inline-actions { display: flex; flex-direction: column; gap: 4px; }
+.sk-inline-actions button { height: 24px; padding: 0 8px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-micro); }
+
+.sk-detail { top: 52px !important; right: 8px !important; bottom: 8px !important; width: 380px; padding: 16px !important; gap: 14px; border-radius: var(--radius-lg); }
+.sk-official-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.sk-detail-head { align-items: flex-start; gap: 12px; }
+.sk-detail-head h2 { margin: 0 0 6px; line-height: 1.25; }
+.sk-detail-head > div { min-width: 0; flex: 1; }
+.sk-detail-head .au-switch { flex: none; margin-left: auto; }
+.sk-detail .au-switch { width: 36px; height: 21px; border-radius: 999px; background: rgb(var(--text-rgb) / 0.2); position: relative; display: inline-block; }
+.sk-detail .au-switch::after { content: ""; position: absolute; width: 17px; height: 17px; border-radius: 50%; background: #fff; top: 2px; left: 2px; }
+.sk-detail .au-switch[aria-checked="true"] { background: rgb(var(--text-rgb) / 0.85); }
+.sk-detail .au-switch[aria-checked="true"]::after { left: 17px; }
+</style>

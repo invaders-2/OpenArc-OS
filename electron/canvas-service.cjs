@@ -10,6 +10,9 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
 const domain = require("./canvas-domain.cjs");
 const authz = require("./authorization-domain.cjs");
 const { AuthorizationStore } = require("./authorization-store.cjs");
@@ -46,10 +49,13 @@ class CanvasService {
     this.logger = logger;
     /** 生成运行 → AbortController（停止时中止在途 HTTP；迟到结果一律丢弃）。*/
     this.abortOf = new Map();
+    /** 异步图片任务：runId → { status, result, error, startedAt, finishedAt }。*/
+    this.asyncRuns = new Map();
     /** 生成运行需要的任务/模型层（装配顺序原因，晚绑定）。*/
     this.taskService = null;
     this.modelService = null;
     this.tempDir = null;
+    this.feedbackDir = process.env.OPENARC_FEEDBACK_DIR || path.join(os.homedir(), "Library", "Application Support", "openarc-os", "feedback");
   }
 
   /** D5-02 Closure：任务层与模型层装配完成后晚绑定（同一实例，不建第二套）。*/
@@ -770,13 +776,13 @@ class CanvasService {
    *   · 停止归属：task.requestCancel/cancelTask → cancel_requested，后续调用一律 TASK_CANCELLED；
    *   · 版本归属：run 固定 baseRevision，迟到的结果只在画布未被改动时才允许落回。
    */
-  startRun({ context, canvasId, nodeId = null, kind = "chat" } = {}) {
+  startRun({ context, canvasId, nodeId = null, kind = "chat", configId = null } = {}) {
     const r = this.#load(context, canvasId, { needEdit: true });
     if (!r.ok) return r;
     if (!this.taskService || !this.modelService) return fail("RUN_UNAVAILABLE");
-    const k = kind === "image" ? "image" : kind === "video" ? "video" : "chat";
-    const capability = k === "image" ? "image-generation" : k === "video" ? "video-generation" : "chat";
-    const resolved = this.modelService.resolveModel({ context: { ...context, appId: "canvas" }, capability });
+    const k = kind === "image" ? "image" : kind === "video" ? "video" : kind === "audio" ? "audio" : kind === "3d" ? "3d" : "chat";
+    const capability = k === "image" ? "image-generation" : k === "video" ? "video-generation" : k === "audio" ? "audio-generation" : k === "3d" ? "3d-generation" : "chat";
+    const resolved = this.modelService.resolveModel({ context: { ...context, appId: "canvas" }, capability, configId: configId || null });
     if (!resolved.ok) return fail(resolved.error);
     // 任务**不绑定**模型配置：每次调用都由 ModelService 按 run 的能力重新解析并授权
     // （比冻结绑定更严：撤权/停用/改能力都会在下一次调用时立即生效）。
@@ -821,6 +827,40 @@ class CanvasService {
   }
 
   /** 用户停止：任务级取消 + run 终结；**在途请求由调用方 abort**，迟到结果不再被接受。*/
+  startAsyncModelCall({ context, canvasId, runId, nodeId = null, prompt = "", ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, size = null, style = null, camera = null, webSearch = false } = {}) {
+    const run = this.store.runById(runId);
+    if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
+    this.asyncRuns.set(runId, { status: "RUNNING", result: null, error: null, startedAt: this.clock(), finishedAt: null, canvasId });
+    void (async () => {
+      try {
+        const result = await this.modelCall({ context, canvasId, runId, kind: "image", prompt, ratio, resolution, customSize, customRatio, count, configId, size, style, camera, webSearch });
+        const currentEntry = this.asyncRuns.get(runId);
+        if (currentEntry && currentEntry.status === "STOPPED") return;
+        const after = this.store.runById(runId);
+        if (!after || after.status !== "RUNNING") { this.asyncRuns.set(runId, { ...(this.asyncRuns.get(runId) || {}), status: "STOPPED", error: "RUN_STOPPED", finishedAt: this.clock() }); return; }
+        if (result && result.ok) this.asyncRuns.set(runId, { ...(this.asyncRuns.get(runId) || {}), status: "DONE", result, error: null, finishedAt: this.clock() });
+        else this.asyncRuns.set(runId, { ...(this.asyncRuns.get(runId) || {}), status: "FAILED", result: null, error: String((result && (result.error || result.detail)) || "MODEL_ERROR"), finishedAt: this.clock() });
+      } catch (error) {
+        this.asyncRuns.set(runId, { ...(this.asyncRuns.get(runId) || {}), status: "FAILED", error: String((error && error.message) || "MODEL_ERROR"), finishedAt: this.clock() });
+      } finally {
+        const current = this.asyncRuns.get(runId);
+        if (current && current.status !== "STOPPED") { try { this.store.finishRun({ runId, status: current.status === "DONE" ? "DONE" : "FAILED", stopReason: current.status === "DONE" ? null : String(current.error || "MODEL_ERROR").slice(0, 60) }); } catch { /* ignore */ } }
+      }
+    })();
+    return ok({ runId, taskId: run.task_id || null });
+  }
+
+  runStatus({ context, canvasId, runId } = {}) {
+    const run = this.store.runById(runId);
+    if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
+    const r = this.#load(context, canvasId, { needEdit: false });
+    if (!r.ok) return r;
+    const entry = this.asyncRuns.get(runId);
+    const status = entry ? entry.status : (run.status === "DONE" ? "DONE" : run.status === "FAILED" ? "FAILED" : run.status === "STOPPED" ? "STOPPED" : "RUNNING");
+    const startedAt = entry ? entry.startedAt : Number(run.started_at || this.clock());
+    return ok({ runId, status, ...(entry && entry.result ? { result: entry.result } : {}), ...(entry && entry.error ? { error: entry.error } : {}), elapsedMs: Math.max(0, (entry && entry.finishedAt ? entry.finishedAt : this.clock()) - startedAt) });
+  }
+
   stopRun({ context, canvasId, runId, reason = "USER_STOP" } = {}) {
     const run = this.store.runById(runId);
     if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
@@ -838,6 +878,7 @@ class CanvasService {
       }
     }
     const finished = this.store.finishRun({ runId: run.run_id, status: "STOPPED", stopReason: String(reason).slice(0, 60) });
+    if (this.asyncRuns && this.asyncRuns.has(run.run_id)) this.asyncRuns.set(run.run_id, { ...(this.asyncRuns.get(run.run_id) || {}), status: "STOPPED", error: "RUN_STOPPED", finishedAt: this.clock() });
     if (this.abortOf) { const ac = this.abortOf.get(run.run_id); if (ac) { try { ac.abort(); } catch { /* ignore */ } this.abortOf.delete(run.run_id); } }
     return ok({ run: this.#runView(finished), cancel: cancelled && cancelled.ok ? { ok: true, status: cancelled.task.status, cancelRequested: cancelled.task.cancelRequested } : null });
   }
@@ -906,7 +947,7 @@ class CanvasService {
     })) });
   }
 
-  async modelCall({ context, canvasId, runId, kind = "chat", messages = null, prompt = "", size = null, ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, signal = null } = {}) {
+  async modelCall({ context, canvasId, runId, kind = "chat", messages = null, prompt = "", size = null, ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, signal = null, style = null, camera = null, webSearch = false } = {}) {
     const run = this.store.runById(runId);
     if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
     const r = this.#load(context, canvasId, { needEdit: true });
@@ -949,7 +990,12 @@ class CanvasService {
     try {
       const effectiveSize = kind === "image" ? this.#imageSizeForRun(run, { size, ratio, resolution, customSize, customRatio }) : null;
       const res = kind === "image"
-        ? await this.modelService.generateImage({ context: ctx, configId: configId || null, prompt: String(prompt || ""), size: effectiveSize, count: Math.max(1, Math.min(4, Number(count) || 1)), signal: ac.signal, capability: "image-generation" })
+        ? await this.modelService.generateImage({
+            context: ctx, configId: configId || null, prompt: String(prompt || ""), size: effectiveSize, count: Math.max(1, Math.min(4, Number(count) || 1)), signal: ac.signal, capability: "image-generation",
+            // 面板的风格 / 摄影机 / 联网：params 与 hints 同时给（适配器按自己的形状消费，没支持就不发）
+            params: { ...(style ? { style } : {}), ...(camera ? { camera } : {}), ...(webSearch === true ? { webSearch: true } : {}) },
+            hints: { ratio: customRatio || ratio || null, resolution: resolution || null, ...(style ? { style } : {}), ...(camera ? { camera } : {}), ...(webSearch === true ? { webSearch: true } : {}) },
+          })
         : await this.modelService.chat({ context: ctx, configId: configId || null, messages: Array.isArray(messages) ? messages : [], signal: ac.signal, capability: "chat" });
       const fresh = this.taskService.getTask({ context: ctx, taskId: run.task_id });
       const rev = fresh.ok ? fresh.task.revision : task.task.revision;
@@ -976,8 +1022,20 @@ class CanvasService {
         return fail("RUN_STOPPED", { status: after ? after.status : "STOPPED" });
       }
       if (!res || !res.ok) return res && res.ok === false ? res : fail("MODEL_ERROR");
-      // 异步 run 的结果写回：按 run.node_id **定向**判定，整画布 revision 前进不再等于丢弃结果。
-      return this.#acceptRunResult(run, res, { canvasId });
+      let finalRes = res;
+      if (kind === "image" && Array.isArray(res.images) && res.images.length) {
+        const images = [];
+        let importError = null;
+        for (const image of res.images) {
+          const dataUrl = image && (image.dataUrl || (typeof image === "string" ? image : ""));
+          if (!dataUrl || !String(dataUrl).startsWith("data:")) { images.push(image); continue; }
+          const imported = await this.importAsset({ context, canvasId, name: "生成图片-" + Date.now().toString(36), dataUrl });
+          if (imported && imported.ok && imported.ref) images.push({ ...(typeof image === "object" ? image : {}), url: imported.ref, ref: imported.ref, dataUrl: null });
+          else { images.push(typeof image === "object" ? image : { dataUrl }); importError = String((imported && (imported.error || imported.detail)) || "ASSET_IMPORT_FAILED"); }
+        }
+        finalRes = { ...res, images, ...(importError ? { assetImportError: importError, assetFallback: "base64" } : {}) };
+      }
+      return this.#acceptRunResult(run, finalRes, { canvasId });
     } catch (err) {
       const fresh = this.taskService.getTask({ context: ctx, taskId: run.task_id });
       this.taskService.failModelCall({ context: ctx, taskId: run.task_id, callId: call.call.callId, providerErrorCode: String((err && err.message) || "MODEL_ERROR").slice(0, 60), expectedRevision: fresh.ok ? fresh.task.revision : task.task.revision });
@@ -1001,7 +1059,7 @@ class CanvasService {
    * 取消走既有 canvas/runStop → abortOf 中止在途 HTTP（同一份 abortOf），不留悬挂请求。
    * 上游没有流式能力/返回非流式时由渲染层如实收口（409 退回普通接口 / 结构化错误），这里不伪造分块。
    */
-  async modelChatStream({ context, canvasId, runId, messages = [], configId = null, requestId = null, signal = null } = {}) {
+  async modelChatStream({ context, canvasId, runId, messages = [], configId = null, requestId = null, signal = null, webSearch = false } = {}) {
     const run = this.store.runById(runId);
     if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
     const r = this.#load(context, canvasId, { needEdit: true });
@@ -1030,7 +1088,7 @@ class CanvasService {
     try {
       const res = await this.modelService.chatStream({
         context: ctx, configId: configId || null, messages: Array.isArray(messages) ? messages : [],
-        signal: ac.signal, capability: "chat", requestId, onEvent: emit,
+        signal: ac.signal, capability: "chat", requestId, onEvent: emit, webSearch: webSearch === true,
       });
       const fresh = this.taskService.getTask({ context: ctx, taskId: run.task_id });
       const rev = fresh.ok ? fresh.task.revision : task.task.revision;
@@ -1188,24 +1246,29 @@ class CanvasService {
   // ---------------------------------------------------------------- 资源库图片（统一存储口径）
 
   /** 本地导入图片：写进**现有资源库**（managed store），画布只拿稳定 ResourceRef。*/
-  async importAsset({ context, canvasId, name = "canvas-image", dataUrl = "" } = {}) {
+  async importAsset({ context, canvasId, name = "canvas-image", dataUrl = "", resourceType = null } = {}) {
     const r = this.#load(context, canvasId, { needEdit: true });
     if (!r.ok) return r;
     if (!this.resourceService || typeof this.resourceService.importManaged !== "function") return fail("RESOURCE_UNAVAILABLE");
     const m = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ""));
     if (!m) return fail(REASON.INVALID_INPUT);
     const bytes = Buffer.from(m[2], "base64");
-    if (!bytes.length || bytes.length > 8 * 1024 * 1024) return fail(REASON.LIMIT_EXCEEDED);
+    // 10-23：视频 / 音频放宽到 200MB（发给模型前要先进资源库再换临时链接）；图片仍 30MB
+    const importCap = /^(video|audio)\//.test(m[1]) ? 200 * 1024 * 1024 : 30 * 1024 * 1024;
+    if (!bytes.length || bytes.length > importCap) return fail(REASON.LIMIT_EXCEEDED, { maxBytes: importCap });
     // 注入的 tempDir 既可能是字符串路径，也可能是返回路径的函数（identity-bootstrap 传字符串）。
     const dir = typeof this.tempDir === "function" ? this.tempDir() : (this.tempDir || null);
     if (!dir) return fail("RESOURCE_UNAVAILABLE");
     // 临时文件名只用 ASCII（路径安全）；资源库里显示的名字保留原文（中文名不再变成下划线），只去掉路径与控制字符。
+    // 资源库按扩展名定类型：名字没带扩展名时按数据类型补上（「生成音频」→「生成音频.wav」），否则会被当成未知文件
+    const EXT_OF = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif", "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov", "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/wave": "wav", "audio/mp4": "m4a", "audio/aac": "aac", "audio/ogg": "ogg", "audio/flac": "flac", "model/gltf-binary": "glb" };
+    if (!/\.[A-Za-z0-9]{2,5}$/.test(String(name)) && EXT_OF[m[1].toLowerCase()]) name = String(name) + "." + EXT_OF[m[1].toLowerCase()];
     const safe = String(name).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "canvas-image";
     const display = String(name).replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "_").trim().slice(0, 120) || safe;
     const file = require("node:path").join(dir, "canvas-import-" + Date.now().toString(36) + "-" + safe);
     require("node:fs").writeFileSync(file, bytes);
     try {
-      const imported = await this.resourceService.importManaged({ context: { ...context, appId: "resource-library" }, sourcePath: file, name: display, resourceType: m[1].startsWith("video") ? "video" : "image", scope: "PERSONAL" });
+      const imported = await this.resourceService.importManaged({ context: { ...context, appId: "resource-library" }, sourcePath: file, name: display, resourceType: resourceType || (m[1].startsWith("video") ? "video" : m[1].startsWith("audio") ? "audio" : m[1].startsWith("model") ? "model" : "image"), scope: "PERSONAL" });
       if (!imported || !imported.ok) return imported && imported.error ? imported : fail("IMPORT_FAILED");
       const ref = imported.resource && (imported.resource.resourceId || imported.resource.resourceRef);
       return ok({ ref: ref ? "openarc-asset:" + String(ref).replace(/^openarc-resource:/, "") : null, resource: imported.resource || null });
@@ -1239,7 +1302,7 @@ class CanvasService {
   }
 
   /** 解析引用（受控加载路径）：读权限 / 资源 owner / 可见画布文档引用 三选一，且未回收才返回内容。*/
-  readAsset({ context, ref } = {}) {
+  readAsset({ context, ref, maxBytes = 120 * 1024 * 1024 } = {}) {
     const r = this.#actor(context);
     if (!r.ok) return r;
     // 接受 openarc-asset:<id> 与裸 ResourceRef 两种写法（前端节点 refs 是前者）。
@@ -1259,7 +1322,7 @@ class CanvasService {
     // 引用放宽只绕过资源 ACL 这一步；画布访问判定已在 #resourceReferencedByVisibleCanvas 完成。
     const readFn = referencedByCanvas && typeof this.resourceService.readDataUrlInternal === "function" ? this.resourceService.readDataUrlInternal : this.resourceService.readDataUrl;
     if (typeof readFn !== "function") return fail("ASSET_UNAVAILABLE");
-    const data = readFn.call(this.resourceService, referencedByCanvas ? { resourceRef: id } : { context, resourceRef: id });
+    const data = readFn.call(this.resourceService, referencedByCanvas ? { resourceRef: id, maxBytes } : { context, resourceRef: id, maxBytes });
     if (!data || !data.ok) return fail("ASSET_UNAVAILABLE");
     return ok({ ref: "openarc-asset:" + id, dataUrl: data.dataUrl, name: row.name, version: Number(row.version || 1) });
   }
@@ -1462,6 +1525,25 @@ class CanvasService {
       canvas: this.#view(fresh, a.ok ? a.access : { allow: false, actions: [], source: "NO_GRANT" }),
       permission: invite.permission === "edit" ? "edit" : "read",
     });
+  }
+
+  /** 本地反馈上报：只追加 JSONL，不建工单、不上传；不记录凭据。 */
+  submitFeedback({ context, category, text, canvasId = null, nodeId = null, appVersion = null } = {}) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const value = String(text == null ? "" : text).trim();
+    if (value.length < 1 || value.length > 4000) return fail("INVALID_INPUT", "feedback-text-1-4000");
+    if (!["bug", "idea", "other"].includes(String(category))) return fail("INVALID_INPUT", "feedback-category");
+    try {
+      fs.mkdirSync(this.feedbackDir, { recursive: true, mode: 0o700 });
+      const id = "fb_" + this.clock().toString(36) + "_" + crypto.randomBytes(3).toString("hex");
+      const record = { id, ts: this.clock(), category: String(category), text: value, canvasId: canvasId ? String(canvasId).slice(0, 120) : null, nodeId: nodeId ? String(nodeId).slice(0, 120) : null, appVersion: appVersion ? String(appVersion).slice(0, 80) : null, platform: process.platform };
+      fs.appendFileSync(path.join(this.feedbackDir, "feedback.jsonl"), JSON.stringify(record) + "\n", { mode: 0o600 });
+      try { this.logger?.("[feedback] submitted " + id + " category=" + category); } catch { /* ignore */ }
+      return ok({ id });
+    } catch (error) {
+      return fail("INTERNAL_ERROR", String((error && error.message) || error).slice(0, 200));
+    }
   }
 }
 

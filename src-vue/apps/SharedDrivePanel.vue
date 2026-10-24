@@ -746,7 +746,7 @@ onMounted(() => void load());
 .shared-field input {
   padding: 6px var(--space-2);
   border-radius: var(--radius-md);
-  border: 1px solid var(--line);
+  border: 0;
   background: rgb(var(--content-rgb) / var(--content-alpha));
   color: var(--text);
   font: inherit;

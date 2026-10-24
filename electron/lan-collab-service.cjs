@@ -21,6 +21,8 @@
  * 监听随机端口（listen(0)），绑定 0.0.0.0；所有状态返回不含令牌 / 配对码明文。
  */
 const http = require("node:http");
+const https = require("node:https");
+const os = require("node:os");
 const crypto = require("node:crypto");
 
 const { CanvasCollabHub } = require("./canvas-dxos-collab.cjs");
@@ -32,6 +34,9 @@ const LAN_COMMANDS = Object.freeze([
   "desktop/lan/stop",
   "desktop/lan/pairing/create",
   "desktop/lan/pair",
+  "desktop/lan/devices",
+  "desktop/lan/revoke",
+  "desktop/lan/join",
 ]);
 const WS_PATH = "/api/canvas/collab";
 const PAIRING_TTL_MS = 10 * 60 * 1000;
@@ -98,8 +103,10 @@ function createLanCollabService(options = {}) {
   let serviceActor = null;
   let disabled = false;
   let lastError = null;
-  let pairing = null; // { hash, expiresAt, canvasId, userId, organizationId, context, createdAt }
-  const tokens = new Map(); // hash → { tokenId, userId, organizationId, canvasId, expiresAt, context, createdAt }
+  let pairing = null; // { hash, expiresAt, canvasId, canEdit, userId, organizationId, context, createdAt }
+  const tokens = new Map(); // hash → { tokenId, userId, organizationId, canvasId, canEdit, expiresAt, context, createdAt }
+  const pairFailures = new Map(); // ip → timestamps[]
+  const audit = [];
   const connections = new Map(); // clientId → connection
   const sockets = new Set();
 
@@ -131,20 +138,35 @@ function createLanCollabService(options = {}) {
     for (const [hash, token] of tokens) if (token.expiresAt <= now) tokens.delete(hash);
   }
 
+  function lanAddress() {
+    try {
+      for (const entries of Object.values(os.networkInterfaces())) {
+        for (const entry of entries || []) {
+          if (entry && entry.family === "IPv4" && !entry.internal && entry.address) return entry.address;
+        }
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
   function status() {
     cleanupExpired();
+    const address = listening ? lanAddress() : null;
     return {
       command: "desktop/lan/status",
       enabled: !!server && listening,
       listening,
       binding: listening ? host : null,
+      address,
+      lanUrl: address && port ? "http://" + address + ":" + port : null,
       port,
       path: wsPath,
+      devices: listDevices(),
       clients: connections.size,
       tokens: tokens.size,
-      pairing: pairing ? { active: true, expiresAt: pairing.expiresAt, canvasId: pairing.canvasId, createdAt: pairing.createdAt } : { active: false, expiresAt: null, canvasId: null, createdAt: null },
+      pairing: pairing ? { active: true, expiresAt: pairing.expiresAt, canvasId: pairing.canvasId, canEdit: pairing.canEdit === true, createdAt: pairing.createdAt } : { active: false, expiresAt: null, canvasId: null, canEdit: false, createdAt: null },
       optIn: true,
-      readOnly: true,
+      readOnly: !([...tokens.values()].some((token) => token.canEdit === true)),
       lastError,
     };
   }
@@ -156,10 +178,7 @@ function createLanCollabService(options = {}) {
     if (!actor.ok) return fail("FORBIDDEN", actor.message || "会话无效");
     serviceActor = actor;
     serviceContext = { ...context, appId: "canvas", source: "lan" };
-    server = http.createServer((request, response) => {
-      response.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-      response.end("not found");
-    });
+    server = http.createServer((request, response) => { void handleHttpRequest(request, response); });
     server.on("upgrade", (request, socket, head) => handleUpgrade(request, socket, head));
     try {
       await new Promise((resolve, reject) => {
@@ -209,17 +228,18 @@ function createLanCollabService(options = {}) {
     const actor = resolveActor(context);
     if (!actor.ok) return fail("FORBIDDEN", actor.message || "会话无效");
     const canvasId = payload && payload.canvasId != null ? asStr(payload.canvasId, 120).trim() || null : null;
+    const canEdit = payload && payload.canEdit === true;
     const code = makePairingCode();
     const createdAt = Number(clock());
     pairing = {
       hash: sha256(normalizePairingCode(code)), expiresAt: createdAt + pairingTtlMs,
-      canvasId, userId: String(actor.user.id), organizationId: actor.user.team_id || null,
+      canvasId, canEdit, userId: String(actor.user.id), organizationId: actor.user.team_id || null,
       context: { ...context, appId: "canvas", source: "lan" }, createdAt,
     };
-    return ok({ code, expiresAt: pairing.expiresAt, canvasId, port, path: wsPath, binding: host, readOnly: true });
+    return ok({ code, expiresAt: pairing.expiresAt, canvasId, canEdit, port, path: wsPath, binding: host, readOnly: !canEdit });
   }
 
-  function pair(payload = {}) {
+  function pair(payload = {}, ip = "") {
     if (!listening) return fail("NOT_READY", "lan-not-started");
     cleanupExpired();
     const normalized = normalizePairingCode(payload && payload.code);
@@ -233,14 +253,14 @@ function createLanCollabService(options = {}) {
     const createdAt = Number(clock());
     const tokenId = "lant_" + crypto.randomBytes(8).toString("hex");
     tokens.set(sha256(token), {
-      tokenId, userId: consumed.userId, organizationId: consumed.organizationId,
-      canvasId: consumed.canvasId, expiresAt: createdAt + tokenTtlMs,
+      tokenId, userId: consumed.userId, organizationId: consumed.organizationId, ip: String(ip || ""),
+      canvasId: consumed.canvasId, canEdit: consumed.canEdit === true, expiresAt: createdAt + tokenTtlMs,
       context: consumed.context, createdAt,
     });
     return ok({
-      token, tokenId, expiresAt: createdAt + tokenTtlMs, canvasId: consumed.canvasId,
+      token, tokenId, expiresAt: createdAt + tokenTtlMs, canvasId: consumed.canvasId, canEdit: consumed.canEdit === true,
       ws: { binding: host, port, path: wsPath, localUrl: "ws://127.0.0.1:" + port + wsPath },
-      readOnly: true,
+      readOnly: consumed.canEdit !== true,
     });
   }
 
@@ -270,6 +290,108 @@ function createLanCollabService(options = {}) {
     for (const conn of targets) send(conn, message);
   }
 
+  function sendJson(response, status, body) {
+    const data = JSON.stringify(body);
+    response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-length": Buffer.byteLength(data) });
+    response.end(data);
+  }
+
+  async function handleHttpRequest(request, response) {
+    let url;
+    try { url = new URL(request.url || "", "http://127.0.0.1"); } catch { sendJson(response, 400, { ok: false, error: "INVALID_INPUT" }); return; }
+    if (url.pathname !== wsPath + "/pair") { sendJson(response, 404, { ok: false, error: "NOT_FOUND" }); return; }
+    if (String(request.method || "").toUpperCase() !== "POST") { sendJson(response, 405, { ok: false, error: "METHOD_NOT_ALLOWED" }); return; }
+    if (!listening) { sendJson(response, 503, { ok: false, error: "NOT_READY" }); return; }
+    const contentType = String(request.headers["content-type"] || "").toLowerCase();
+    if (!contentType.startsWith("application/json")) { sendJson(response, 415, { ok: false, error: "UNSUPPORTED_MEDIA_TYPE" }); return; }
+    const ip = String(request.socket.remoteAddress || "unknown");
+    const now = Number(clock());
+    const recent = (pairFailures.get(ip) || []).filter((at) => now - at < 60000);
+    pairFailures.set(ip, recent);
+    if (recent.length >= 5) { audit.push({ event: "pair_rate_limited", ip, at: now }); sendJson(response, 429, { ok: false, error: "RATE_LIMITED", retryAfterMs: 60000 - (now - recent[0]) }); return; }
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { body += chunk; if (body.length > 4096) { request.destroy(); sendJson(response, 413, { ok: false, error: "PAYLOAD_TOO_LARGE" }); } });
+    request.on("end", () => {
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); } catch { pairFailures.set(ip, recent.concat([now])); sendJson(response, 400, { ok: false, error: "INVALID_INPUT" }); return; }
+      const result = pair({ code: parsed && parsed.code, canvasId: parsed && parsed.canvasId }, ip);
+      if (!result || result.ok !== true) {
+        pairFailures.set(ip, recent.concat([now]));
+        audit.push({ event: "pair_failed", ip, error: result && result.error, at: now });
+        const status = result && result.error === "NOT_FOUND" ? 404 : result && result.error === "FORBIDDEN" ? 403 : 400;
+        sendJson(response, status, { ok: false, error: (result && result.error) || "PAIR_FAILED", detail: result && result.detail });
+        return;
+      }
+      pairFailures.delete(ip);
+      audit.push({ event: "pair_succeeded", ip, tokenId: result.tokenId, canvasId: result.canvasId, canEdit: result.canEdit === true, at: now });
+      sendJson(response, 200, { ok: true, token: result.token, tokenId: result.tokenId, canvasId: result.canvasId, canEdit: result.canEdit === true, expiresAt: result.expiresAt, wsPath: wsPath, port, path: wsPath });
+    });
+    request.on("error", () => { try { sendJson(response, 400, { ok: false, error: "INVALID_INPUT" }); } catch { /* ignore */ } });
+  }
+
+  function joinRemote(payload = {}) {
+    const hostUrl = asStr(payload.hostUrl, 500).trim();
+    const code = asStr(payload.code, 20).trim();
+    if (!hostUrl || !code) return Promise.resolve(fail("INVALID_INPUT", "hostUrl / code 必填"));
+    let parsed;
+    try { parsed = new URL(hostUrl); } catch { return Promise.resolve(fail("INVALID_INPUT", "hostUrl 无效")); }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return Promise.resolve(fail("INVALID_INPUT", "hostUrl 必须是 http/https"));
+    if (parsed.username || parsed.password) return Promise.resolve(fail("INVALID_INPUT", "hostUrl 不允许凭据"));
+    const target = parsed.origin + wsPath + "/pair";
+    const body = JSON.stringify({ code });
+    const transport = parsed.protocol === "https:" ? https : http;
+    return new Promise((resolve) => {
+      const request = transport.request(target, { method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) }, timeout: 12000 }, (response) => {
+        let data = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => { data += chunk; if (data.length > 16384) request.destroy(); });
+        response.on("end", () => {
+          let parsedBody = null;
+          try { parsedBody = JSON.parse(data); } catch { /* ignore */ }
+          if (response.statusCode !== 200 || !parsedBody || parsedBody.ok !== true || !parsedBody.token || !parsedBody.wsPath) {
+            resolve(fail(parsedBody && parsedBody.error ? String(parsedBody.error) : "PAIR_FAILED", parsedBody && parsedBody.detail ? String(parsedBody.detail) : "HTTP " + response.statusCode));
+            return;
+          }
+          const wsUrl = parsed.protocol.replace("http", "ws") + "://" + parsed.host + parsedBody.wsPath;
+          audit.push({ event: "lan_join_succeeded", host: parsed.host, canvasId: parsedBody.canvasId || null, canEdit: parsedBody.canEdit === true, at: Number(clock()) });
+          resolve(ok({ token: parsedBody.token, tokenId: parsedBody.tokenId || null, canEdit: parsedBody.canEdit === true, canvasId: parsedBody.canvasId || null, expiresAt: parsedBody.expiresAt || null, wsUrl }));
+        });
+      });
+      request.on("timeout", () => { request.destroy(); resolve(fail("PAIR_TIMEOUT")); });
+      request.on("error", (error) => resolve(fail("PAIR_UNREACHABLE", String((error && error.message) || error))));
+      request.end(body);
+    });
+  }
+
+  function listDevices() {
+    cleanupExpired();
+    return [...connections.values()].map((conn) => ({
+      clientId: conn.clientId, tokenId: conn.scope.tokenId || null, username: conn.username || "",
+      ip: conn.ip || null, canEdit: conn.scope.canEdit === true, connectedAt: conn.connectedAt,
+      joined: [...conn.joined], expiresAt: conn.scope.expiresAt,
+    }));
+  }
+
+  function revoke(payload = {}) {
+    cleanupExpired();
+    const tokenId = asStr(payload.tokenId, 80).trim();
+    const clientId = asStr(payload.clientId, 120).trim();
+    const deviceIp = asStr(payload.ip, 80).trim();
+    if (!tokenId && !clientId && !deviceIp) return fail("INVALID_INPUT", "tokenId / clientId / ip 至少一个");
+    let revoked = 0;
+    for (const [hash, entry] of [...tokens]) {
+      if ((tokenId && entry.tokenId === tokenId) || (!tokenId && !clientId && deviceIp && entry.ip === deviceIp)) { tokens.delete(hash); revoked += 1; }
+    }
+    for (const conn of [...connections.values()]) {
+      if ((tokenId && conn.scope.tokenId === tokenId) || (clientId && conn.clientId === clientId) || (deviceIp && conn.ip === deviceIp)) {
+        try { closeWith(conn, 1008, "revoked"); } catch { /* ignore */ }
+      }
+    }
+    audit.push({ event: "device_revoked", tokenId: tokenId || null, clientId: clientId || null, ip: deviceIp || null, revoked, at: Number(clock()) });
+    return ok({ revoked, devices: listDevices() });
+  }
+
   function handleUpgrade(request, socket, head) {
     let url;
     try { url = new URL(request.url || "", "http://127.0.0.1"); } catch { socket.destroy(); return; }
@@ -293,7 +415,7 @@ function createLanCollabService(options = {}) {
     ];
     socket.write(responseHeaders.join("\r\n"));
     const clientId = "lan:" + crypto.randomBytes(8).toString("hex");
-    const conn = { clientId, socket, scope, buffer: Buffer.alloc(0), joined: new Set(), closed: false };
+    const conn = { clientId, socket, scope, buffer: Buffer.alloc(0), joined: new Set(), closed: false, ip: String(request.socket.remoteAddress || ""), connectedAt: Number(clock()), username: "" };
     connections.set(clientId, conn);
     sockets.add(socket);
     if (head && head.length) onData(conn, head);
@@ -376,6 +498,13 @@ function createLanCollabService(options = {}) {
     return true;
   }
 
+  function broadcastRoom(canvasId, message, exceptClientId = null) {
+    for (const conn of connections.values()) {
+      if (conn.clientId === exceptClientId || !conn.joined.has(canvasId)) continue;
+      send(conn, { ...message, canvasId });
+    }
+  }
+
   function handleMessage(conn, text) {
     if (!checkScope(conn)) return;
     let message;
@@ -415,9 +544,11 @@ function createLanCollabService(options = {}) {
           const canvasId = asStr(message.canvasId, 120).trim();
           if (!canvasId) { send(conn, { type: "collab.join.result", ok: false, error: "INVALID_INPUT" }); return; }
           if (conn.scope.canvasId && conn.scope.canvasId !== canvasId) { send(conn, { type: "collab.join.result", ok: false, error: "FORBIDDEN" }); return; }
-          const result = hub.join({ canvasId, clientId: conn.clientId, userId: conn.scope.userId, username: asStr(message.username, 80), canEdit: false });
+          const canEdit = conn.scope.canEdit === true;
+          conn.username = asStr(message.username, 80);
+          const result = hub.join({ canvasId, clientId: conn.clientId, userId: conn.scope.userId, username: conn.username, canEdit });
           if (result.ok) conn.joined.add(canvasId);
-          send(conn, { type: "collab.join.result", ok: result.ok, error: result.ok ? null : result.error, detail: result.ok ? null : result.detail, presence: result.ok ? result.presence : null, readOnly: true });
+          send(conn, { type: "collab.join.result", ok: result.ok, error: result.ok ? null : result.error, detail: result.ok ? null : result.detail, presence: result.ok ? result.presence : null, readOnly: !canEdit, canEdit });
           return;
         }
         case "collab.leave": {
@@ -435,7 +566,42 @@ function createLanCollabService(options = {}) {
           return;
         }
         case "collab.patch": {
-          send(conn, { type: "error", error: "READ_ONLY", detail: "lan tokens do not grant edit permission" });
+          if (conn.scope.canEdit !== true) { send(conn, { type: "error", error: "READ_ONLY", detail: "lan token does not grant edit permission" }); return; }
+          const canvasId = asStr(message.canvasId, 120).trim();
+          if (!canvasId || !conn.joined.has(canvasId)) { send(conn, { type: "error", error: "NOT_FOUND", detail: "not-joined" }); return; }
+          const baseRevision = Number(message.baseRevision);
+          const currentRevision = Number(message.currentRevision);
+          const result = hub.submitPatch({ canvasId, clientId: conn.clientId, baseRevision, currentRevision, payload: message.patch && typeof message.patch === "object" ? message.patch : {} });
+          send(conn, { type: "collab.patch.result", ok: result.ok, error: result.ok ? null : result.error, detail: result.ok ? null : result.detail, revision: result.ok ? currentRevision : null });
+          return;
+        }
+        case "hello": {
+          send(conn, { type: "hello.ok", cid: conn.clientId });
+          return;
+        }
+        case "snapshot-request": {
+          const canvasId = asStr(message.canvasId, 120).trim();
+          if (!canvasId || !conn.joined.has(canvasId)) { send(conn, { type: "error", error: "NOT_FOUND", detail: "not-joined" }); return; }
+          broadcastRoom(canvasId, { type: "snapshot-request", cid: conn.clientId }, conn.clientId);
+          return;
+        }
+        case "snapshot": {
+          const canvasId = asStr(message.canvasId, 120).trim();
+          if (!canvasId || !conn.joined.has(canvasId)) return;
+          broadcastRoom(canvasId, { type: "snapshot", cid: conn.clientId, doc: message.doc || null }, conn.clientId);
+          return;
+        }
+        case "op": {
+          const canvasId = asStr(message.canvasId, 120).trim();
+          if (conn.scope.canEdit !== true) { send(conn, { type: "error", error: "READ_ONLY", detail: "lan token does not grant edit permission" }); return; }
+          if (!canvasId || !conn.joined.has(canvasId)) { send(conn, { type: "error", error: "NOT_FOUND", detail: "not-joined" }); return; }
+          broadcastRoom(canvasId, { type: "op", cid: conn.clientId, op: message.op || null }, conn.clientId);
+          return;
+        }
+        case "presence": {
+          const canvasId = asStr(message.canvasId, 120).trim();
+          if (!canvasId || !conn.joined.has(canvasId)) return;
+          broadcastRoom(canvasId, { type: "presence", cid: conn.clientId, cursor: message.cursor || null }, conn.clientId);
           return;
         }
         case "ping": {
@@ -459,6 +625,9 @@ function createLanCollabService(options = {}) {
         case "desktop/lan/stop": result = await stop(); break;
         case "desktop/lan/pairing/create": result = pairingCreate(payload, context); break;
         case "desktop/lan/pair": result = pair(payload); break;
+        case "desktop/lan/devices": result = ok({ devices: listDevices() }); break;
+        case "desktop/lan/revoke": result = revoke(payload); break;
+        case "desktop/lan/join": result = await joinRemote(payload); break;
         default: return localProxyDomain.normalizeLocalProxyError(localProxyDomain.localProxyCommandNotAllowed(command));
       }
       if (result && result.ok === false) return { ok: false, error: result.error, detail: result.detail };

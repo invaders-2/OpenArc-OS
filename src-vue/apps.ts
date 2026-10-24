@@ -32,14 +32,14 @@ export const APPS: readonly AppEntry[] = [
   { id: "home", name: "应用中心", icon: "apps", version: "0.1.0" },
   { id: "browser", name: "浏览器", icon: "safari", version: "0.1.0" },
   { id: "files", name: "访达", icon: "finder", version: "0.1.0" },
-  { id: "resource-library", name: "资源库", icon: "finder", version: "0.1.0" },
+  { id: "resource-library", name: "资源库", icon: "library", version: "0.1.0" },
   { id: "canvas", name: "AI Studio", icon: "freeform", version: "0.1.0" },
   { id: "projects", name: "项目", icon: "folder", version: "0.1.0" },
-  { id: "organization", name: "组织", icon: "settings", version: "0.1.0" },
+  { id: "organization", name: "组织治理", icon: "contacts", version: "0.1.0" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts", version: "0.1.0" },
-  { id: "mcp-center", name: "MCP 中心", icon: "sharing", version: "0.1.0" },
+  { id: "mcp-center", name: "MCP 中心", icon: "mcp", version: "0.1.0" },
   // 0.6.1：第三方集成入口（领星 / 紫鸟 / 钉钉 / 夸克 / 天气 / 黄历等可选插件）。
-  // 图标复用随包的 sharing 身份图标：本批只允许改 src-vue / src/types，不新增 public 资产。
+  // 图标用 sharing（连接/共享）身份图标；task-2 起 MCP 中心改用 mcp.png，两者不再同图。
   { id: "integrations", name: "第三方集成", icon: "sharing", version: "0.1.0" },
   // 10-16：协议中心（模型 / 供应商协议，原「模型与服务商 › 协议」标签独立成应用）
   { id: "protocols", name: "协议中心", icon: "protocols", version: "0.1.0" },
@@ -84,7 +84,7 @@ const APP_NAME_EN: Record<string, string> = {
   "resource-library": "Resource Library",
   canvas: "AI Studio",
   projects: "Projects",
-  organization: "Organization",
+  organization: "Organization Governance",
   skills: "Skill Center",
   "mcp-center": "MCP Center",
   integrations: "Integrations",
@@ -134,12 +134,16 @@ export const APP_LINE_ICON: Record<string, Component> = {
 
 export const lineIconFor = (appId: string): Component => APP_LINE_ICON[appId] ?? LayoutGrid;
 
-/** 应用分类（应用程序弹窗的分类条与应用市场共用口径）。没列的归「其他」。 */
+/**
+ * 应用分类（应用程序弹窗的分类条与应用市场共用口径）。没列的归「其他」。
+ * 开发 = 面向开发者 / 协议与工具连接的应用；团队与资源 = 项目、成员与可复用资产。
+ */
 export const APP_CATEGORY: Record<string, string> = {
-  files: "系统", trash: "系统", settings: "系统", dev: "系统",
+  home: "系统", files: "系统", trash: "系统", settings: "系统",
+  dev: "开发", protocols: "开发", "mcp-center": "开发",
   integrations: "团队与资源",
   canvas: "创作", photos: "创作", music: "创作", notes: "创作", video: "创作", declare: "创作", drama: "创作",
   chat: "效率", automation: "效率", calendar: "效率", weather: "效率", browser: "效率", market: "效率",
-  projects: "团队与资源", organization: "团队与资源", "resource-library": "团队与资源", skills: "团队与资源", "mcp-center": "团队与资源", protocols: "团队与资源",
+  projects: "团队与资源", organization: "团队与资源", "resource-library": "团队与资源", skills: "团队与资源",
 };
-export const APP_CATEGORIES = ["效率", "创作", "团队与资源", "系统"];
+export const APP_CATEGORIES = ["创作", "效率", "开发", "系统", "团队与资源"];

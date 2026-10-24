@@ -105,7 +105,7 @@ type LabDraft = {
   name: string;
   appId: string;
   summary?: string;
-  files?: { path: string; bytes: number }[];
+  files?: { path: string; bytes: number; content?: string }[];
   checks?: LabCheck[];
   createdAt?: number;
   previewUrl?: string;
@@ -189,6 +189,29 @@ type DevAgentOutcome = {
   [key: string]: unknown;
 };
 const agentAvailable = ref(!!window.openarc?.agent);
+const ideFile = ref("");
+const ideRunning = ref(false);
+const ideLogs = ref<{ tone: "ok" | "err" | ""; text: string }[]>([]);
+const ideLines = computed(() => {
+  const f = (drafts.value[0]?.files || []).find((x) => x.path === ideFile.value);
+  return String(f?.content || "").split("\n");
+});
+function ideHighlight(line: string) {
+  const esc = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return esc.replace(/("[^"]*")/g, '<span class="tok-s">$1</span>').replace(/\b(import|from|const|await|return|async|function|export)\b/g, '<span class="tok-k">$1</span>').replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="tok-n">$1</span>');
+}
+function ideCheck() {
+  const d = drafts.value[0];
+  ideLogs.value = [{ tone: "", text: "> 检查 " + d.name }];
+  for (const c of d.checks || []) ideLogs.value.push({ tone: c.status === "pass" ? "ok" : c.status === "warn" ? "" : "err", text: (c.status === "pass" ? "✓ " : c.status === "warn" ? "! " : "✗ ") + (c.label || c.id || "检查项") });
+  if (!(d.checks || []).length) ideLogs.value.push({ tone: "", text: "开发者桥未返回检查项（NOT VERIFIED）" });
+}
+function ideRun() {
+  const d = drafts.value[0];
+  if (!d.previewUrl) return;
+  ideRunning.value = true;
+  ideLogs.value = [{ tone: "", text: "> 打开沙箱预览" }];
+}
 const agentApp = ref<{ appId: string; name: string } | null>(null);
 const agentInstruction = ref("");
 const agentMode = ref<"assistant" | "thinking" | "agent">("thinking");
@@ -307,6 +330,7 @@ async function loadLab() {
   const listValue = payloadOf<{ drafts?: LabDraft[] }>(listReply);
   if (listValue) {
     drafts.value = Array.isArray(listValue.drafts) ? listValue.drafts : [];
+    if (!ideFile.value && drafts.value[0]?.files?.length) ideFile.value = drafts.value[0].files[0].path;
     labError.value = null;
     if (selectedDraft.value && !drafts.value.some((item) => item.id === selectedDraft.value?.id)) selectedDraft.value = null;
   } else labError.value = resultFailure(listReply);
@@ -649,6 +673,7 @@ const platformName =
 
 onMounted(() => {
   void loadTab();
+  void loadLab();
 });
 </script>
 
@@ -675,6 +700,37 @@ onMounted(() => {
     </nav>
 
     <div class="split-main dev-main">
+      <div v-if="drafts.length" class="dev-proto" data-dev-proto>
+        <div class="dv-toolbar" data-dev-toolbar>
+          <b class="dv-title">{{ drafts[0].name }}</b>
+          <span class="dv-sub">开发项目 · 沙箱运行</span>
+          <span class="toolbar-spacer" />
+          <button type="button" class="dv-btn" data-dev-check @click="ideCheck">检查</button>
+          <button type="button" class="dv-btn pri" data-dev-run :disabled="!drafts[0].previewUrl" :title="drafts[0].previewUrl ? '在沙箱中打开预览' : '没有可运行的沙箱预览（NOT VERIFIED）'" @click="ideRun">运行</button>
+        </div>
+        <div class="dv-body">
+          <aside class="dv-tree" data-dev-tree>
+            <div class="dv-cap">项目文件</div>
+            <button v-for="f in (drafts[0].files || [])" :key="f.path" type="button" class="dv-file" data-dev-file :class="{ on: ideFile === f.path }" @click="ideFile = f.path"><span class="dv-ico">{{ f.path.endsWith(".json") ? "⚙" : "‹›" }}</span>{{ f.path }}</button>
+            <div class="dv-file dv-folder"><span class="dv-ico">▸</span>assets</div>
+            <div class="dv-file dv-folder"><span class="dv-ico">▸</span>mcp</div>
+          </aside>
+          <section class="dv-editor" data-dev-editor>
+            <div class="dv-code"><div class="dv-file-head">{{ ideFile || "选择一个文件" }}</div><div class="dv-lines"><div v-for="(line, i) in ideLines" :key="i" class="dv-line"><span class="dv-ln">{{ i + 1 }}</span><code v-html="ideHighlight(line)"></code></div></div></div>
+            <div class="dv-console" data-dev-console><div v-for="(l, i) in ideLogs" :key="i" :class="{ err: l.tone === 'err', ok: l.tone === 'ok' }">{{ l.text }}</div><div v-if="!ideLogs.length" class="dv-muted">控制台输出会显示在这里。</div></div>
+          </section>
+          <aside class="dv-preview" data-dev-preview>
+            <div class="dv-preview-head"><b>预览</b><span class="dv-badge" :class="{ ok: ideRunning }" data-dev-preview-badge>{{ ideRunning ? "运行中" : "未运行" }}</span></div>
+            <div class="dv-preview-stage">
+              <div class="dv-preview-card" data-dev-preview-card>
+                <img v-if="ideRunning && drafts[0].previewUrl" :src="drafts[0].previewUrl" alt="沙箱预览" />
+                <div v-else class="dv-card-empty"><b>秋季新品 · 门店海报</b><span>点「运行」在沙箱中启动</span></div>
+              </div>
+              
+            </div>
+          </aside>
+        </div>
+      </div>
       <div class="pane-toolbar">
         <strong class="pane-title">{{ APP_SECTION_TITLE[tab] }}</strong>
         <div class="toolbar-spacer" />
@@ -1140,8 +1196,78 @@ onMounted(() => {
 @media (max-width: 900px) {
   .dev-draft-cols { grid-template-columns: 1fr; }
 }
-.dev-agent-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 72px; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-caption); }
+.dev-agent-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 72px; margin: 6px 0; padding: 6px 8px; border: 0; border-radius: var(--radius-md); background: var(--sunken); color: var(--text); font-size: var(--fs-caption); }
 .dev-agent-result { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); }
 .dev-agent-result p { margin: 0; font-size: var(--fs-micro); color: var(--muted); }
 .dev-agent-output { margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text); }
+
+.dev-app .split-side { display: none !important; }
+.dev-app .split-main { margin-left: 0 !important; padding: 0 !important; }
+.dev-app .pane-toolbar { display: none !important; }
+.dev-app .dev-scroll { display: none !important; }
+.dev-proto { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dv-toolbar { height: 52px; min-height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 20px; border-bottom: 0.5px solid var(--line); }
+.dv-title { font-size: 15px; }
+.dv-sub { color: var(--muted); font-size: var(--fs-micro); }
+.dv-btn { height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-caption); }
+.dv-btn.pri { background: var(--text); color: var(--content); }
+.dv-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr) 300px; }
+.dv-tree { border-right: 0.5px solid var(--line); padding: 8px; overflow: auto; }
+.dv-cap { color: var(--muted); font-size: var(--fs-micro); padding: 4px 8px 8px; }
+.dv-file { width: 100%; height: 28px; text-align: left; padding: 0 8px; border-radius: 6px; font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dv-file.on { background: rgb(var(--text-rgb) / 0.08); }
+.dv-editor { display: flex; flex-direction: column; min-width: 0; }
+.dv-code { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px; border-bottom: 0.5px solid var(--line); }
+.dv-file-head { font-family: var(--font-mono, monospace); font-size: var(--fs-caption); margin-bottom: 8px; }
+.dv-note { color: var(--muted); font-size: var(--fs-micro); line-height: 1.6; }
+.dv-console { height: 168px; overflow: auto; padding: 10px 18px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.7; }
+.dv-console .ok { color: var(--ok, #2f8f4e); }
+.dv-console .err { color: var(--bad, #c0392b); }
+.dv-muted { color: var(--muted); }
+.dv-preview { border-left: 0.5px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+.dv-preview-head { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 0.5px solid var(--line); }
+.dv-badge { height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.08); color: var(--muted); font-size: var(--fs-micro); display: inline-flex; align-items: center; }
+.dv-badge.ok { background: rgb(var(--ok-rgb, 47 143 78) / 0.12); color: var(--ok, #2f8f4e); }
+.dv-preview-stage { flex: 1; display: grid; place-items: center; padding: 16px; }
+.dv-preview-card { width: 220px; aspect-ratio: 3 / 4; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.04); display: grid; place-items: center; overflow: hidden; padding: 10px; box-sizing: border-box; }
+.dv-preview-card img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-md); }
+.dv-card-empty { color: var(--muted); font-size: var(--fs-micro); text-align: center; }
+
+.dv-toolbar { padding-right: 12px !important; }
+.dv-btn { width: 69px; justify-content: center; }
+.dv-body { grid-template-columns: 200px 680px 320px; }
+.dv-console { height: 150px !important; }
+.dv-code { flex: 1; }
+
+.dv-preview-card { height: 340px; }
+@container (max-width: 1100px) {
+  .dv-body { grid-template-columns: 160px minmax(0, 1fr) 220px !important; }
+}
+
+@container (max-width: 1100px) {
+  .dv-preview-card { width: 160px; }
+  .dv-preview-stage { padding: 8px; }
+  .dv-sub { display: none; }
+  .dv-toolbar { padding-left: 8px; padding-right: 8px; gap: 4px; }
+}
+
+.dv-toolbar { padding-left: 92px !important; }
+.dv-btn.pri { color: var(--content) !important; }
+.dv-card-empty { display: flex; flex-direction: column; gap: 8px; }
+
+.dv-btn.pri { color: #fff !important; }
+
+.dv-lines { font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.7; }
+.dv-line { display: flex; gap: 12px; white-space: pre; }
+.dv-ln { width: 24px; text-align: right; color: var(--muted); flex: none; }
+.dv-line code { color: var(--text); }
+.dv-line .tok-k { color: #9b5de5; }
+.dv-line .tok-s { color: #2f8f4e; }
+.dv-line .tok-n { color: #b26a00; }
+.dv-ico { width: 16px; display: inline-block; color: var(--muted); }
+.dv-folder { color: var(--muted); }
+.dv-preview-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--muted); font-size: var(--fs-caption); }
+.dv-empty-icon { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: rgb(var(--text-rgb) / 0.06); font-size: 18px; }
+.dv-card-title { position: absolute; bottom: 12px; color: #fff; font-size: var(--fs-micro); text-shadow: 0 1px 4px rgb(0 0 0 / .6); }
+.dv-preview-card { position: relative; }
 </style>

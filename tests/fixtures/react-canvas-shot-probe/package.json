@@ -1,0 +1,7 @@
+{
+  "name": "openarc-react-canvas-shot-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "React 画布截图探针：隔离 profile 中初始化→登录→打开 canvas 窗口→capturePage"
+}

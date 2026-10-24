@@ -249,9 +249,9 @@ const indexStatus = ref<{ indexStatus: string; stale: boolean; documentVersion: 
 const reindexing = ref<{ processed: number; remaining: number; total: number } | null>(null);
 
 /* ── task-61：按来源/画布分组、时间过滤、固定详情与真实媒体尺寸/时长 ───────── */
-type GroupMode = "source" | "canvas";
+type GroupMode = "source" | "canvas" | "none";
 type TimeFilter = "all" | "24h" | "7d" | "30d";
-const groupMode = ref<GroupMode>("source");
+const groupMode = ref<GroupMode>("none");
 const timeFilter = ref<TimeFilter>("all");
 const GROUP_MODES: { id: GroupMode; label: string }[] = [
   { id: "source", label: "按来源" },
@@ -288,6 +288,7 @@ const timeFilteredItems = computed<Descriptor[]>(() => {
 });
 const groupedItems = computed<{ key: string; label: string; hint: string; items: Descriptor[] }[]>(() => {
   const list = timeFilteredItems.value;
+  if (groupMode.value === "none") return [{ key: "all", label: "", hint: "", items: list }];
   if (groupMode.value === "source") {
     const groups = new Map<string, Descriptor[]>();
     for (const item of list) {
@@ -499,6 +500,7 @@ async function reload(nextOffset = 0) {
     hasMore.value = !!res.hasMore;
     offset.value = nextOffset;
     error.value = q && res.totalIsLowerBound ? "结果可能不完整（索引扫描达到上限）" : null;
+    void loadCardVideoMeta();
   } else {
     error.value = String((res && res.error) || "INTERNAL_ERROR");
   }
@@ -550,9 +552,74 @@ async function loadTags() {
   if (res && res.ok) tags.value = res.items || [];
 }
 
+/* 原型侧栏每个类型都带真实数量：resource/query limit=1 只取 total，不拉数据。 */
+const typeCounts = ref<Record<string, number>>({});
+async function loadTypeCounts() {
+  const ids = ["all", "memory", "documents", "images", "videos", "audio", "code", "prompts", "generated", "favorites"];
+  const next: Record<string, number> = {};
+  for (const id of ids) {
+    const res = await cmd({ type: "resource/query", category: id, limit: 1, offset: 0 });
+    if (res && res.ok) next[id] = Number(res.total) || 0;
+  }
+  typeCounts.value = next;
+}
+
+/* 打开：可编辑文本类进编辑器；图片/视频/音频把预览放大（真实预留在详情里）。 */
+const expandedPreview = ref(false);
+function openSelected() {
+  const r = inspector.value?.resource;
+  if (!r) return;
+  if (["memory", "text", "code", "prompt"].includes(r.resourceType)) {
+    void openEditor(r.resourceRef);
+    return;
+  }
+  expandedPreview.value = !expandedPreview.value;
+}
+/* 卡片收藏星与视频时长：收藏走 resource/setFavorite；时长用预览 URL 的真实 metadata。 */
+const cardVideoUrls = ref<Record<string, string>>({});
+const cardDurations = ref<Record<string, number>>({});
+async function favoriteCard(r: Descriptor) {
+  await cmd({ type: "resource/setFavorite", resourceRef: r.resourceRef, favorite: !r.favorite });
+  await afterMutation(r.favorite ? "已取消收藏" : "已收藏");
+}
+async function loadCardVideoMeta() {
+  for (const r of items.value.filter((item) => item.resourceType === "video").slice(0, 8)) {
+    if (cardVideoUrls.value[r.resourceId]) continue;
+    const res = await cmd({ type: "resource/preview", resourceRef: r.resourceRef });
+    if (res && res.ok && typeof res.url === "string" && res.url) {
+      cardVideoUrls.value = { ...cardVideoUrls.value, [r.resourceId]: res.url };
+    }
+  }
+}
+function setCardDuration(r: Descriptor, event: Event) {
+  const media = event.target as HTMLVideoElement;
+  const duration = Number(media.duration);
+  if (Number.isFinite(duration) && duration > 0) cardDurations.value = { ...cardDurations.value, [r.resourceId]: duration };
+}
+function durationOf(r: Descriptor): string {
+  const value = cardDurations.value[r.resourceId];
+  if (!value) return "";
+  const total = Math.round(value);
+  return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0");
+}
+
+const isEditableResource = (r: Descriptor) => ["memory", "text", "code", "prompt"].includes(r.resourceType);
+
+const SCOPE_LABEL: Record<string, string> = { PERSONAL: "仅自己", DEPARTMENT: "本部门", ORGANIZATION: "组织", TEAM: "团队" };
+const agentAllowed = computed(() => {
+  const effective = inspector.value?.capabilities?.effective || {};
+  return effective["resource.read"] === true || effective.read === true;
+});
+function scopeLabelOf(value: string | null | undefined): string {
+  if (!value) return "仅自己";
+  return SCOPE_LABEL[value] || value;
+}
+
 onMounted(() => {
   void reload(0);
   void loadCollections();
+  void loadTags();
+  void loadTypeCounts();
 });
 watch([category, query, filterCollection, filterTag, sort, direction], () => {
   void reload(0);
@@ -581,7 +648,7 @@ async function select(resourceId: string, opts: { touch?: boolean } = {}) {
 
 async function afterMutation(message: string) {
   notice.value = message;
-  await Promise.all([reload(0), loadCollections(), loadTags()]);
+  await Promise.all([reload(0), loadCollections(), loadTags(), loadTypeCounts()]);
   if (selectedId.value) {
     const res = await cmd({ type: "resource/inspector", resourceRef: selectedId.value });
     if (res && res.ok) inspector.value = res as Inspector;
@@ -662,6 +729,7 @@ async function confirmPermanentDelete(resourceRef: string, name: string) {
   pendingDelete.value = { resourceRef, name, references };
 }
 
+const TYPE_NAV = NAV.filter((n) => ["all", "memory", "documents", "images", "videos", "audio", "code", "prompts", "generated"].includes(n.id));
 const navItems = NAV;
 const currentNav = computed(() => navItems.find((n) => n.id === category.value));
 const inTrash = computed(() => category.value === "trash");
@@ -812,11 +880,11 @@ async function reindexOne() {
 
   <div v-else class="split">
     <div class="split-main">
-      <div class="rl-app" data-d3-04a="resource-library" data-d3-04b="app">
-        <nav class="rl-nav" aria-label="资源库导航">
-          <div class="rl-nav-section">分类</div>
+      <div class="rl-app" :data-detail-open="selectedId ? 'true' : 'false'" data-d3-04a="resource-library" data-d3-04b="app">
+        <nav class="rl-nav rl-nav--proto" aria-label="资源库导航">
+          <div class="rl-nav-section">资源库</div>
           <button
-            v-for="n in navItems"
+            v-for="n in TYPE_NAV"
             :key="n.id"
             type="button"
             class="rl-nav-item"
@@ -825,13 +893,22 @@ async function reindexOne() {
             :aria-current="category === n.id ? 'page' : undefined"
             @click="chooseNav(n.id)"
           >
-            <component :is="NAV_ICON[n.id] || FileText" :size="15" /> {{ n.label }}
+            <component :is="NAV_ICON[n.id] || FileText" :size="16" />
+            <span class="rl-nav-label">{{ n.label }}</span>
+            <span class="rl-count">{{ typeCounts[n.id] ?? 0 }}</span>
+          </button>
+          <div class="rl-nav-section">快捷</div>
+          <button type="button" class="rl-nav-item" :class="{ 'is-active': category === 'favorites' }" :data-d3-04b-nav="'favorites'" @click="chooseNav('favorites')">
+            <Star :size="16" /><span class="rl-nav-label">收藏</span><span class="rl-count">{{ typeCounts.favorites ?? 0 }}</span>
+          </button>
+          <button type="button" class="rl-nav-item" :class="{ 'is-active': category === 'recent' }" data-d3-04b-nav="recent" @click="chooseNav('recent')">
+            <Clock :size="16" /><span class="rl-nav-label">最近</span>
           </button>
           <div class="rl-nav-section">
-            收藏集
+            集合
             <button type="button" class="rl-nav-add" aria-label="新建收藏集" data-d3-04b-action="new-collection" @click="openCollection">+</button>
           </div>
-          <button type="button" class="rl-nav-item" :class="{ 'is-active': filterCollection === 'unfiled' }" data-d3-04b-nav="unfiled" @click="chooseUnfiled"><FolderOpen :size="15" /> 未归类</button>
+          <button type="button" class="rl-nav-item" :class="{ 'is-active': filterCollection === 'unfiled' }" data-d3-04b-nav="unfiled" @click="chooseUnfiled"><FolderOpen :size="16" /><span class="rl-nav-label">未归类</span></button>
           <button
             v-for="c in collections"
             :key="c.collectionId"
@@ -841,57 +918,62 @@ async function reindexOne() {
             :data-d3-04b-nav="'col:' + c.collectionId"
             @click="chooseCollection(c.collectionId)"
           >
-            {{ c.name }} <span class="rl-count">{{ c.resourceCount }}</span>
+            <Layers :size="16" /><span class="rl-nav-label">{{ c.name }}</span> <span class="rl-count">{{ c.resourceCount }}</span>
           </button>
-          <div v-if="tags.length" class="rl-nav-section">标签</div>
-          <div class="rl-tag-list">
-            <button v-for="t in tags" :key="t.tagId" type="button" class="rl-tag" :class="{ 'is-active': filterTag === t.tagId }" :data-d3-04b-tag="t.tagId" @click="toggleTag(t.tagId)">{{ t.name }}</button>
-          </div>
+          <div class="rl-nav-section">回收站</div>
+          <button type="button" class="rl-nav-item" :class="{ 'is-active': category === 'trash' }" data-d3-04b-nav="trash" @click="chooseNav('trash')">
+            <Trash2 :size="16" /><span class="rl-nav-label">回收站</span>
+          </button>
         </nav>
 
         <section class="rl-content" aria-label="资源列表" @scroll.passive="onContentScroll">
-          <div class="rl-head">
-            <h2 class="rl-title">{{ currentNav ? currentNav.label : "全部" }} <small>{{ timeFilteredItems.length }} / {{ total }} 项</small></h2>
-            <div class="rl-group-switch" role="group" aria-label="分组方式">
-              <button
-                v-for="mode in GROUP_MODES"
-                :key="mode.id"
-                type="button"
-                :class="{ 'is-active': groupMode === mode.id }"
-                :aria-pressed="groupMode === mode.id"
-                :data-rl-group-mode="mode.id"
-                @click="chooseGroupMode(mode.id)"
-              >{{ mode.label }}</button>
-            </div>
-          </div>
-
-          <div class="rl-toolbar">
-            <DsSearchField :value="query" placeholder="全文搜索（本地索引，中文可用）" label="全文搜索" @update:value="query = $event" />
-            <div class="rl-toolbar-actions">
-              <label class="rl-field">
-                <span>时间</span>
-                <select v-model="timeFilter" data-rl-time-filter aria-label="时间过滤">
-                  <option v-for="f in TIME_FILTERS" :key="f.id" :value="f.id">{{ f.label }}</option>
-                </select>
-              </label>
-              <DsButton variant="secondary" size="sm" data-d3-04a-action="import" @click="doImport">导入</DsButton>
-              <DsButton variant="secondary" size="sm" data-d3-04a-action="link" @click="doLink">链接文件</DsButton>
-              <DsButton variant="primary" size="sm" data-d3-04b-action="create" @click="openCreate">新建</DsButton>
-              <label class="rl-field">
-                <span>排序</span>
-                <select v-model="sort" aria-label="排序字段">
-                  <option value="updated">更新时间</option>
-                  <option value="created">创建时间</option>
-                  <option value="name">名称</option>
-                  <option value="size">大小</option>
-                </select>
-              </label>
-              <DsButton variant="ghost" size="sm" aria-label="切换排序方向" @click="direction = direction === 'asc' ? 'desc' : 'asc'">{{ direction === "asc" ? "↑" : "↓" }}</DsButton>
-              <div class="rl-viewtoggle" role="group" aria-label="视图切换">
-                <button type="button" :aria-pressed="view === 'grid'" data-d3-04b-view="grid" aria-label="网格" title="网格" @click="view = 'grid'"><LayoutGrid :size="14" /></button>
-                <button type="button" :aria-pressed="view === 'list'" data-d3-04b-view="list" aria-label="列表" title="列表" @click="view = 'list'"><List :size="14" /></button>
+          <div class="rl-toolbar rl-toolbar--proto">
+            <h2 class="rl-title">
+              {{ currentNav ? currentNav.label : "全部" }}
+              <small>{{ timeFilteredItems.length }} 项 · 本地优先，不自动上传</small>
+            </h2>
+            <span class="toolbar-spacer" />
+            <DsSearchField :value="query" placeholder="搜索名称、标签、内容" label="搜索资源" @update:value="query = $event" />
+            <details class="rl-menu" data-rl-add-menu>
+              <summary class="rl-add">＋ 添加</summary>
+              <div class="rl-menu-body">
+                <button type="button" data-d3-04a-action="import" @click="doImport">导入文件…</button>
+                <button type="button" data-d3-04a-action="link" @click="doLink">链接文件…</button>
+                <button type="button" data-d3-04b-action="create" @click="openCreate">新建资源…</button>
               </div>
-            </div>
+            </details>
+            <details class="rl-menu" data-rl-more-menu>
+              <summary aria-label="更多选项" title="更多选项">⋯</summary>
+              <div class="rl-menu-body rl-menu-body--wide">
+                <label class="rl-field"><span>时间</span>
+                  <select v-model="timeFilter" data-rl-time-filter aria-label="时间过滤">
+                    <option v-for="f in TIME_FILTERS" :key="f.id" :value="f.id">{{ f.label }}</option>
+                  </select>
+                </label>
+                <label class="rl-field"><span>排序</span>
+                  <select v-model="sort" aria-label="排序字段">
+                    <option value="updated">更新时间</option>
+                    <option value="created">创建时间</option>
+                    <option value="name">名称</option>
+                    <option value="size">大小</option>
+                  </select>
+                </label>
+                <button type="button" class="rl-menu-item" @click="direction = direction === 'asc' ? 'desc' : 'asc'">{{ direction === "asc" ? "升序 ↑" : "降序 ↓" }}</button>
+                <div class="rl-menu-row" role="group" aria-label="分组方式">
+                  <button type="button" :class="{ 'is-active': groupMode === 'none' }" data-rl-group-mode="none" @click="chooseGroupMode('none')">不分组</button>
+                  <button type="button" :class="{ 'is-active': groupMode === 'source' }" data-rl-group-mode="source" @click="chooseGroupMode('source')">按来源</button>
+                  <button type="button" :class="{ 'is-active': groupMode === 'canvas' }" data-rl-group-mode="canvas" @click="chooseGroupMode('canvas')">按画布</button>
+                </div>
+                <div class="rl-menu-row" role="group" aria-label="视图切换">
+                  <button type="button" :class="{ 'is-active': view === 'grid' }" data-d3-04b-view="grid" @click="view = 'grid'">网格</button>
+                  <button type="button" :class="{ 'is-active': view === 'list' }" data-d3-04b-view="list" @click="view = 'list'">列表</button>
+                </div>
+                <button type="button" class="rl-menu-item" data-d3-04c-action="rebuild-index" :disabled="!!reindexing" @click="rebuildIndex">重建搜索索引</button>
+              </div>
+            </details>
+          </div>
+          <div v-if="tags.length" class="rl-chips" data-rl-tag-chips>
+            <button v-for="t in tags" :key="t.tagId" type="button" class="rl-chip" :class="{ on: filterTag === t.tagId }" :data-d3-04b-tag="t.tagId" @click="toggleTag(t.tagId)">{{ t.name }}</button>
           </div>
 
           <p v-if="error" class="rl-error" data-d3-04b-error role="alert">{{ error }}</p>
@@ -904,18 +986,18 @@ async function reindexOne() {
           <p v-if="timeFilteredItems.length === 0 && !busy" class="rl-empty" data-d3-04a-empty>{{ timeFilter === "all" ? (currentNav ? currentNav.empty : "暂无资源。") : timeFilterLabel + "内没有资源（已加载 " + items.length + " 项）。" }}</p>
 
           <section v-for="group in groupedItems" :key="group.key" class="rl-group" :data-rl-group="group.key">
-            <header class="rl-group-head">
+            <header v-if="groupMode !== 'none'" class="rl-group-head">
               <strong class="rl-group-title">{{ group.label }}</strong>
               <span class="rl-group-count">{{ group.items.length }}</span>
               <span v-if="group.hint" class="rl-group-hint">{{ group.hint }}</span>
               <span class="rl-group-time">{{ timeFilterLabel }}</span>
             </header>
             <div :class="view === 'grid' ? 'rl-grid' : 'rl-list'" :data-d3-04b-view-mode="view" role="list" :aria-label="'资源分组 ' + group.label">
-              <button
+              <div
                 v-for="r in group.items"
                 :key="r.resourceId"
-                type="button"
                 role="listitem"
+                tabindex="0"
                 class="rl-card"
                 :class="{ 'is-selected': selectedId === r.resourceId }"
                 :data-d3-04a-item="r.resourceId"
@@ -923,7 +1005,8 @@ async function reindexOne() {
                 :ref="(el) => bindThumb(el, r)"
                 :aria-label="r.name + '，' + r.resourceType + '，' + AVAILABILITY_LABEL[r.availability]"
                 @click="select(r.resourceId)"
-                @dblclick="openEditor(r.resourceRef)"
+                @dblclick="isEditableResource(r) ? openEditor(r.resourceRef) : openSelected()"
+                @keydown.enter.prevent="select(r.resourceId)"
               >
                 <span
                   class="rl-thumb"
@@ -932,6 +1015,7 @@ async function reindexOne() {
                   :data-rl-thumb-type="isImageResource(r) ? 'image' : 'other'"
                   :data-rl-thumb-state="thumbStateOf(r)"
                   :data-rl-thumb-requested="thumbOf(r).requested ? '1' : '0'"
+                  :data-rl-thumb-error="thumbOf(r).error || ''"
                 >
                   <img
                     v-if="thumbUrlOf(r)"
@@ -942,14 +1026,21 @@ async function reindexOne() {
                     decoding="async"
                     @error="markThumbFailed(r)"
                   />
-                  <component v-else :is="TYPE_ICON[r.resourceType] || FileText" :size="24" :stroke-width="1.5" />
+                  <component v-else :is="TYPE_ICON[r.resourceType] || FileText" :size="28" :stroke-width="1.4" />
+                  <button type="button" class="rl-fav-btn" :class="{ 'is-on': r.favorite }" :aria-label="r.favorite ? '取消收藏' : '收藏'" :data-rl-fav="r.resourceId" @click.stop="favoriteCard(r)">★</button>
+                  <span v-if="durationOf(r)" class="rl-duration">{{ durationOf(r) }}</span>
+                  <video
+                    v-if="cardVideoUrls[r.resourceId] && !cardDurations[r.resourceId]"
+                    class="rl-duration-source"
+                    :src="cardVideoUrls[r.resourceId]"
+                    preload="metadata"
+                    aria-hidden="true"
+                    @loadedmetadata="setCardDuration(r, $event)"
+                  />
                 </span>
                 <div class="rl-card-body">
-                  <div class="rl-card-top">
-                    <span class="rl-type">{{ TYPE_LABEL[r.resourceType] || r.resourceType }}</span>
-                    <span v-if="r.favorite" class="rl-fav" aria-label="已收藏">★</span>
-                  </div>
                   <div class="rl-card-name">{{ r.name }}</div>
+                  <div class="rl-card-meta">{{ TYPE_LABEL[r.resourceType] || r.resourceType }} · {{ scopeLabelOf(r.scope) }}</div>
                   <div v-if="r.snippet && r.snippet.matched" class="rl-card-snippet" data-d3-04c-snippet>
                     <template v-for="(s, i) in r.snippet.spans" :key="i">
                       <mark v-if="s.match">{{ s.text }}</mark>
@@ -958,14 +1049,8 @@ async function reindexOne() {
                     {{ r.snippet.truncated ? "…" : "" }}
                   </div>
                   <div v-if="r.matchedFields && r.matchedFields.length" class="rl-card-fields" data-d3-04c-fields>命中：{{ r.matchedFields.join(" / ") }}</div>
-                  <div class="rl-card-meta">{{ r.storageMode }} · {{ r.availability === "AVAILABLE" ? "可用" : AVAILABILITY_LABEL[r.availability] }}</div>
-                  <div class="rl-card-foot">
-                    <span>{{ fmtSize(r.size) }}</span>
-                    <span>v{{ r.version }}</span>
-                  </div>
-                  <div class="rl-card-ref">{{ r.resourceRef }}</div>
                 </div>
-              </button>
+              </div>
             </div>
           </section>
 
@@ -1043,16 +1128,31 @@ async function reindexOne() {
               <div v-if="detailCollectionText"><dt>集合</dt><dd data-rl-detail-collection>{{ detailCollectionText }}</dd></div>
               <div v-if="detailProjectsText"><dt>项目</dt><dd data-rl-detail-projects>{{ detailProjectsText }}</dd></div>
               <div v-if="detailCanvasText"><dt>画布</dt><dd data-rl-detail-canvas>{{ detailCanvasText }}</dd></div>
+              <div><dt>引用 ID</dt><dd class="mono" :title="inspector.resource.resourceRef">{{ inspector.resource.resourceRef }}</dd></div>
               <div v-if="inspector.resource.ownerUserId"><dt>所有者</dt><dd class="mono" :title="inspector.resource.ownerUserId">{{ inspector.resource.ownerUserId }}</dd></div>
               <div><dt>可用性</dt><dd :data-rl-detail-availability="inspector.resource.availability">{{ AVAILABILITY_LABEL[inspector.resource.availability] }}</dd></div>
             </dl>
 
+            <div class="rl-detail-scope">
+              <div class="rl-frow">
+                <div class="rl-lab"><b>可见范围</b><small>仅自己 / 本部门 / 组织</small></div>
+                <strong class="rl-value" :data-rl-scope="inspector.resource.scope || 'PERSONAL'">{{ scopeLabelOf(inspector.resource.scope) }}</strong>
+              </div>
+              <p class="rl-note" data-rl-scope-note>数据层没有范围修改命令，这里只读展示（可编辑范围 NOT VERIFIED）。</p>
+              <div class="rl-frow">
+                <div class="rl-lab"><b>允许 Agent 使用</b><small>开启后获授权的助理与应用可以读取它</small></div>
+                <strong class="rl-value" :data-rl-agent="agentAllowed ? 'on' : 'off'">{{ agentAllowed ? "允许" : "不允许" }}</strong>
+              </div>
+              <p class="rl-note" data-rl-agent-note>Agent 授权开关命令未接入；这里显示的是能力位（可切换开关 NOT VERIFIED）。</p>
+            </div>
+
             <div class="rl-detail-actions">
-              <DsButton variant="primary" size="sm" :status="downloadBusy ? 'loading' : 'idle'" :disabled="inspector.resource.trashed" data-rl-detail-download @click="downloadSelected"><Download :size="14" /> 下载</DsButton>
+              <DsButton variant="primary" size="sm" data-rl-detail-open @click="openSelected">打开</DsButton>
+              <DsButton variant="secondary" size="sm" :status="downloadBusy ? 'loading' : 'idle'" :disabled="inspector.resource.trashed" data-rl-detail-download @click="downloadSelected"><Download :size="14" /> 下载</DsButton>
               <DsButton v-if="detailCanvasNodes.length" variant="secondary" size="sm" data-rl-detail-locate @click="locateInCanvas(detailCanvasNodes[0])"><MapPin :size="14" /> 在画布中定位</DsButton>
               <DsButton variant="ghost" size="sm" data-d3-04b-action="favorite" :aria-pressed="inspector.favorite" @click="toggleFavorite">{{ inspector.favorite ? "取消收藏" : "收藏" }}</DsButton>
               <DsButton v-if="['memory', 'text', 'code', 'prompt'].includes(inspector.resource.resourceType) && !inspector.trashed" variant="secondary" size="sm" data-d3-04b-action="edit" :disabled="!canEdit" @click="openEditor(inspector.resource.resourceRef)">编辑内容</DsButton>
-              <DsButton v-if="!inspector.trashed" variant="danger" size="sm" data-d3-04b-action="delete" :disabled="!canDelete" @click="deleteSelected">删除</DsButton>
+              <DsButton v-if="!inspector.trashed" variant="danger" size="sm" data-d3-04b-action="delete" :disabled="!canDelete" @click="deleteSelected">移到回收站</DsButton>
               <template v-else>
                 <DsButton variant="secondary" size="sm" data-d3-04b-action="restore" @click="restoreSelected">恢复</DsButton>
                 <DsButton variant="danger" size="sm" data-d3-04b-action="permanent-delete" @click="confirmPermanentDelete(inspector.resource.resourceId, inspector.resource.name)">永久删除</DsButton>
@@ -1321,6 +1421,177 @@ async function reindexOne() {
 .rl-nav { margin: 8px 0 8px 8px; }
 .rl-content { padding: 10px 16px 14px; }
 
+/* ── 原型对照（task-5）：两栏 + 右侧滑入详情 + 卡片网格 ───────────────── */
+.rl-app { grid-template-columns: 218px minmax(0, 1fr); }
+.rl-app[data-detail-open="true"] { grid-template-columns: 218px minmax(0, 1fr) 300px; }
+.rl-app[data-detail-open="false"] .rl-detail { display: none; }
+.rl-content { position: relative; padding-top: 0; }
+.rl-nav { width: 210px; }
+.rl-toolbar--proto .rl-title { font-size: 15px; line-height: 22px; }
+.rl-toolbar--proto { height: 52px; margin: 0; padding: 0 10px; }
+.rl-toolbar--proto .rl-title { font-size: var(--fs-secondary); }
+.rl-chips { margin: 0; padding: 0 10px 10px; }
+.rl-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; padding-top: 8px; }
+.rl-card .rl-thumb { aspect-ratio: auto; height: 190px; }
+.rl-nav--proto .rl-nav-section {
+  padding: 12px 10px 4px;
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+.rl-nav--proto .rl-nav-item {
+  min-height: 32px;
+  padding: 0 10px;
+  gap: 9px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-secondary);
+}
+.rl-nav--proto .rl-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rl-nav--proto .rl-nav-item .rl-count { margin-left: auto; font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums; }
+.rl-nav--proto .rl-nav-item.is-active { background: rgb(var(--text-rgb) / 0.1); color: var(--text); font-weight: var(--fw-medium); }
+.rl-toolbar--proto { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
+.rl-toolbar--proto .rl-title { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: var(--fs-title); font-weight: var(--fw-medium); }
+.rl-toolbar--proto .rl-title small { font-size: var(--fs-caption); font-weight: var(--fw-regular); color: var(--muted); }
+.rl-toolbar--proto .ds-search { width: 210px; flex: none; }
+.rl-menu { position: relative; }
+.rl-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  height: 28px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--text-rgb) / 0.07);
+  font-size: var(--fs-secondary);
+  color: var(--text);
+  user-select: none;
+}
+.rl-menu > summary::-webkit-details-marker { display: none; }
+.rl-menu[open] > summary { background: rgb(var(--text-rgb) / 0.12); }
+.rl-menu > summary.rl-add { background: var(--accent); color: var(--on-accent); }
+.rl-menu-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 180px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--radius-lg);
+  background: rgb(var(--content-rgb) / 0.98);
+  box-shadow: var(--elevation-2);
+}
+.rl-menu-body--wide { min-width: 240px; }
+.rl-menu-body button {
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-secondary);
+  color: var(--text);
+  cursor: pointer;
+}
+.rl-menu-body button:hover { background: var(--row-hover); }
+.rl-menu-body button.is-active { background: rgb(var(--text-rgb) / 0.1); font-weight: var(--fw-medium); }
+.rl-menu-row { display: flex; gap: 4px; padding: 4px; }
+.rl-menu-row button { flex: 1 1 auto; text-align: center; padding: 5px 6px; }
+.rl-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: var(--fs-caption); color: var(--muted); }
+.rl-field select { border: 0; background: rgb(var(--text-rgb) / 0.06); color: var(--text); border-radius: var(--radius-md); padding: 4px 6px; font: inherit; font-size: var(--fs-caption); }
+.rl-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 0 12px; }
+.rl-chip {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--text-rgb) / 0.06);
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  transition: background var(--dur-feedback) var(--ease-standard), color var(--dur-feedback) var(--ease-standard);
+}
+.rl-chip:hover { background: rgb(var(--text-rgb) / 0.1); color: var(--text); }
+.rl-chip.on { background: var(--accent); color: var(--on-accent); }
+.rl-grid { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 14px; }
+.rl-card {
+  border-radius: var(--radius-lg);
+  background: rgb(var(--text-rgb) / 0.04);
+  box-shadow: var(--elevation-1);
+  overflow: hidden;
+  cursor: pointer;
+}
+.rl-card:hover { background: rgb(var(--text-rgb) / 0.07); box-shadow: var(--elevation-card-hover); }
+.rl-card.is-selected { box-shadow: 0 0 0 2px var(--accent); }
+.rl-card .rl-thumb { aspect-ratio: 4 / 3; display: grid; place-items: center; position: relative; color: var(--muted); background: rgb(var(--text-rgb) / 0.04); }
+.rl-card .rl-thumb-img { width: 100%; height: 100%; object-fit: cover; }
+.rl-fav-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--content-rgb) / 0.82);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.rl-fav-btn.is-on { color: var(--text); }
+.rl-duration {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 0 6px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+.rl-duration-source { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.rl-card-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 2px; }
+.rl-card-name { font-size: var(--fs-secondary); font-weight: var(--fw-medium); color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rl-card-meta { font-size: var(--fs-caption); color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rl-detail-scope { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 2px; }
+.rl-frow { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.rl-lab { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-secondary); }
+.rl-lab small { color: var(--muted); font-size: var(--fs-micro); }
+.rl-value { font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.rl-cap, .rl-note { color: var(--muted); font-size: var(--fs-micro); line-height: var(--lh-normal); }
+
+/* task-8：详情改为 grid 内嵌列（不再覆盖卡片/底部栏） */
+.rl-detail {
+  position: static;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 14px;
+  border-radius: 0;
+  border-left: 0.5px solid var(--line);
+  background: rgb(var(--content-rgb) / 0.98);
+  overflow: auto;
+  transform: none;
+  pointer-events: auto;
+  box-shadow: none;
+  z-index: auto;
+}
+
 @media (max-width: 1180px) {
   .rl-app { grid-template-columns: 200px minmax(0, 1fr); }
   .rl-detail {
@@ -1391,4 +1662,41 @@ async function reindexOne() {
 .rl-list .rl-card { height: auto; padding: 0; }
 .rl-list .rl-card .rl-thumb { display: none; }
 .rl-list .rl-card-body { padding: 10px 12px; }
+
+/* task-8 final overrides */
+.rl-nav { margin: 8px 0 8px 8px !important; width: 210px; }
+.rl-content { padding: 0 10px 14px; }
+.rl-toolbar--proto { padding: 0; }
+.rl-toolbar--proto .rl-title { margin-left: 10px; font-size: 15px; line-height: 22px; }
+.rl-chips { padding: 0 0 10px 10px; }
+.rl-grid { padding: 18px 0 0; }
+.rl-card .rl-thumb { height: 190px; aspect-ratio: auto; }
+.rl-card-body { padding: 10px 12px; }
+
+.rl-content { padding: 0 0 14px; }
+.rl-toolbar--proto { padding: 0 20px; align-items: center; margin: 0; }
+.rl-toolbar--proto .rl-title { margin-left: 0; }
+.rl-chips { margin: 0; padding: 0 0 10px 20px; }
+.rl-grid { padding: 18px 0 0 0; }
+.rl-card { min-height: 244px; }
+.rl-card .rl-thumb { height: 190px; min-height: 190px; }
+
+.rl-grid { padding: 18px 0 0 24px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.rl-card .rl-thumb { height: 185px; min-height: 185px; }
+.rl-toolbar--proto .rl-title { align-self: center; }
+
+.rl-toolbar--proto .rl-title { margin-top: 10px; }
+
+.rl-chips { padding-bottom: 0; }
+.rl-grid { padding: 18px 24px 0 24px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.rl-card { width: 250px; min-width: 0; }
+.rl-card .rl-thumb { height: 185px; min-height: 185px; }
+
+.rl-grid { margin: 18px 24px 0; padding: 0; width: auto; }
+.rl-toolbar--proto .rl-title { margin-top: 15px; }
+
+@container (max-width: 760px) {
+  .rl-toolbar--proto { flex-wrap: wrap; height: auto; min-height: 52px; padding: 6px 20px; row-gap: 6px; }
+  .rl-toolbar--proto .ds-search { width: 180px; }
+}
 </style>

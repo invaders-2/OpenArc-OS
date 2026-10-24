@@ -30,7 +30,9 @@ import PhotosApp from "../apps/PhotosApp.vue";
 import IntegrationsApp from "../apps/IntegrationsApp.vue";
 import { markRaw, ref, toRaw } from "vue";
 import ReactIsland from "../bridge/ReactIsland.vue";
-import { CanvasHost } from "../../src/canvas/CanvasHost";
+// 10-23：AI Studio 换成新画布 canvas-next。回滚 = 把下一行换回
+// import { ReactCanvasApp } from "../../src/canvas/react-canvas/ReactCanvasApp";（旧版仍在仓库）
+import { NextCanvasApp } from "../../src/canvas/canvas-next/entry";
 import { BrowserApp } from "../../src/browser/BrowserApp";
 import {
   browserCommand,
@@ -64,16 +66,23 @@ function browserProps(id: string) {
   };
 }
 
-/** AI Studio = 既有 NOVAI 画布宿主（React 原样复用，见 bridge/ReactIsland.vue）。 */
-const CanvasHostRaw = markRaw(CanvasHost);
+/** AI Studio = 新画布 canvas-next（NextCanvasApp，见 bridge/ReactIsland.vue）。 */
+const NextCanvasAppRaw = markRaw(NextCanvasApp);
 function canvasProps(id: string) {
   const win = toRaw(shell.model).windows.find((w) => w.id === id);
   return {
     win,
+    // 显示名取身份快照（Agent 问候 / 头像首字 / 评论署名）；未登录时为空，画布自己有兜底
+    userName: identity.snapshot.displayName || "",
+    // 画布入口页的「应用市场 / Skill 中心」：打开外壳自己的应用窗口（appId 见 src-vue/apps.ts 的 market / skills）
+    onOpenApp: (appId: string) => shell.activateApp(appId),
+    onOpenMcpCenter: () => shell.activateApp("mcp-center"),
     onOpenModelSettings: () => {
       shell.requestModelSettings();
       shell.activateApp("settings");
     },
+    onOpenSettings: () => shell.activateApp("settings"),
+    onBackToWorkspace: () => (win ? shell.closeWindow(win.id) : undefined),
   };
 }
 
@@ -238,7 +247,8 @@ function onTabPointerDown(e: PointerEvent, win: ShellWindow, tabId: string) {
     :style="styleOf(win)"
     @pointerdown="shell.focusWindow(win.id)"
   >
-    <div class="window-title" @pointerdown="startDrag($event, win)" @dblclick="shell.toggleMaximize(win.id)">
+    <div class="window-title">
+      <div class="window-dragstrip" aria-hidden="true" @pointerdown="startDrag($event, win)" @dblclick="shell.toggleMaximize(win.id)" />
       <div class="traffic">
         <!-- 红灯语义同 React（components.tsx closeAction）：App 窗口收进 Dock，只有系统设置真的关闭 -->
         <button
@@ -269,15 +279,6 @@ function onTabPointerDown(e: PointerEvent, win: ShellWindow, tabId: string) {
           data-window-merge
           @click.stop="shell.mergeSameApp(win.appId)"
         >合并窗口</button>
-        <button
-          v-if="shell.tabInfoOf(win.id).canOpenNew"
-          type="button"
-          class="window-tab-icon"
-          :aria-label="t('新建同应用窗口')"
-          title="新建同应用窗口"
-          data-window-new
-          @click.stop="shell.openNewWindow(win.appId)"
-        >＋</button>
       </div>
     </div>
       <!-- task-21：标签组（标题栏右侧同一行；不新增窗口几何，非 active 成员只隐藏不卸载） -->
@@ -316,15 +317,6 @@ function onTabPointerDown(e: PointerEvent, win: ShellWindow, tabId: string) {
           >×</button>
         </div>
         <div class="window-tab-tools">
-          <button
-            v-if="shell.tabInfoOf(win.id).canOpenNew"
-            type="button"
-            class="window-tab-icon"
-            :aria-label="t('新建同应用窗口')"
-            title="新建同应用窗口"
-            data-window-new
-            @click.stop="shell.openNewWindow(win.appId)"
-          >＋</button>
           <button
             type="button"
             class="window-tab-icon"
@@ -377,7 +369,7 @@ function onTabPointerDown(e: PointerEvent, win: ShellWindow, tabId: string) {
         :component="BrowserAppRaw"
         :props="browserProps(win.id)"
       />
-      <ReactIsland v-else-if="win.appId === 'canvas'" :component="CanvasHostRaw" :props="canvasProps(win.id)" />
+      <ReactIsland v-else-if="win.appId === 'canvas'" :component="NextCanvasAppRaw" :props="canvasProps(win.id)" />
       <PhotosApp v-else-if="win.appId === 'photos'" />
       <PlannedApp v-else :app-id="win.appId" />
     </div>

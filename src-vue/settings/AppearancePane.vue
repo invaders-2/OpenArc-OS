@@ -327,63 +327,6 @@ async function saveProfile() {
     </section>
 
     <section class="set-sec">
-      <div class="set-sh">
-        <h3>{{ t("锁屏壁纸") }}</h3>
-        <span class="wallpaper-actions">
-      <label class="control-button" data-d3-id="settings-lock-wallpaper-upload">
-        {{ t("上传壁纸") }}
-        <input type="file" accept="image/*,video/*" hidden @change="onLockUpload" />
-      </label>
-    </span>
-      </div>
-    <div class="wallpaper-grid">
-      <button
-        class="wallpaper-option"
-        :class="{ on: shell.lockWallpaper === 'same' }"
-        data-lock-wallpaper="same"
-        data-d3-id="settings-lock-wallpaper-same"
-        :aria-pressed="shell.lockWallpaper === 'same'"
-        @click="shell.setLockWallpaper('same')"
-      >
-        <span>{{ t("同桌面") }}</span>
-      </button>
-      <template v-for="it in shell.wallpaperItems" :key="it.id">
-        <button
-          v-if="it.kind === 'preset'"
-          class="wallpaper-option"
-          :class="{ on: shell.lockWallpaper === it.id }"
-          :data-lock-wallpaper="it.id"
-          :aria-pressed="shell.lockWallpaper === it.id"
-          @click="shell.setLockWallpaper(it.id)"
-        >
-          <span>{{ t(it.name) }}</span>
-        </button>
-        <button
-          v-else
-          class="wallpaper-option"
-          :class="{ on: shell.lockWallpaper === 'custom:' + it.id }"
-          :data-lock-wallpaper="'custom:' + it.id"
-          :aria-pressed="shell.lockWallpaper === 'custom:' + it.id"
-          @click="shell.setLockWallpaper('custom:' + it.id)"
-        >
-          <video
-            v-if="kindOfExt(it.ext) === 'video'"
-            :src="fileUrl(WALLPAPER_ID, it.id)"
-            :style="mediaStyle(it.id)"
-            muted
-            loop
-            autoplay
-            playsinline
-          />
-          <img v-else :src="fileUrl(WALLPAPER_ID, it.id)" :style="mediaStyle(it.id)" alt="" />
-          <span>{{ t(it.name) }}</span>
-        </button>
-      </template>
-    </div>
-      <p class="set-cap">{{ t("登录界面与锁屏共用同一张，独立于桌面。") }}</p>
-    </section>
-
-    <section class="set-sec">
       <h3>{{ t("程序坞与桌面") }}</h3>
       <div class="set-group">
       <div class="setting-row">
@@ -459,6 +402,65 @@ async function saveProfile() {
       </div>
       </div>
     </section>
+
+    <section class="set-sec">
+      <div class="set-sh">
+        <h3>{{ t("锁屏壁纸") }}</h3>
+        <span class="wallpaper-actions">
+      <label class="control-button" data-d3-id="settings-lock-wallpaper-upload">
+        {{ t("上传壁纸") }}
+        <input type="file" accept="image/*,video/*" hidden @change="onLockUpload" />
+      </label>
+    </span>
+      </div>
+    <div class="wallpaper-grid">
+      <button
+        class="wallpaper-option"
+        :class="{ on: shell.lockWallpaper === 'same' }"
+        data-lock-wallpaper="same"
+        data-d3-id="settings-lock-wallpaper-same"
+        :aria-pressed="shell.lockWallpaper === 'same'"
+        @click="shell.setLockWallpaper('same')"
+      >
+        <span>{{ t("同桌面") }}</span>
+      </button>
+      <template v-for="it in shell.wallpaperItems" :key="it.id">
+        <button
+          v-if="it.kind === 'preset'"
+          class="wallpaper-option"
+          :class="{ on: shell.lockWallpaper === it.id }"
+          :data-lock-wallpaper="it.id"
+          :aria-pressed="shell.lockWallpaper === it.id"
+          @click="shell.setLockWallpaper(it.id)"
+        >
+          <span>{{ t(it.name) }}</span>
+        </button>
+        <button
+          v-else
+          class="wallpaper-option"
+          :class="{ on: shell.lockWallpaper === 'custom:' + it.id }"
+          :data-lock-wallpaper="'custom:' + it.id"
+          :aria-pressed="shell.lockWallpaper === 'custom:' + it.id"
+          @click="shell.setLockWallpaper('custom:' + it.id)"
+        >
+          <video
+            v-if="kindOfExt(it.ext) === 'video'"
+            :src="fileUrl(WALLPAPER_ID, it.id)"
+            :style="mediaStyle(it.id)"
+            muted
+            loop
+            autoplay
+            playsinline
+          />
+          <img v-else :src="fileUrl(WALLPAPER_ID, it.id)" :style="mediaStyle(it.id)" alt="" />
+          <span>{{ t(it.name) }}</span>
+        </button>
+      </template>
+    </div>
+      <p class="set-cap">{{ t("登录界面与锁屏共用同一张，独立于桌面。") }}</p>
+    </section>
+
+
 
     <!-- 0.6.1：系统字体（只读本机字体清单，按需预览；systemFonts:command） -->
     <SystemFontsPanel />

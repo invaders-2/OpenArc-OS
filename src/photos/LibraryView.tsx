@@ -1,8 +1,8 @@
 /**
  * 照片应用 · 图库视图。
  *
- * 只经 window.openarc.photos.command（photos:command）与 appExchange:command（列表画布）取值：
- * 没有 raw fs、没有宿主绝对路径、字节一律 base64url 回渲染层。
+ * 只经 window.openarc.photos.command（photos:command）、appExchange:command（列表画布）与
+ * media:command（上传到免费图床）取值：没有 raw fs、没有宿主绝对路径，字节一律 base64url 回渲染层。
  *
  * 与冻结契约的对应（每条命令在界面里的落点）：
  *   photos/sources/list     来源列表 + 来源子目录 + 虚拟文件夹 + 本地照片分页网格（本页主数据）
@@ -14,6 +14,7 @@
  *   photos/visionModels | reversePrompt   反推提示词（无供应商给配置指引）
  *   photos/backgroundRemoval         一键抠图（缺依赖给结构化提示）
  *   photos/health                    依赖事实（右侧详情底部只读展示）
+ *   media/public-media/upload        详情面板「上传到免费图床」（原图字节转标准 base64 外发，回公网直链）
  * appExchange/targets                导入到画布时用它列出的画布（target 表由后端过滤）
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,6 +32,7 @@ import {
   Send,
   Sparkles,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { Badge, Button, IconButton, ScrollArea, SearchField, TextField, useToast } from "../design-system/primitives";
 import { PageState } from "../design-system/page-states";
@@ -40,6 +42,7 @@ import {
   PHOTOS_PAGE_LIMIT_DEFAULT,
   assignSummary,
   backgroundRemovalHint,
+  base64UrlToBase64,
   base64UrlToBytes,
   base64UrlToDataUrl,
   buildLocalFolderTree,
@@ -101,6 +104,27 @@ type DetailState =
   | { status: "error"; item: PhotoItem; code: string; text: string };
 
 type ImportDialogState = { destination: "canvas" | "library"; targetId: string };
+
+/** media/public-media/upload 的 value.media（与 openarc-ipc.d.ts 的直链回执同形）。 */
+type UploadedMedia = { url: string; service: string; expiresAt?: number | string; bytes: number; fileName: string };
+
+type UploadState =
+  | { status: "idle" }
+  | { status: "uploading" }
+  | { status: "ready"; media: UploadedMedia }
+  | { status: "error"; code: string; message: string };
+
+/** media 域命令面（electron/preload.cjs 的 window.openarc.media）。 */
+type MediaBridge = {
+  command: (cmd: { command: string; payload?: Record<string, unknown> }) => Promise<unknown>;
+};
+
+/** 只读取桥：浏览器预览里没有 window.openarc，界面走「桥未接入」失败分支而不抛错。 */
+function getMediaBridge(): MediaBridge | undefined {
+  if (typeof window === "undefined") return undefined;
+  const bridge = (window as unknown as { openarc?: { media?: MediaBridge } }).openarc?.media;
+  return bridge && typeof bridge.command === "function" ? bridge : undefined;
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    网格卡片：缩略图懒加载（进入视口 120px 才请求）
@@ -207,6 +231,19 @@ export function LibraryView({ photos, exchange }: { photos: DomainBridge | null;
     [photos],
   );
 
+  const callMedia = useCallback(
+    async (command: string, payload: Record<string, unknown>): Promise<unknown> => {
+      const bridge = getMediaBridge();
+      if (!bridge) return { ok: false, error: "NO_BRIDGE", message: "桌面桥未接入（当前环境没有媒体域），上传没有发出" };
+      try {
+        return await bridge.command({ command, payload });
+      } catch (error) {
+        return { ok: false, error: "DXOS_ERR_INTERNAL", message: String((error as Error)?.message || error) };
+      }
+    },
+    [],
+  );
+
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<FailureView | null>(null);
@@ -251,6 +288,7 @@ export function LibraryView({ photos, exchange }: { photos: DomainBridge | null;
     | { status: "ready"; dataUrl: string; raw: string; bytes: number }
     | { status: "error"; code: string; text: string }
   >({ status: "idle" });
+  const [upload, setUpload] = useState<UploadState>({ status: "idle" });
 
   const thumbCache = useRef(new Map<string, string>());
   const thumbFailed = useRef(new Set<string>());
@@ -325,6 +363,7 @@ export function LibraryView({ photos, exchange }: { photos: DomainBridge | null;
       setDetail({ status: "loading", item });
       setPromptState({ status: "idle" });
       setRemoval({ status: "idle" });
+      setUpload({ status: "idle" });
       const rawRes = item.kind === "image" ? await call("photos/sourceFile", { id: item.id }) : null;
       if (detailSeq.current !== seq) return;
       const rawValue = rawRes ? resultValue<PhotosSourceFileValue>(rawRes) : null;
@@ -592,6 +631,41 @@ export function LibraryView({ photos, exchange }: { photos: DomainBridge | null;
     },
     [toast],
   );
+
+  const copyLink = useCallback(
+    async (url: string) => {
+      try {
+        await navigator.clipboard.writeText(url);
+        toast({ kind: "success", title: "已复制链接" });
+      } catch {
+        toast({ kind: "warning", title: "复制失败", description: "请手动选中公网直链复制。" });
+      }
+    },
+    [toast],
+  );
+
+  const runUpload = useCallback(async () => {
+    if (detail.status !== "ready" || !detail.raw || detail.item.kind !== "image") return;
+    const seq = detailSeq.current;
+    setUpload({ status: "uploading" });
+    const res = await callMedia("media/public-media/upload", {
+      name: detail.item.name,
+      mime: detail.item.mime,
+      data: base64UrlToBase64(detail.raw),
+    });
+    if (detailSeq.current !== seq) return;
+    const value = resultValue<{ media?: UploadedMedia }>(res);
+    const media = value && value.media && typeof value.media.url === "string" && value.media.url ? value.media : null;
+    if (!media) {
+      const fail = resultFailure(res) || localFailure("RESPONSE_INCOMPLETE", "");
+      const message = fail.message || photosErrorText(fail.code);
+      setUpload({ status: "error", code: fail.code, message });
+      toast({ kind: "error", title: "上传失败", description: message });
+      return;
+    }
+    setUpload({ status: "ready", media });
+    toast({ kind: "success", title: "已上传到免费图床", description: "公网直链 72 小时后自动删除。" });
+  }, [callMedia, detail, toast]);
 
   /* ── 派生数据 ─────────────────────────────────────────────────────────── */
   const page = pageState({ offset: slice.offset, limit: slice.limit, total: slice.total, loaded: items.length, truncated: slice.truncated });
@@ -1058,6 +1132,50 @@ export function LibraryView({ photos, exchange }: { photos: DomainBridge | null;
                   </div>
                 ) : null}
               </section>
+
+              {detail.item.kind === "image" ? (
+                <section className="photos-group" aria-label="上传到免费图床">
+                  <div className="photos-pane-head">
+                    <h3>上传到免费图床</h3>
+                  </div>
+                  <p className="photos-hint">
+                    把原图上传到免费临时图床，得到一个公网直链。文件会上传到第三方 catbox.moe 服务器，链接 72 小时后自动删除，任何拿到链接的人都能打开。
+                  </p>
+                  <div className="photos-actions">
+                    <Button
+                      size="sm"
+                      status={upload.status === "uploading" ? "loading" : "idle"}
+                      iconStart={<Upload size={14} strokeWidth={1.5} />}
+                      disabled={!detail.hasRaw}
+                      onClick={() => void runUpload()}
+                    >
+                      {upload.status === "uploading" ? "正在上传…" : upload.status === "ready" ? "重新上传" : "上传到免费图床"}
+                    </Button>
+                    {upload.status === "ready" ? (
+                      <Button size="sm" variant="secondary" onClick={() => void copyLink(upload.media.url)}>
+                        复制链接
+                      </Button>
+                    ) : null}
+                  </div>
+                  {!detail.hasRaw ? <p className="photos-hint">原图字节没有读到，这张照片不能上传。</p> : null}
+                  {upload.status === "ready" ? (
+                    <>
+                      <TextField
+                        label="公网直链"
+                        readOnly
+                        value={upload.media.url}
+                        data-photos-upload-url="1"
+                      />
+                      <p className="photos-hint">链接 72 小时后自动删除，到期后需要重新上传。</p>
+                    </>
+                  ) : null}
+                  {upload.status === "error" ? (
+                    <p className="photos-error" role="alert" data-photos-upload-error={upload.code}>
+                      {upload.message}（{upload.code}）
+                    </p>
+                  ) : null}
+                </section>
+              ) : null}
             </div>
           )}
 

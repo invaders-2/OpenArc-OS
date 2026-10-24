@@ -58,6 +58,7 @@ function devCjs(): Plugin {
 }
 
 export default defineConfig(({ command }) => ({
+  server: { watch: { ignored: ["**/artifacts/**", "**/.oa-browser/**"] } },
   base: "./",
   // React Refresh 只在 dev 需要（build 走 esbuild 的 JSX），因此 build 路径不挂 react()。
   // Vue 插件 build 路径也必须挂：vue.html 是一个真实入口，.vue SFC 只有它能编译。

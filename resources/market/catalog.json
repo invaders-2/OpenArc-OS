@@ -2,23 +2,406 @@
   "schema": "openarc.local-market-catalog/v1",
   "version": 1,
   "generatedAt": 0,
-  "page": {
-    "id": "local",
-    "title": "本地市场"
-  },
-  "categories": [],
-  "items": [],
-  "apps": [],
-  "skillPacks": [],
+  "page": { "id": "local", "title": "本地市场" },
+  "categories": [
+    { "id": "creative", "name": "创作", "icon": "✦", "description": "内置创作类应用：画布、相册、音乐、视频剪辑。" },
+    { "id": "efficiency", "name": "效率", "icon": "⚡", "description": "内置效率类应用：浏览器、对话。" },
+    { "id": "team-resource", "name": "团队与资源", "icon": "◍", "description": "内置团队与资源类应用：资源库、项目。" },
+    { "id": "brand-design", "name": "品牌设计", "icon": "◈", "description": "换背景、产品图、品牌物料类模板。" },
+    { "id": "film-creative", "name": "影视创意", "icon": "▦", "description": "脚本、分镜、首帧与镜头运动类模板。" },
+    { "id": "ecommerce-ads", "name": "电商广告", "icon": "◇", "description": "卖点拆解、批量出图与海报类模板。" }
+  ],
+  "apps": [
+    {
+      "id": "canvas", "name": "AI Studio", "version": "0.1.0", "build": 1, "builtIn": true, "category": "software",
+      "categoryIds": ["creative"], "subtitle": "无限画布：图像、视频与工作流",
+      "summary": "无限画布：在自由节点里写提示词、接素材、串工作流，按节点逐个生成图像、视频与文本。",
+      "prompt": "给一款白色运动水壶做三张电商主图，干净白底，主标题突出卖点",
+      "tags": ["画布", "生成", "工作流"], "featured": true, "publishedAt": 1760860800000,
+      "sections": {
+        "what": "在无限画布上把文字、图片、视频节点连成工作流，逐节点调用已配置的模型生成内容。",
+        "context": "想做的画面 / 视频描述；如需参考图先把素材拖进画布；生成前需在「设置 › 模型与服务商」配好模型。",
+        "how": "新建画布 → 添加节点并写提示词 → 连上游素材 → 点生成；多节点可以按顺序逐段跑，也可以右键「运行到此」。",
+        "output": "画布文档与各节点产物（图片 / 视频 / 文本），产物会进生成历史，也可以保存到素材库。",
+        "scope": "画布只负责编排与调用：模型、密钥、计费都在服务商侧；没有配置模型时不会假装能生成。",
+        "followUp": "从「应用市场 › 项目模板」一键建好 5 套常用工作流；或直接把复制到的提示词粘进首个节点。"
+      }
+    },
+    {
+      "id": "photos", "name": "相册", "version": "0.1.0", "build": 1, "builtIn": true, "category": "software",
+      "categoryIds": ["creative"], "subtitle": "汇总访达里的全部图片",
+      "summary": "汇总访达里的全部图片，按网格浏览、查看原图，也能导入画布或素材库。",
+      "tags": ["照片", "浏览"], "featured": false, "publishedAt": 1760428800000,
+      "sections": {
+        "what": "把本机（访达）里的图片汇总成一个相册，方便快速翻看与再次使用。",
+        "context": "访达里已有的图片；相册本身不下载、不联网取图。",
+        "how": "打开「相册」读取本机图片索引，点开一张看原图与详情，可下载或导入画布 / 素材库。",
+        "output": "可浏览的图片列表与原图预览；导入动作会在画布或素材库里生成对应资源。",
+        "scope": "只读本机已授权的图片；不索引云端网盘，也不做图片编辑。",
+        "followUp": "需要改图时把图片导入画布，用画布节点或图片编辑工具处理。"
+      }
+    },
+    {
+      "id": "music", "name": "音乐", "version": "0.1.0", "build": 1, "builtIn": true, "category": "software",
+      "categoryIds": ["creative"], "subtitle": "播放访达里的音频文件",
+      "summary": "播放访达里的音频文件：列表选曲、进度与音量的本地播放器。",
+      "tags": ["音频", "播放"], "featured": false, "publishedAt": 1760342400000,
+      "sections": {
+        "what": "播放本机访达里的音频文件，用来试听生成或导入的音频素材。",
+        "context": "访达里已有的音频文件。",
+        "how": "打开「音乐」读取本机音频索引，点选即播；播放控制在本机完成，不上传音频。",
+        "output": "本机音频播放。",
+        "scope": "只做本地播放，不接入在线音乐服务，也不提供转码。",
+        "followUp": "想生成音乐或配音，在画布用「音频」节点并配置音频模型。"
+      }
+    },
+    {
+      "id": "video", "name": "视频剪辑", "version": "0.1.0", "build": 1, "builtIn": true, "category": "software",
+      "categoryIds": ["creative"], "subtitle": "拼接、裁剪视频并用本机 FFmpeg 导出",
+      "summary": "把本机视频按入点 / 出点裁剪、拼接，用本机 FFmpeg 导出成片。",
+      "tags": ["视频", "剪辑", "导出"], "featured": false, "publishedAt": 1760256000000,
+      "sections": {
+        "what": "把本机视频片段裁剪、排序、拼接，导出成一个成片文件。",
+        "context": "访达里的视频文件；导出需要本机带 FFmpeg（应用内会显示是否可用）。",
+        "how": "在「视频剪辑」里选片段、拖时间线定入点 / 出点，点导出由本机 FFmpeg 渲染。",
+        "output": "导出到本机的成片文件。",
+        "scope": "只做剪辑与转码，不做特效合成；FFmpeg 不可用时如实报错，不伪造导出成功。",
+        "followUp": "需要生成素材时先在画布出视频节点，再回到这里剪。"
+      }
+    },
+    {
+      "id": "resource-library", "name": "资源库", "version": "0.1.0", "build": 1, "builtIn": true, "category": "software",
+      "categoryIds": ["team-resource"], "subtitle": "可被助理引用的资源",
+      "summary": "管理可被助理、画布与其它应用引用的图片、文档与素材。",
+      "tags": ["资源", "素材", "引用"], "featured": false, "publishedAt": 1760173200000,
+      "sections": {
+        "what": "集中管理可被助理、画布与其它应用引用的资源（图片 / 文档 / 素材）。",
+        "context": "要归档的文件或画布产物；按范围（个人 / 团队）与权限共享。",
+        "how": "导入或从画布保存进资源库，按文件夹 / 搜索查找；引用时用资源标识，不复制大段内容。",
+        "output": "带归属与权限的资源条目，可被其它应用引用。",
+        "scope": "权限决定谁能看 / 改；删除进回收站，可恢复。",
+        "followUp": "在画布或对话里引用资源；团队共享时先在「组织治理」确认可见范围。"
+      }
+    },
+    {
+      "id": "browser", "name": "浏览器", "version": "0.1.0", "build": 1, "builtIn": true, "category": "software",
+      "categoryIds": ["efficiency"], "subtitle": "受控的网页浏览与下载",
+      "summary": "在桌面里开标签页浏览网页：地址栏、前进后退、下载面板都走受控主进程。",
+      "tags": ["网页", "浏览"], "featured": false, "publishedAt": 1760086800000,
+      "sections": {
+        "what": "在 OpenArc 桌面内浏览网页，用于查资料、比对页面或下载文件。",
+        "context": "要访问的网址；网站权限（摄像头 / 定位等）会单独提示。",
+        "how": "打开「浏览器」输入地址，按标签页管理；下载进入下载面板，由主进程落盘。",
+        "output": "网页视图与下载结果。",
+        "scope": "导航受安全策略约束（危险协议 / 非白名单跳转会被拦并记录）；不注入脚本、不伪装 UA。",
+        "followUp": "需要把网页内容用于生成时，把关键信息复制到「对话」或画布提示词里。"
+      }
+    },
+    {
+      "id": "chat", "name": "对话", "version": "0.1.0", "build": 1, "builtIn": true, "category": "software",
+      "categoryIds": ["efficiency"], "subtitle": "和助理对话、交代任务",
+      "summary": "和助理对话、交代任务：可以提问、让它调用工具，也能把结果沉淀成任务记录。",
+      "prompt": "帮我把这段文字总结成 3 条要点，并给出下一步建议",
+      "tags": ["对话", "助理", "任务"], "featured": true, "publishedAt": 1759914000000,
+      "sections": {
+        "what": "和助理多轮对话、交代任务；需要动手的操作会按工具权限与审批执行。",
+        "context": "你想问的问题或要交代的任务；可附上资源库里的素材。没有配置对话模型时会提示去设置里添加。",
+        "how": "在「对话」输入内容发送；助理按需调用已授权工具，需要确认的操作会先停下来等你批准。",
+        "output": "对话回复与任务记录（含执行摘要）；结果未知会与失败分开标注。",
+        "scope": "工具调用受权限与 MCP 开关约束；不会绕过审批，也不会展示模型内部思维链。",
+        "followUp": "把常用指令存成技能，或在「应用市场 › 官方技能」里复制提示词。"
+      }
+    },
+    {
+      "id": "projects", "name": "项目", "version": "0.1.0", "build": 1, "builtIn": true, "category": "software",
+      "categoryIds": ["team-resource"], "subtitle": "项目与成员协作",
+      "summary": "用项目把任务、成员与资源收在一起，按权限协作。",
+      "tags": ["项目", "协作"], "featured": false, "publishedAt": 1759827600000,
+      "sections": {
+        "what": "用项目聚合任务、成员与资源，方便按范围协作与追踪。",
+        "context": "项目名称与成员；成员权限在「组织治理」里分配。",
+        "how": "新建项目 → 邀请成员 → 在项目里放任务与资源；可见范围由资源与项目权限共同决定。",
+        "output": "项目及其成员、任务与资源清单。",
+        "scope": "越权成员看不到项目内容；删除与转移需要管理权限。",
+        "followUp": "把项目里反复做的流程写成技能，或从「项目模板」起一张画布。"
+      }
+    }
+  ],
+  "skillPacks": [
+    {
+      "id": "chat", "name": "对话回复", "version": "1.0.0",
+      "description": "普通对话、问答、解释概念；不适合长文写作（用 writing）和代码（用 code）。",
+      "summary": "内置官方技能：对话 / 问答 / 解释概念。",
+      "prompt": "你是一个直接、自然、可靠的中文对话助手。回答用户问题；不需要生成图片；不输出无关解释。",
+      "tags": ["对话", "官方技能"], "publishedAt": 1759255200000, "featured": false,
+      "sections": {
+        "what": "普通对话、问答、解释概念；不适合长文写作（用 writing）和代码（用 code）。",
+        "context": "用户的问题或对话内容",
+        "how": "把用户的问题作为指令交给当前默认对话模型，直接回复。",
+        "output": "对话文本（在对话里直接显示）。",
+        "scope": "内置官方技能：通过对话或 /chat 显式调用；启用技能不会自动获得应用、设备或文件权限。",
+        "followUp": "在「对话」里追问，或在「应用市场 › 官方技能」里复制提示词。"
+      }
+    },
+    {
+      "id": "writing", "name": "写作生成", "version": "1.0.0",
+      "description": "生成诗歌、文案、故事、脚本、邮件、标题等原创文本，输出可直接交付的成品。",
+      "summary": "内置官方技能：按体裁与语气写可直接交付的文本。",
+      "prompt": "你是中文写作助手。按用户要求创作可直接交付的文本，如诗歌、文案、故事、标题、邮件。只输出成品，除非用户要求解释。",
+      "tags": ["写作", "官方技能", "精选"], "publishedAt": 1760301600000, "featured": true,
+      "sections": {
+        "what": "生成诗歌、文案、故事、脚本、邮件、标题等原创文本，输出可直接交付的成品。",
+        "context": "写作要求，包含体裁、主题、长度、语气等",
+        "how": "把写作要求与素材交给当前默认对话模型，按 systemPrompt 的约束只输出成品。",
+        "output": "可直接交付的文本成品。",
+        "scope": "内置官方技能：通过对话或 /writing 显式调用；不会获得额外权限，也不抓取外部资料。",
+        "followUp": "在「对话」里继续改稿，或复制提示词到自己的编辑器。"
+      }
+    },
+    {
+      "id": "rewrite", "name": "文本改写", "version": "1.0.0",
+      "description": "润色、改写、扩写、缩写、翻译或调整语气，保持原意。",
+      "summary": "内置官方技能：润色 / 改写 / 扩写 / 缩写 / 翻译。",
+      "prompt": "你是文本改写助手。根据用户要求润色、改写、扩写、缩写、翻译或调整语气。尽量保留原意，只输出改写结果。",
+      "tags": ["改写", "官方技能"], "publishedAt": 1759514400000, "featured": false,
+      "sections": {
+        "what": "润色、改写、扩写、缩写、翻译或调整语气，保持原意。",
+        "context": "改写要求 + 原文",
+        "how": "按你的改写要求把原文交给当前默认对话模型，尽量保留原意，只输出改写结果。",
+        "output": "改写后的文本。",
+        "scope": "内置官方技能：通过对话或 /rewrite 显式调用；不会获得额外权限。",
+        "followUp": "连续改写可再发一轮要求，或复制提示词复用。"
+      }
+    },
+    {
+      "id": "code", "name": "代码助手", "version": "1.0.0",
+      "description": "写代码、解释代码、分析报错、给出技术修复方案。",
+      "summary": "内置官方技能：写代码 / 解释代码 / 分析报错。",
+      "prompt": "你是代码与技术助手。可以写代码、解释代码、分析报错、给出修复方案。需要代码时使用清晰代码块。",
+      "tags": ["代码", "官方技能", "精选"], "publishedAt": 1760647200000, "featured": true,
+      "sections": {
+        "what": "写代码、解释代码、分析报错、给出技术修复方案。",
+        "context": "编程需求、代码片段或报错信息",
+        "how": "把你的需求 / 代码片段 / 报错交给当前默认对话模型，需要代码时用清晰代码块输出。",
+        "output": "代码、解释或修复方案（文本）。",
+        "scope": "内置官方技能：通过对话或 /code 显式调用；不会自行执行代码，也不会访问本机文件。",
+        "followUp": "把代码贴回工程里验证，或在对话里继续追问报错。"
+      }
+    },
+    {
+      "id": "analysis", "name": "文本分析", "version": "1.0.0",
+      "description": "总结、归纳、对比、提取要点、诊断问题，输出结构化结论。",
+      "summary": "内置官方技能：总结 / 对比 / 提取要点 / 诊断问题。",
+      "prompt": "你是分析总结助手。擅长总结、归纳、对比、提取要点、诊断问题。输出结构清晰，优先给结论。",
+      "tags": ["分析", "官方技能"], "publishedAt": 1759773600000, "featured": false,
+      "sections": {
+        "what": "总结、归纳、对比、提取要点、诊断问题，输出结构化结论。",
+        "context": "分析要求 + 待分析的文本材料",
+        "how": "按分析要求把材料交给当前默认对话模型，输出结构清晰、结论优先的结果。",
+        "output": "结构化分析结论（文本）。",
+        "scope": "内置官方技能：通过对话或 /analysis 显式调用；只分析你给的文本，不抓取外部资料。",
+        "followUp": "在对话里继续追问细节，或复制提示词复用。"
+      }
+    }
+  ],
+  "templates": [
+    {
+      "id": "tpl-text-to-video", "name": "文字生视频", "version": "1.0.0", "kind": "text", "category": "film-creative",
+      "summary": "一段文字脚本 → 一条短片：画布会连好「视频脚本」文本节点与「短片」视频节点。",
+      "prompt": "写一段 10 秒短片的分镜脚本，3 个镜头", "nodeTitle": "视频脚本",
+      "tags": ["视频", "脚本", "模板"], "publishedAt": 1760750400000, "featured": true,
+      "steps": [
+        { "title": "视频脚本", "detail": "文本节点，提示词：写一段 10 秒短片的分镜脚本，3 个镜头" },
+        { "title": "短片", "detail": "视频节点，提示词：按上游脚本生成，电影感，节奏紧凑" },
+        { "title": "连线", "detail": "脚本 → 短片，按上游文本生成视频" }
+      ],
+      "doc": {
+        "nodes": [
+          { "id": "tpl-t2v-script", "kind": "text", "x": 0, "y": 0, "w": 300, "h": 220, "title": "视频脚本", "prompt": "写一段 10 秒短片的分镜脚本，3 个镜头" },
+          { "id": "tpl-t2v-video", "kind": "video", "x": 460, "y": 0, "w": 340, "h": 220, "title": "短片", "prompt": "按上游脚本生成，电影感，节奏紧凑" }
+        ],
+        "edges": [{ "id": "e_t2v_1", "from": "tpl-t2v-script", "to": "tpl-t2v-video" }]
+      },
+      "sections": {
+        "what": "从一句创意出发拿到分镜脚本，再按脚本生成一条短片；画布会按顺序把两个节点连好。",
+        "context": "一句创意或一段现成脚本；要真正生成视频，需要先在「系统设置 › 模型与服务商」配好可用的视频模型。",
+        "how": "立即体验会在画布上创建「视频脚本」（文本）与「短片」（视频）两个节点并连好；脚本节点已带好提示词。",
+        "output": "一张新画布：2 个节点 + 1 条连线，脚本节点带模板提示词。",
+        "scope": "只创建节点与连线，不会自动调用模型或扣费；生成需要你确认后点「生成」。",
+        "followUp": "打开画布改脚本，再点生成；也可以复制提示词到自己的文档里。"
+      }
+    },
+    {
+      "id": "tpl-image-rebackground", "name": "图片换背景", "version": "1.0.0", "kind": "image", "category": "brand-design",
+      "summary": "上传产品图 → 保持主体不变换背景：连好「原图」与「换背景」两个图片节点。",
+      "prompt": "保持主体不变，背景换成清晨的木质书桌，左侧窗光", "nodeTitle": "换背景",
+      "tags": ["换背景", "产品图", "模板"], "publishedAt": 1760232000000, "featured": false,
+      "steps": [
+        { "title": "原图", "detail": "图片节点，用来上传或拖入原图（还没有图片时是空位）" },
+        { "title": "换背景", "detail": "图片节点，提示词：保持主体不变，背景换成清晨的木质书桌，左侧窗光" },
+        { "title": "连线", "detail": "原图 → 换背景，用原图作为参考生成" }
+      ],
+      "doc": {
+        "nodes": [
+          { "id": "tpl-bg-source", "kind": "image", "x": 0, "y": 0, "w": 300, "h": 300, "title": "原图" },
+          { "id": "tpl-bg-result", "kind": "image", "x": 460, "y": 0, "w": 300, "h": 300, "title": "换背景", "prompt": "保持主体不变，背景换成清晨的木质书桌，左侧窗光" }
+        ],
+        "edges": [{ "id": "e_bg_1", "from": "tpl-bg-source", "to": "tpl-bg-result" }]
+      },
+      "sections": {
+        "what": "保留商品 / 主体不动，只替换背景，适合品牌物料与产品图。",
+        "context": "一张原图（立即体验后拖入「原图」节点）；以及你想要的背景描述。",
+        "how": "立即体验会创建「原图」「换背景」两个图片节点并连好，换背景节点带好提示词。",
+        "output": "一张新画布：2 个节点 + 1 条连线；原图节点等待你放入图片。",
+        "scope": "只创建节点与连线，不会自动生成；原图为空时不会凭空造图。",
+        "followUp": "把原图拖进画布，改背景描述后点生成。"
+      }
+    },
+    {
+      "id": "tpl-first-frame-video", "name": "首帧生成视频", "version": "1.0.0", "kind": "image", "category": "film-creative",
+      "summary": "一张图作为首帧 → 镜头运动成片：连好「首帧」图片节点与「首帧视频」视频节点。",
+      "prompt": "镜头缓慢环绕主体，光线从左扫到右", "nodeTitle": "首帧",
+      "tags": ["首帧", "视频", "模板"], "publishedAt": 1760360400000, "featured": false,
+      "steps": [
+        { "title": "首帧", "detail": "图片节点，放第一帧画面" },
+        { "title": "首帧视频", "detail": "视频节点，提示词：镜头缓慢环绕主体，光线从左扫到右" },
+        { "title": "连线", "detail": "首帧 → 首帧视频，把图当首帧生成" }
+      ],
+      "doc": {
+        "nodes": [
+          { "id": "tpl-i2v-frame", "kind": "image", "x": 0, "y": 0, "w": 300, "h": 260, "title": "首帧" },
+          { "id": "tpl-i2v-video", "kind": "video", "x": 460, "y": 0, "w": 340, "h": 220, "title": "首帧视频", "prompt": "镜头缓慢环绕主体，光线从左扫到右" }
+        ],
+        "edges": [{ "id": "e_i2v_1", "from": "tpl-i2v-frame", "to": "tpl-i2v-video" }]
+      },
+      "sections": {
+        "what": "用一张图当首帧，让视频模型沿你描述的镜头运动生成短片。",
+        "context": "一张首帧图片 + 镜头运动描述；需要可用的视频模型。",
+        "how": "立即体验会创建「首帧」（图片）与「首帧视频」（视频）并连好；视频节点带好提示词。",
+        "output": "一张新画布：2 个节点 + 1 条连线。",
+        "scope": "只创建节点与连线，不会自动生成或扣费。",
+        "followUp": "把首帧图片拖进节点，微调镜头描述后点生成。"
+      }
+    },
+    {
+      "id": "tpl-ecom-poster", "name": "电商卖点套图", "version": "1.0.0", "kind": "image", "category": "ecommerce-ads",
+      "summary": "产品图 + 产品信息 → 卖点拆解 → 3 张海报：6 个节点 + 8 条连线的工作流模板。",
+      "prompt": "输出 3 个卖点海报方案，以“海报1”“海报2”“海报3”开头，每个包含主标题、画面、文案", "nodeTitle": "卖点拆解",
+      "tags": ["电商", "海报", "批量", "模板"], "publishedAt": 1760812800000, "featured": true,
+      "steps": [
+        { "title": "产品图", "detail": "图片节点，放产品图" },
+        { "title": "产品信息", "detail": "文本节点，手写产品 / 卖点 / 人群 / 风格偏好" },
+        { "title": "卖点拆解", "detail": "文本节点，提示词：输出 3 个卖点海报方案…" },
+        { "title": "海报 1–3", "detail": "3 个图片节点，提示词：参考 @卖点拆解·海报N，基于产品图生成竖版卖点海报" },
+        { "title": "连线", "detail": "产品图/产品信息 → 卖点拆解；产品图与卖点拆解各连 3 张海报，共 8 条连线" }
+      ],
+      "doc": {
+        "nodes": [
+          { "id": "tpl-ecom-product", "kind": "image", "x": 0, "y": 0, "w": 260, "h": 260, "title": "产品图" },
+          { "id": "tpl-ecom-info", "kind": "text", "x": 0, "y": 320, "w": 260, "h": 220, "title": "产品信息", "text": "产品：\n卖点：\n人群：\n风格偏好：" },
+          { "id": "tpl-ecom-breakdown", "kind": "text", "x": 360, "y": 120, "w": 300, "h": 240, "title": "卖点拆解", "prompt": "输出 3 个卖点海报方案，以“海报1”“海报2”“海报3”开头，每个包含主标题、画面、文案" },
+          { "id": "tpl-ecom-poster-1", "kind": "image", "x": 760, "y": -40, "w": 240, "h": 300, "title": "海报 1", "prompt": "参考 @卖点拆解·海报1，基于产品图生成竖版卖点海报" },
+          { "id": "tpl-ecom-poster-2", "kind": "image", "x": 760, "y": 320, "w": 240, "h": 300, "title": "海报 2", "prompt": "参考 @卖点拆解·海报2，基于产品图生成竖版卖点海报" },
+          { "id": "tpl-ecom-poster-3", "kind": "image", "x": 760, "y": 680, "w": 240, "h": 300, "title": "海报 3", "prompt": "参考 @卖点拆解·海报3，基于产品图生成竖版卖点海报" }
+        ],
+        "edges": [
+          { "id": "e_ecom_1", "from": "tpl-ecom-product", "to": "tpl-ecom-breakdown" },
+          { "id": "e_ecom_2", "from": "tpl-ecom-info", "to": "tpl-ecom-breakdown" },
+          { "id": "e_ecom_3", "from": "tpl-ecom-product", "to": "tpl-ecom-poster-1" },
+          { "id": "e_ecom_4", "from": "tpl-ecom-product", "to": "tpl-ecom-poster-2" },
+          { "id": "e_ecom_5", "from": "tpl-ecom-product", "to": "tpl-ecom-poster-3" },
+          { "id": "e_ecom_6", "from": "tpl-ecom-breakdown", "to": "tpl-ecom-poster-1" },
+          { "id": "e_ecom_7", "from": "tpl-ecom-breakdown", "to": "tpl-ecom-poster-2" },
+          { "id": "e_ecom_8", "from": "tpl-ecom-breakdown", "to": "tpl-ecom-poster-3" }
+        ]
+      },
+      "sections": {
+        "what": "把产品信息和产品图整理成 3 个卖点海报方案，再逐张出图。",
+        "context": "产品图、产品与卖点信息、目标人群与风格偏好。",
+        "how": "立即体验会一次性建好 6 个节点并连好：产品图、产品信息、卖点拆解、海报 1/2/3（产品图与卖点拆解都连到 3 张海报，共 8 条连线）。",
+        "output": "一张新画布：6 个节点 + 8 条连线，卖点拆解节点带好提示词。",
+        "scope": "只创建节点与连线，不会自动生成；出图需要你可用的图片模型。",
+        "followUp": "先填产品信息与产品图，生成卖点拆解后再逐张出海报。"
+      }
+    },
+    {
+      "id": "tpl-table-batch", "name": "表格批量出图", "version": "1.0.0", "kind": "text", "category": "ecommerce-ads",
+      "summary": "文本任务拆解 → 多维表格 → 逐行出图：适合一次做 4 张不同场景的宣传图。",
+      "prompt": "把下面的产品拆成 4 张不同场景的宣传图任务", "nodeTitle": "任务拆解",
+      "tags": ["批量", "表格", "模板"], "publishedAt": 1760476800000, "featured": false,
+      "steps": [
+        { "title": "任务拆解", "detail": "文本节点，输出类型设为「多维表格」，提示词：把下面的产品拆成 4 张不同场景的宣传图任务" },
+        { "title": "多维表格", "detail": "表格节点，承接逐行任务" },
+        { "title": "逐行出图", "detail": "图片节点，提示词：按这一行的描述生成宣传图，主体保持一致" },
+        { "title": "连线", "detail": "任务拆解 → 多维表格 → 逐行出图" }
+      ],
+      "doc": {
+        "nodes": [
+          { "id": "tpl-tb-breakdown", "kind": "text", "x": 0, "y": 0, "w": 300, "h": 240, "title": "任务拆解", "prompt": "把下面的产品拆成 4 张不同场景的宣传图任务", "params": { "output": "table" } },
+          { "id": "tpl-tb-table", "kind": "table", "x": 440, "y": 0, "w": 420, "h": 240, "title": "多维表格", "table": { "title": "多维表格", "columns": ["场景", "画面描述", "比例"], "rows": [["", "", ""], ["", "", ""], ["", "", ""]] } },
+          { "id": "tpl-tb-image", "kind": "image", "x": 1000, "y": 0, "w": 300, "h": 300, "title": "逐行出图", "prompt": "按这一行的描述生成宣传图，主体保持一致" }
+        ],
+        "edges": [
+          { "id": "e_tb_1", "from": "tpl-tb-breakdown", "to": "tpl-tb-table" },
+          { "id": "e_tb_2", "from": "tpl-tb-table", "to": "tpl-tb-image" }
+        ]
+      },
+      "sections": {
+        "what": "把一个产品的宣传需求拆成多行任务，按行批量出图。",
+        "context": "产品信息与想要的场景方向；需要可用的对话模型（拆解）与图片模型（出图）。",
+        "how": "立即体验会创建「任务拆解」（文本，输出多维表格）、「多维表格」、「逐行出图」三个节点并连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线，任务拆解节点带好提示词。",
+        "scope": "只创建节点与连线，不会自动生成；批量执行需要你确认。",
+        "followUp": "先跑任务拆解得到表格，再按行生成。"
+      }
+    },
+    {
+      "id": "tpl-storyboard-video", "name": "分镜表到视频", "version": "1.0.0", "kind": "text", "category": "film-creative",
+      "summary": "一句创意 → 分镜表 → 逐镜头视频：适合把想法快速落成一条片子。",
+      "prompt": "一条 15 秒的产品开箱短片，节奏由慢到快", "nodeTitle": "创意",
+      "tags": ["分镜", "视频", "模板"], "publishedAt": 1760682000000, "featured": false,
+      "steps": [
+        { "title": "创意", "detail": "文本节点，输出类型设为「分镜表」，提示词：一条 15 秒的产品开箱短片，节奏由慢到快" },
+        { "title": "分镜表", "detail": "表格节点，逐行承接镜头" },
+        { "title": "逐镜头视频", "detail": "视频节点，提示词：按这一行的镜头描述生成" },
+        { "title": "连线", "detail": "创意 → 分镜表 → 逐镜头视频" }
+      ],
+      "doc": {
+        "nodes": [
+          { "id": "tpl-sb-idea", "kind": "text", "x": 0, "y": 0, "w": 300, "h": 240, "title": "创意", "prompt": "一条 15 秒的产品开箱短片，节奏由慢到快", "params": { "output": "storyboard" } },
+          { "id": "tpl-sb-storyboard", "kind": "table", "x": 440, "y": 0, "w": 460, "h": 240, "title": "分镜表", "table": { "title": "分镜表", "columns": ["镜头", "画面", "运镜", "时长", "台词 / 字幕"], "rows": [["", "", "", "", ""], ["", "", "", "", ""], ["", "", "", "", ""]] } },
+          { "id": "tpl-sb-video", "kind": "video", "x": 1040, "y": 0, "w": 340, "h": 220, "title": "逐镜头视频", "prompt": "按这一行的镜头描述生成" }
+        ],
+        "edges": [
+          { "id": "e_sb_1", "from": "tpl-sb-idea", "to": "tpl-sb-storyboard" },
+          { "id": "e_sb_2", "from": "tpl-sb-storyboard", "to": "tpl-sb-video" }
+        ]
+      },
+      "sections": {
+        "what": "把一句创意拆成分镜表，再逐镜头生成视频。",
+        "context": "一句创意（可再补产品信息）；需要可用的对话模型与视频模型。",
+        "how": "立即体验会创建「创意」（文本，输出分镜表）、「分镜表」、「逐镜头视频」三个节点并连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线，创意节点带好提示词。",
+        "scope": "只创建节点与连线，不会自动生成；逐镜头生成需要你确认。",
+        "followUp": "先跑创意得到分镜表，再按行生成视频。"
+      }
+    }
+  ],
+  "railPages": [
+    { "id": "featured", "title": "精选项目", "itemIds": ["canvas", "chat", "tpl-ecom-poster", "tpl-text-to-video", "writing", "code"] },
+    { "id": "latest", "title": "最新上线", "itemIds": ["canvas", "tpl-ecom-poster", "photos", "tpl-text-to-video", "tpl-storyboard-video", "tpl-table-batch", "chat"] }
+  ],
   "fields": {
     "schema": "清单格式标识；market-service.cjs 只按 version 校验，此字段供人阅读",
     "version": "清单结构版本，必须为 1；不是 1 一律 MARKET_MANIFEST_INVALID",
     "generatedAt": "清单生成时间（毫秒）。0 表示未指定，服务读取时用当前时间补；仅影响展示",
     "page": "市场标题：{ id, title }；id 缺省回落 local",
-    "categories": "可选分类数组；为空时服务端按 software / games 兜底，不影响条目",
-    "items": "保留的条目总表，本版本恒为空；真实条目只从 apps / skillPacks 读取",
+    "categories": "可选分类数组；为空时服务端按 software / games 兜底，不影响条目。计数会把 App / 技能包 / 模板都算进去",
+    "items": "保留的条目总表，本版本恒为空；真实条目只从 apps / skillPacks / templates 读取",
     "apps": "本地 App 条目数组。空数组 = 本次没有可用 App（有效状态，不是错误）",
-    "skillPacks": "本地技能包条目数组。空数组 = 本次没有可用技能包"
+    "skillPacks": "本地技能包条目数组。空数组 = 本次没有可用技能包",
+    "templates": "项目模板条目数组（task-21 新增，可选）。条目必须带 id / name / prompt，非法条目被丢弃并计入 rejected.templates",
+    "railPages": "精选 rails（可选）：[{ id, title, itemIds }]，最多 6 条、每条最多 30 个 id；未知 id 在界面侧忽略"
   },
   "appItemFields": {
     "id": "必填；只允许 [a-zA-Z0-9._-]",
@@ -27,20 +410,42 @@
     "build": "必填；大于 0 的整数",
     "category": "可选；games 或缺省 software",
     "subtitle": "可选；一句话副标题",
-    "summary": "可选；详细介绍",
+    "summary": "可选；详细介绍（详情第一段优先用它）",
+    "prompt": "可选；可复制提示词（最多 4000 字）",
+    "sections": "可选；六段详情 { what, context, how, output, scope, followUp }，每段最多 1200 字",
     "tags": "可选；字符串数组（最多 12）",
     "featured": "可选；布尔，是否推荐",
     "packageSize": "可选；字节数",
-    "publishedAt": "可选；毫秒时间戳"
+    "publishedAt": "可选；毫秒时间戳（「最新上线」据此倒序）"
   },
   "skillPackItemFields": {
-    "id": "必填；只允许 [a-zA-Z0-9._-]",
+    "id": "必填；只允许 [a-zA-Z0-9._-]；官方技能包与 skill/list 的 id 一致",
     "name": "必填；展示名",
     "version": "必填；非空字符串",
     "description": "可选；介绍",
+    "summary": "可选；详情用的一句话摘要",
+    "prompt": "可选；可复制提示词（最多 4000 字）",
+    "sections": "可选；六段详情，每段最多 1200 字",
+    "category": "可选；分类 id（必须与 categories[].id 对得上）",
+    "featured": "可选；布尔",
     "entry": "可选；相对入口路径（拒绝绝对路径与 .. 穿越）",
     "tags": "可选；字符串数组",
     "packageSize": "可选；字节数",
     "publishedAt": "可选；毫秒时间戳"
+  },
+  "templateItemFields": {
+    "id": "必填；只允许 [a-zA-Z0-9._-]",
+    "name": "必填；展示名",
+    "prompt": "必填；模板提示词（最多 4000 字）——「复制提示词」与「立即体验」都靠它",
+    "version": "可选；缺省 1.0.0",
+    "kind": "可选；text | image | video | audio（决定立即体验创建的首节点类型），缺省 text",
+    "category": "可选；分类 id（必须与 categories[].id 对得上）",
+    "summary": "可选；一句话说明（详情第一段优先用它）",
+    "nodeTitle": "可选；立即体验创建的首节点标题，缺省取 steps[0].title 或 name",
+    "steps": "可选；[{ title, detail }]，最多 12 步，title ≤160 字、detail ≤800 字",
+    "tags": "可选；字符串数组（最多 12）",
+    "featured": "可选；布尔",
+    "publishedAt": "可选；毫秒时间戳（「最新上线」据此倒序）",
+    "sections": "可选；六段详情，每段最多 1200 字"
   }
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { ArrowUp, ChevronDown, CircleAlert, Plus, ShieldQuestion, Square, Wrench } from "lucide-vue-next";
+import { ArrowUp, ChevronDown, CircleAlert, Monitor, MoreHorizontal, Paperclip, ShieldQuestion, Sparkles, Square, SquarePen, Wrench } from "lucide-vue-next";
+import ResourcePicker from "./ResourcePicker.vue";
 
 /**
  * 对话（task-53）：DSH Harness 会话面。task 桥是唯一真源。
@@ -18,11 +19,11 @@ type Detail = {
   appendable: boolean; appendReason: string | null; resumable: boolean; stopReason: string | null;
   recovery: any; budgetLedger: any; verifications: any[];
 };
-type Msg = { key: string; role: "user" | "assistant"; text: string; pending?: boolean; failed?: boolean };
 type ModelOption = { configId: string; displayName: string; providerName: string; isDefault: boolean };
 type Approval = { approvalRequestId: string; toolId: string; toolDisplayName?: string; riskClass?: string | null; effectClass?: string; targetDisplayName?: string | null };
 
 const taskBridge = (window as any).openarc?.task;
+const resourceBridge = (window as any).openarc?.resource;
 const modelBridge = (window as any).openarc?.model;
 const sideEffectBridge = (window as any).openarc?.sideEffect;
 const tasks = ref<Task[]>([]);
@@ -32,7 +33,11 @@ const draft = ref("");
 const sending = ref(false);
 const error = ref("");
 const scroller = ref<HTMLElement | null>(null);
-const processOpen = ref(true);
+const panelOpen = ref(true);
+const listQuery = ref("");
+const resourcePickerOpen = ref(false);
+const openTurns = ref<Set<string>>(new Set());
+function toggleTurn(key: string) { const next = new Set(openTurns.value); if (next.has(key)) next.delete(key); else next.add(key); openTurns.value = next; }
 const models = ref<ModelOption[]>([]);
 const defaultModelId = ref("");
 const selectedModelId = ref("");
@@ -59,13 +64,19 @@ const when = (t: number) => { const d = new Date(Number(t) || 0); if (!Number.is
 const selectedModel = computed(() => models.value.find((m) => m.configId === selectedModelId.value) || null);
 const defaultModel = computed(() => models.value.find((m) => m.configId === defaultModelId.value) || null);
 const modelHint = computed(() => {
-  if (!modelBridge) return "模型桥不可用。";
+  if (!modelBridge) return "";
   if (modelError.value) return modelError.value;
-  if (!models.value.length) return "还没有可用的 chat 模型；可在系统设置里配置。";
-  if (selectedModel.value && selectedModel.value.configId !== defaultModelId.value) return "任务桥按后端默认模型执行；这里选择其他模型不会下发（后端尚无任务级模型覆盖命令）。";
-  return defaultModel.value ? "默认模型：" + defaultModel.value.displayName + "（" + defaultModel.value.providerName + "）" : "后端未绑定 chat 默认模型。";
+  if (!models.value.length) return "还没有可用的对话模型，请在系统设置里添加。";
+  return defaultModel.value ? "默认对话模型：" + defaultModel.value.displayName + "（" + defaultModel.value.providerName + "），在系统设置里更改" : modelHint2.value;
 });
 
+/** 对话用的模型由主进程按默认模型冻结，界面只显示、不提供无效的切换。 */
+const modelLabel = computed(() => {
+  const id = detail.value?.task.modelConfigId;
+  const m = (id && models.value.find((x) => x.configId === id)) || defaultModel.value;
+  return m ? m.displayName : models.value.length ? "默认模型" : "未配置模型";
+});
+const modelHint2 = computed(() => "对话使用「系统设置 › 模型与服务商」里的默认对话模型");
 async function loadModels() {
   if (!modelBridge) return;
   modelError.value = "";
@@ -104,18 +115,35 @@ async function loadDetail(id = currentId.value) {
   await nextTick();
   scroller.value?.scrollTo({ top: scroller.value.scrollHeight });
 }
-const messages = computed<Msg[]>(() => {
-  const d = detail.value; if (!d) return [];
-  const out: Msg[] = []; const steps = [...d.steps].sort((a, b) => a.sequence - b.sequence);
-  steps.forEach((s, i) => {
-    const ask = s.input?.goal ?? (i === 0 ? d.task.goal : ""); if (ask) out.push({ key: s.stepId + ":u", role: "user", text: ask });
+
+/* 会话列表：搜索 + 按「今天 / 更早」分组 */
+const sessionGroups = computed(() => {
+  const q = listQuery.value.trim().toLowerCase();
+  const list = q ? tasks.value.filter((t) => String(t.goal || "").toLowerCase().includes(q)) : tasks.value;
+  const today = new Date().toDateString();
+  const a = list.filter((t) => new Date(Number(t.updatedAt) || 0).toDateString() === today);
+  const b = list.filter((t) => new Date(Number(t.updatedAt) || 0).toDateString() !== today);
+  return [{ label: "今天", items: a }, { label: "更早", items: b }].filter((g) => g.items.length);
+});
+const statusTone = (s: string) => (running(s) ? "run" : s === "FAILED" || s === "BLOCKED" ? "bad" : "done");
+const toolTone = (status: string) => (status === "执行完成" ? "ok" : status === "执行中" ? "run" : /等待/.test(status) ? "wait" : /失败|拒|阻止/.test(status) ? "bad" : "idle");
+/** 每一轮 = 用户提问 + 这一轮的工具步骤 + 助手回答；工具事件按时间归到它之后第一个产出回答的轮次。 */
+const turns = computed(() => {
+  const d = detail.value; if (!d) return [] as { key: string; ask: string; answer: string; pending: boolean; failed: boolean; tools: any[] }[];
+  const steps = [...d.steps].sort((a, b) => a.sequence - b.sequence);
+  const rows = steps.map((s, i) => {
+    const ask = s.input?.goal ?? (i === 0 ? d.task.goal : "");
     const arts = d.artifacts.filter((a) => a.stepId === s.stepId); const last = arts[arts.length - 1];
-    if (last) out.push({ key: s.stepId + ":a", role: "assistant", text: asText(last.content) });
-    else if (["FAILED", "CANCELLED", "BLOCKED"].includes(s.status)) out.push({ key: s.stepId + ":a", role: "assistant", text: "步骤" + (STATUS[s.status] || s.status) + "。", failed: true });
-    else out.push({ key: s.stepId + ":a", role: "assistant", text: "思考中…", pending: true });
+    const failed = !last && ["FAILED", "CANCELLED", "BLOCKED"].includes(s.status);
+    const pending = !last && !failed;
+    return { key: s.stepId, ask, answer: last ? asText(last.content) : failed ? "这一步" + (STATUS[s.status] || s.status) + "。" : "", pending, failed, doneAt: last ? Number(last.createdAt) || 0 : Infinity, tools: [] as any[] };
   });
-  if (!steps.length) { out.push({ key: "goal", role: "user", text: d.task.goal }); out.push({ key: "wait", role: "assistant", text: running(d.task.status) ? "思考中…" : STATUS[d.task.status] ?? "", pending: running(d.task.status) }); }
-  return out;
+  if (!rows.length) rows.push({ key: "goal", ask: d.task.goal, answer: running(d.task.status) ? "" : STATUS[d.task.status] ?? "", pending: running(d.task.status), failed: false, doneAt: Infinity, tools: [] });
+  for (const card of toolCards.value) {
+    const target = rows.find((r) => card.at <= r.doneAt) || rows[rows.length - 1];
+    target.tools.push(card);
+  }
+  return rows;
 });
 const TOOL_STATUS: Record<string, string> = { "tool.proposed": "已提议", "tool.validated": "已校验", "tool.denied": "已拒绝", "tool.approval_required": "等待审批", "tool.execution.started": "执行中", "tool.execution.succeeded": "执行完成", "tool.execution.failed": "执行失败", "tool.execution.blocked": "执行被阻止", "harness.tool_proposed": "已提议", "harness.permission_requested": "等待权限", "harness.permission_rejected": "权限被拒" };
 const TOOL_RANK: Record<string, number> = { "已提议": 1, "已校验": 2, "等待审批": 3, "等待权限": 3, "执行中": 4, "执行完成": 5, "执行失败": 5, "执行被阻止": 5, "已拒绝": 5, "权限被拒": 5 };
@@ -129,7 +157,7 @@ const toolNameOf = (p: any) => {
 };
 const toolCards = computed(() => {
   const evs = detail.value?.events || [];
-  const byKey = new Map<string, { key: string; title: string; toolId: string; status: string; detail: string; rank: number; sequence: number }>();
+  const byKey = new Map<string, { key: string; title: string; toolId: string; status: string; detail: string; rank: number; sequence: number; at: number }>();
   for (const e of evs) {
     if (!/^(tool\.|harness\.tool|harness\.permission)/.test(e.eventType)) continue;
     const p = e.safePayload || {};
@@ -141,7 +169,7 @@ const toolCards = computed(() => {
     const detail = String(p.reasonCode || p.decision || p.reason || (p.toolVersion != null ? "v" + p.toolVersion : "") || "");
     const toolId = String(p.toolId || p.safeToolId || "");
     const prev = byKey.get(key);
-    if (!prev) byKey.set(key, { key, title, toolId, status, detail, rank, sequence: e.sequence });
+    if (!prev) byKey.set(key, { key, title, toolId, status, detail, rank, sequence: e.sequence, at: Number(e.createdAt) || 0 });
     else if (rank >= prev.rank) { prev.title = title !== "工具调用" ? title : prev.title; prev.status = status; prev.detail = detail || prev.detail; prev.rank = rank; prev.toolId = toolId || prev.toolId; prev.sequence = e.sequence; }
     else if (title !== "工具调用") prev.title = title;
   }
@@ -235,6 +263,13 @@ async function stop() { if (!taskBridge || !currentId.value) return; const r = a
 async function resume() { if (!taskBridge || !currentId.value || !detail.value) return; const r = await taskBridge.command({ command: "task/resume", payload: { taskId: currentId.value, expectedRevision: detail.value.task.revision } }).catch(() => null); if (!r?.ok) error.value = errText(r?.error); await loadDetail(); }
 async function acknowledge(callId: string) { if (!taskBridge || !currentId.value) return; const r = await taskBridge.command({ command: "task/acknowledgeUnknownEffect", payload: { taskId: currentId.value, callId } }).catch(() => null); if (!r?.ok) error.value = errText(r?.error); await loadDetail(); }
 function onKey(e: KeyboardEvent) { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); void send(); } }
+async function attachResource(ref: string) {
+  resourcePickerOpen.value = false;
+  let name = ref;
+  const res = await resourceBridge?.command({ type: "resource/get", resourceRef: ref }).catch(() => null);
+  if (res && res.ok && res.resource && res.resource.name) name = String(res.resource.name);
+  draft.value = (draft.value ? draft.value.replace(/\s+$/, "") + " " : "") + "@" + name + " ";
+}
 async function loadApprovals() { if (!sideEffectBridge) return; const r = await sideEffectBridge.command({ type: "sideEffect/listPending" }).catch(() => null); if (Array.isArray(r?.items)) approvals.value = r.items; else if (r?.ok === false) approvalError.value = String(r.error || "APPROVAL_UNAVAILABLE"); }
 onMounted(async () => {
   await Promise.all([loadList(), loadModels(), loadApprovals()]);
@@ -251,122 +286,351 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); })
 
 <template>
   <div class="split chat-app">
-    <nav class="split-side" aria-label="对话">
-      <div class="split-section">对话 <small class="planned-count">{{ tasks.length }}</small></div>
-      <button type="button" class="split-nav chat-new" :aria-current="currentId === null ? 'true' : undefined" data-chat-new @click="newSession"><Plus :size="14" /> <span class="split-nav-label">新对话</span></button>
-      <div class="notes-list" data-chat-sessions>
-        <button v-for="t in tasks" :key="t.taskId" type="button" class="notes-item" :data-chat-session="t.taskId" :aria-current="currentId === t.taskId ? 'true' : undefined" @click="select(t.taskId)"><span class="notes-item-name">{{ t.goal }}</span><small>{{ when(t.updatedAt) }} · {{ STATUS[t.status] ?? t.status }}</small></button>
+    <!-- 原型 C：会话列表 280（搜索 · 今天 / 更早） -->
+    <nav class="split-side chat-side" aria-label="对话">
+      <div class="chat-side-top">
+        <label class="ds-search chat-search"><input v-model="listQuery" class="ds-search__input" type="search" placeholder="搜索对话" aria-label="搜索对话" /></label>
+        <button type="button" class="chat-icon-btn" data-chat-new title="新对话" aria-label="新对话" @click="newSession"><SquarePen :size="16" /></button>
       </div>
-      <p class="planned-note">与「全局 AI」共用 task 桥；历史就是真实任务记录。</p>
+      <div class="chat-sessions" data-chat-sessions>
+        <template v-for="g in sessionGroups" :key="g.label">
+          <div class="split-section">{{ g.label }}</div>
+          <button v-for="t in g.items" :key="t.taskId" type="button" class="chat-session" :data-chat-session="t.taskId" :aria-current="currentId === t.taskId ? 'true' : undefined" @click="select(t.taskId)">
+            <span class="chat-session-name">{{ t.goal }}</span>
+            <small><span v-if="running(t.status)" class="chat-live" aria-hidden="true" />{{ STATUS[t.status] ?? t.status }} · {{ when(t.updatedAt) }}</small>
+          </button>
+        </template>
+        <p v-if="!tasks.length" class="chat-side-empty">还没有对话。</p>
+        <p v-else-if="!sessionGroups.length" class="chat-side-empty">没有匹配的对话。</p>
+      </div>
     </nav>
+
     <div class="split-main chat-main">
       <div class="pane-toolbar chat-toolbar">
         <strong class="pane-title chat-title">{{ detail?.task.goal ?? "新对话" }}</strong>
+        <span v-if="detail" class="chat-status" data-chat-status :data-tone="statusTone(detail.task.status)">{{ STATUS[detail.task.status] ?? detail.task.status }}</span>
         <div class="toolbar-spacer" />
-        <label v-if="modelBridge" class="chat-model-pick" title="模型来自 model/list；任务桥按后端默认模型执行"><span>模型</span>
-          <select v-model="selectedModelId" data-chat-model :disabled="!models.length"><option v-if="!models.length" value="">未配置</option><option v-for="m in models" :key="m.configId" :value="m.configId">{{ m.displayName }}{{ m.isDefault ? "（默认）" : "" }}</option></select>
-        </label>
-        <span v-if="detail" class="notes-status" data-chat-status>{{ STATUS[detail.task.status] ?? detail.task.status }}</span>
-        <button v-if="detail && (running(detail.task.status) || sending)" type="button" class="chat-stop" data-chat-stop aria-label="停止任务" title="停止任务" @click="stop"><Square :size="13" /></button>
-      </div>
-      <p v-if="modelHint" class="chat-model-hint" data-chat-model-hint>{{ modelHint }}</p>
-      <div ref="scroller" class="chat-scroll">
-        <div v-if="!taskBridge" class="empty-content"><p>任务运行时只在 OpenArc 桌面应用里可用。</p></div>
-        <div v-else-if="!currentId" class="chat-empty" data-chat-empty><div class="chat-empty-mark">✦</div><h2>开始一段新对话</h2><p>发一条消息；任务运行时会把步骤、模型调用、工具调用与审批事件写回这里。当前没有 token 级流式，界面按 task/get 快照增量展示。</p></div>
-        <div v-for="m in messages" :key="m.key" class="chat-msg" :data-role="m.role" :data-chat-message="m.role" :class="{ pending: m.pending, failed: m.failed }"><div class="chat-bubble"><div v-if="m.role === 'assistant'" class="chat-md" data-chat-markdown v-html="markdown(m.text)" /><template v-else>{{ m.text }}</template></div></div>
-        <section v-if="detail && (toolCards.length || eventRows.length)" class="chat-process" data-chat-process>
-          <button type="button" class="chat-process-head" :aria-expanded="processOpen" @click="processOpen = !processOpen"><ChevronDown :size="13" :class="{ closed: !processOpen }" /><span>过程 · 工具 {{ toolCards.length }} · 事件 {{ eventRows.length }}</span><small>task/get 快照增量</small></button>
-          <template v-if="processOpen">
-            <div v-if="toolCards.length" class="chat-tools" data-chat-tools><div v-for="card in toolCards" :key="card.key" class="chat-tool" :data-chat-tool="card.title" :data-chat-tool-id="card.toolId" :data-chat-tool-status="card.status"><Wrench :size="13" /><strong>{{ card.title }}</strong><span :data-chat-tool-state="card.status">{{ card.status }}</span><small v-if="card.toolId && card.toolId !== card.title" class="chat-tool-id">{{ card.toolId }}</small><small v-if="card.detail">{{ card.detail }}</small></div></div>
-            <ol v-if="eventRows.length" class="chat-events" data-chat-events><li v-for="e in eventRows" :key="e.eventId" :data-chat-event="e.eventType"><span class="chat-event-seq">#{{ e.sequence }}</span><span class="chat-event-type">{{ e.eventType }}</span><small>{{ when(e.createdAt) }}</small><code v-if="e.safePayload" class="chat-event-payload">{{ JSON.stringify(e.safePayload).slice(0, 220) }}</code></li></ol>
-          </template>
-        </section>
-        <div v-if="approvals.length" class="chat-approvals" data-chat-approvals><div v-for="a in approvals" :key="a.approvalRequestId" class="chat-approval" :data-chat-approval="a.approvalRequestId"><ShieldQuestion :size="15" /><div><strong>等待你的审批</strong><p>{{ a.toolDisplayName || a.toolId }} · {{ a.riskClass || a.effectClass || "副作用" }}<span v-if="a.targetDisplayName"> · {{ a.targetDisplayName }}</span></p><small>审批入口在系统审批浮层（复用 ApprovalPrompt）；批准/拒绝后这里刷新真实状态。</small></div></div></div>
-        <p v-if="approvalError" class="chat-error" data-chat-approval-error>审批请求暂不可用（{{ approvalError }}）</p>
-        <section v-if="budgetInfo" class="chat-budget" data-chat-budget :data-chat-budget-kind="budgetInfo.kind" :data-chat-budget-resumable="budgetInfo.resumable">
-          <CircleAlert :size="16" />
-          <div>
-            <strong>任务已暂停：{{ budgetInfo.label }}预算用完</strong>
-            <p data-chat-budget-summary>{{ budgetInfo.exhaustedText }}</p>
-            <div class="chat-budget-metrics">
-              <span v-for="row in budgetInfo.rows" :key="row.key" :data-chat-budget-row="row.key">消耗 {{ row.consumed }} / {{ row.authorized }} · 剩余 {{ row.remaining }}</span>
-            </div>
-            <p class="chat-budget-resume-meta" data-chat-budget-resume-meta>{{ budgetInfo.resumeText }}<span v-if="budgetInfo.add"> · 继续执行追加 +{{ budgetInfo.add }}</span></p>
-            <p v-if="budgetError" class="chat-error" role="alert" data-chat-budget-error>{{ budgetError }}</p>
-            <button v-if="budgetInfo.resumable" type="button" class="chat-mini chat-budget-resume" data-chat-budget-resume :disabled="resuming" @click="resumeBudget">{{ resuming ? "正在续接…" : "继续执行（追加 +" + budgetInfo.add + "）" }}</button>
-            <small v-else class="chat-budget-reason" data-chat-budget-reason>{{ budgetInfo.reasonText }}</small>
+        <details class="chat-menu" data-chat-model-menu>
+          <summary class="chat-model" data-chat-model :title="modelHint">{{ modelLabel }} <ChevronDown :size="12" /></summary>
+          <div class="chat-menu-body">
+            <p class="chat-menu-note">对话模型由主进程按默认模型冻结，这里只读展示（切换 NOT VERIFIED）。</p>
+            <button v-for="m in models" :key="m.configId" type="button" :class="{ on: m.isDefault }" disabled>
+              {{ m.displayName }} <small>{{ m.providerName }}</small>
+            </button>
+            <p v-if="!models.length" class="chat-menu-note">还没有可用的对话模型；请到「系统设置 › 模型与服务商」添加。</p>
+            <button type="button" data-chat-model-refresh @click="loadModels">刷新模型列表</button>
           </div>
-        </section>
-        <p v-if="budgetNotice" class="chat-hint chat-budget-notice" data-chat-budget-notice>{{ budgetNotice }}</p>
-        <div v-if="detail && detail.task.status === 'BLOCKED' && !budgetInfo" class="chat-blocked" data-chat-blocked><CircleAlert :size="16" /><div><strong>任务已阻塞{{ detail.stopReason ? "：" + detail.stopReason : "" }}</strong><p v-if="needsAck">有工具结果未知：先核对实际影响并确认，才能恢复。</p><div v-for="c in recoveryCalls" :key="c.callId" class="chat-recovery" :data-chat-recovery-call="c.callId"><span>{{ c.toolId }} · {{ c.recoveryResult }}</span><button v-if="!c.acknowledged" type="button" class="chat-mini" :data-chat-ack="c.callId" @click="acknowledge(c.callId)">我已核查</button><small v-else>已人工确认</small></div><button v-if="detail.resumable" type="button" class="chat-mini" data-chat-resume @click="resume">恢复任务</button></div></div>
+        </details>
+        <span class="chat-device" data-chat-device title="后端任务没有设备字段，这里是只读环境标识（NOT VERIFIED）"><Monitor :size="12" /> 本机 · D1</span>
+        <details class="chat-menu chat-menu-right" data-chat-more>
+          <summary class="chat-icon-btn" aria-label="更多" title="更多"><MoreHorizontal :size="16" /></summary>
+          <div class="chat-menu-body">
+            <button type="button" :disabled="!detail" data-chat-refresh @click="loadDetail()">刷新任务状态</button>
+            <button type="button" :disabled="!running(detail?.task.status)" data-chat-menu-stop @click="stop">停止任务</button>
+            <button type="button" data-chat-menu-new @click="newSession">新对话</button>
+          </div>
+        </details>
       </div>
-      <p v-if="error" class="chat-error" role="alert" data-chat-error>{{ error }}</p>
-      <p v-else-if="detail && !detail.appendable && terminal(detail.task.status) && detail.appendReason" class="chat-hint" data-chat-append-hint>这段对话不能继续追加（{{ detail.appendReason }}）；可以新建对话。</p>
-      <form class="chat-composer" @submit.prevent="send">
-        <textarea v-model="draft" rows="1" data-chat-input :placeholder="currentId ? '继续这段对话…' : '给助理发消息…'" aria-label="消息" :disabled="!taskBridge || sending" @keydown="onKey" />
-        <button v-if="running(detail?.task.status)" type="button" class="chat-send chat-send-stop" data-chat-stop-composer aria-label="停止任务" @click="stop"><Square :size="13" /></button>
-        <button v-else type="submit" class="chat-send" data-chat-send aria-label="发送" :disabled="!draft.trim() || sending || !taskBridge"><ArrowUp :size="15" /></button>
-      </form>
-      <p class="chat-stream-note" data-chat-stream-note>事件增量来自 task/get 轮询 + 运行结束 task/event 补批；后端没有 token 级流式，界面不伪造打字机效果。</p>
+
+      <div class="chat-body">
+        <div class="chat-col">
+          <div ref="scroller" class="chat-scroll">
+            <div class="chat-thread">
+              <div v-if="!taskBridge" class="chat-empty"><p>对话只在 OpenArc 桌面应用里可用。</p></div>
+              <div v-else-if="!currentId" class="chat-empty" data-chat-empty>
+                <div class="chat-empty-mark"><Sparkles :size="22" :stroke-width="1.5" /></div>
+                <h2>有什么可以帮你？</h2>
+                <p>可以直接提问，也可以让助理动手做事：它会一步步调用工具，需要你确认的操作会先停下来请你批准。</p>
+                <p v-if="!models.length && modelBridge" class="chat-empty-warn">还没有可用的对话模型，请先到「系统设置 › 模型与服务商」添加。</p>
+              </div>
+
+              <template v-for="turn in turns" :key="turn.key">
+                <div class="chat-msg" data-role="user" data-chat-message="user"><div class="chat-bubble">{{ turn.ask }}</div></div>
+                <div class="chat-msg chat-msg-ai" data-role="assistant" data-chat-message="assistant" :class="{ pending: turn.pending, failed: turn.failed }">
+                  <span class="chat-orb" aria-hidden="true" />
+                  <div class="chat-bubble">
+                    <!-- 任务卡：这一轮调用了哪些工具、现在做到哪一步（结构化摘要，不展示思维链） -->
+                    <div v-if="turn.tools.length" class="chat-taskcard" data-chat-tools>
+                      <button type="button" class="chat-taskcard-head" :aria-expanded="openTurns.has(turn.key)" @click="toggleTurn(turn.key)">
+                        <Wrench :size="13" /><span>{{ turn.pending ? "正在执行" : "已执行" }} {{ turn.tools.length }} 个步骤</span>
+                        <small>{{ turn.tools[turn.tools.length - 1].title }} · {{ turn.tools[turn.tools.length - 1].status }}</small>
+                        <ChevronDown :size="13" class="chat-chev" :class="{ open: openTurns.has(turn.key) }" />
+                      </button>
+                      <ol v-if="openTurns.has(turn.key)" class="chat-steps">
+                        <li v-for="card in turn.tools" :key="card.key" :data-chat-tool="card.title" :data-chat-tool-id="card.toolId" :data-chat-tool-status="card.status" :data-chat-tool-state="card.status">
+                          <span class="chat-step-dot" :data-tone="toolTone(card.status)" />
+                          <span class="chat-step-name">{{ card.title }}</span>
+                          <small>{{ card.status }}</small>
+                        </li>
+                      </ol>
+                    </div>
+                    <span v-if="turn.pending" class="chat-typing"><i /><i /><i /><span class="chat-caret" /></span>
+                    <div v-else class="chat-md" data-chat-markdown v-html="markdown(turn.answer)" />
+                  </div>
+                </div>
+              </template>
+
+              <div v-for="a in approvals" :key="a.approvalRequestId" class="chat-card chat-card-warn" :data-chat-approval="a.approvalRequestId">
+                <ShieldQuestion :size="16" />
+                <div><strong>等待你确认</strong><p>{{ a.toolDisplayName || a.toolId }}<span v-if="a.targetDisplayName"> · {{ a.targetDisplayName }}</span></p><small>请在弹出的确认窗口里批准或拒绝，结果会回到这里。</small></div>
+              </div>
+              <p v-if="approvalError" class="chat-error" data-chat-approval-error>暂时读不到待确认的操作。</p>
+
+              <section v-if="budgetInfo" class="chat-card chat-card-warn" data-chat-budget :data-chat-budget-kind="budgetInfo.kind" :data-chat-budget-resumable="budgetInfo.resumable">
+                <CircleAlert :size="16" />
+                <div>
+                  <strong>任务已暂停：{{ budgetInfo.label }}次数用完</strong>
+                  <p data-chat-budget-summary>{{ budgetInfo.exhaustedText }}</p>
+                  <p class="chat-card-meta" data-chat-budget-resume-meta>{{ budgetInfo.resumeText }}</p>
+                  <p v-if="budgetError" class="chat-error" role="alert" data-chat-budget-error>{{ budgetError }}</p>
+                  <button v-if="budgetInfo.resumable" type="button" class="chat-mini" data-chat-budget-resume :disabled="resuming" @click="resumeBudget">{{ resuming ? "正在继续…" : "继续执行（再给 " + budgetInfo.add + " 次）" }}</button>
+                  <small v-else class="chat-card-meta" data-chat-budget-reason>{{ budgetInfo.reasonText }}</small>
+                </div>
+              </section>
+              <p v-if="budgetNotice" class="chat-hint" data-chat-budget-notice>{{ budgetNotice }}</p>
+              <div v-if="detail && detail.task.status === 'BLOCKED' && !budgetInfo" class="chat-card" data-chat-blocked>
+                <CircleAlert :size="16" />
+                <div>
+                  <strong>任务已暂停</strong>
+                  <p v-if="needsAck">有操作的结果不确定：请先核对实际影响，再确认继续。</p>
+                  <div v-for="c in recoveryCalls" :key="c.callId" class="chat-recovery" :data-chat-recovery-call="c.callId"><span>{{ c.toolId }}</span><button v-if="!c.acknowledged" type="button" class="chat-mini" :data-chat-ack="c.callId" @click="acknowledge(c.callId)">我已核对</button><small v-else>已确认</small></div>
+                  <button v-if="detail.resumable" type="button" class="chat-mini" data-chat-resume @click="resume">继续任务</button>
+                </div>
+              </div>
+
+              <details v-if="detail" class="chat-process" data-chat-process>
+                <summary>处理过程 · {{ toolCards.length }} 个工具 · {{ detail.calls.length }} 次模型调用</summary>
+                <div class="chat-kv"><span>状态</span><b>{{ STATUS[detail.task.status] ?? detail.task.status }}</b></div>
+                <div class="chat-kv"><span>轮次</span><b>{{ turns.length }}</b></div>
+                <ol v-if="toolCards.length" class="chat-steps">
+                  <li v-for="card in toolCards" :key="card.key"><span class="chat-step-dot" :data-tone="toolTone(card.status)" /><span class="chat-step-name">{{ card.title }}</span><small>{{ card.status }}</small></li>
+                </ol>
+                <details v-if="eventRows.length" class="chat-debug" open>
+                  <summary>事件记录（{{ eventRows.length }}）</summary>
+                  <ol class="chat-events" data-chat-events><li v-for="e in eventRows" :key="e.eventId" :data-chat-event="e.eventType"><span class="chat-event-type">{{ e.eventType }}</span><small>{{ when(e.createdAt) }}</small></li></ol>
+                </details>
+              </details>
+            </div>
+          </div>
+
+          <div class="chat-dock">
+            <p v-if="error" class="chat-error" role="alert" data-chat-error>{{ error }}</p>
+            <p v-else-if="detail && !detail.appendable && terminal(detail.task.status) && detail.appendReason" class="chat-hint" data-chat-append-hint>这段对话已结束，不能继续追加；可以新建一段对话。</p>
+            <form class="chat-composer" @submit.prevent="send">
+              <textarea v-model="draft" rows="1" data-chat-input :placeholder="currentId ? '继续这段对话…' : '给助理发消息，或输入 / 选择 Skill'" aria-label="消息" :disabled="!taskBridge || sending" @keydown="onKey" />
+              <div class="chat-composer-bar">
+                <button type="button" class="chat-chip" disabled title="附件命令未接入（NOT VERIFIED）"><Paperclip :size="12" /> 附件</button>
+                <span class="chat-chip is-static" data-chat-skill title="Skill 选择命令未接入，这里是只读占位（NOT VERIFIED）"><Wrench :size="12" /> 自动选择能力</span>
+                <button type="button" class="chat-chip" data-chat-resource @click="resourcePickerOpen = true">引用资源</button>
+                <span class="toolbar-spacer" />
+                <span class="chat-kbd">回车发送 · ⇧回车换行</span>
+                <button v-if="running(detail?.task.status)" type="button" class="chat-send chat-send-stop" data-chat-stop aria-label="停止" title="停止" @click="stop"><Square :size="12" /></button>
+                <button v-else type="submit" class="chat-send" data-chat-send aria-label="发送" :disabled="!draft.trim() || sending || !taskBridge"><ArrowUp :size="15" /></button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- 原型没有右侧第三栏：任务步骤 / 事件收进消息流末尾的「处理过程」折叠块。 -->
+      </div>
+      <ResourcePicker v-if="resourcePickerOpen" picker-app-id="chat" :requested-actions="['resource.view']" title="引用资源" @choose="attachResource" @cancel="resourcePickerOpen = false" />
     </div>
   </div>
 </template>
 
 <style scoped>
+.chat-side { width: 260px; }
+.chat-side-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.chat-search { flex: 1; min-width: 0; }
+.chat-icon-btn { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-md); color: var(--muted); }
+.chat-icon-btn:hover, .chat-icon-btn[aria-pressed="true"] { background: rgb(var(--text-rgb) / 0.07); color: var(--text); }
+.chat-sessions { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 1px; }
+.chat-sessions::-webkit-scrollbar { display: none; }
+.chat-session { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 7px 10px; border-radius: var(--radius-md); text-align: left; color: var(--text); }
+.chat-session:hover { background: rgb(var(--text-rgb) / 0.05); }
+.chat-session[aria-current="true"] { background: rgb(var(--sidebar-selected-rgb, 224 224 224)); }
+.chat-session-name { font-size: var(--fs-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-session[aria-current="true"] .chat-session-name { font-weight: var(--fw-medium); }
+.chat-session small { display: flex; align-items: center; gap: 5px; font-size: var(--fs-caption); color: var(--muted); }
+.chat-live { width: 6px; height: 6px; border-radius: 50%; background: #34c759; }
+.chat-side-empty { margin: 8px 10px; font-size: var(--fs-caption); color: var(--muted); }
+
 .chat-toolbar { gap: 10px; }
-.chat-model-pick { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-micro); }
-.chat-model-pick select { max-width: 220px; padding: 3px 7px; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.06); color: var(--text); font: inherit; font-size: var(--fs-caption); }
-.chat-model-hint { margin: 0 28px 4px; color: var(--muted); font-size: var(--fs-micro); line-height: var(--lh-normal); }
-.chat-stop { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); background: rgb(var(--text-rgb) / 0.06); }
-.chat-empty { margin: auto; max-width: 560px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--muted); }
+.chat-title { max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-headline); }
+.chat-status { font-size: var(--fs-caption); color: var(--muted); }
+.chat-status[data-tone="run"] { color: var(--text); }
+.chat-status[data-tone="bad"] { color: var(--failed); }
+.chat-model { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); color: var(--muted); }
+
+.chat-body { flex: 1; min-height: 0; display: flex; }
+.chat-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.chat-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; padding: 16px 24px 8px; }
+.chat-scroll::-webkit-scrollbar { display: none; }
+/* 消息流最大宽 720 居中（原型 C） */
+.chat-thread { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+.chat-msg { display: flex; }
+.chat-msg[data-role="user"] { justify-content: flex-end; }
+.chat-bubble { max-width: 100%; font-size: var(--fs-body); line-height: 1.7; color: var(--text); overflow-wrap: anywhere; }
+/* 用户消息：右对齐、sunken 底、12 圆角；助手回复：左对齐、无底色 */
+.chat-msg[data-role="user"] .chat-bubble { max-width: 80%; padding: 8px 14px; border-radius: 12px; background: var(--sunken); color: var(--text); white-space: pre-wrap; }
+.chat-msg[data-role="assistant"] .chat-bubble { width: 100%; max-width: 100%; padding: 0; border-radius: 0; background: none; white-space: normal; }
+.chat-dock .chat-composer { margin: 0 auto; border-radius: 14px; }
+.chat-msg.failed .chat-bubble { color: var(--failed); }
+.chat-typing { display: inline-flex; gap: 4px; padding: 6px 0; }
+.chat-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: chat-dot 1.2s infinite ease-in-out; }
+.chat-typing i:nth-child(2) { animation-delay: 0.15s; }
+.chat-typing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes chat-dot { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+
+.chat-empty { margin: auto; max-width: 480px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--muted); }
 .chat-empty h2 { margin: 0; font-size: var(--fs-title); font-weight: var(--fw-medium); color: var(--text); }
-.chat-empty p { margin: 0; font-size: var(--fs-caption); line-height: var(--lh-relaxed); }
-.chat-empty-mark { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: rgb(var(--text-rgb) / 0.06); color: var(--text); font-size: 24px; }
+.chat-empty p { margin: 0; font-size: var(--fs-secondary); line-height: var(--lh-relaxed); }
+.chat-empty-warn { color: var(--warning-text, #a05a00) !important; }
+.chat-empty-mark { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--sunken); color: var(--text); }
+
 .chat-md { white-space: normal; }
-.chat-md :deep(p) { margin: 0 0 6px; }
-.chat-md :deep(h1), .chat-md :deep(h2), .chat-md :deep(h3), .chat-md :deep(h4) { margin: 8px 0 4px; font-size: var(--fs-body); font-weight: var(--fw-medium); }
-.chat-md :deep(ul) { margin: 4px 0; padding-left: 18px; }
+.chat-md :deep(p) { margin: 0 0 8px; }
+.chat-md :deep(p:last-child) { margin-bottom: 0; }
+.chat-md :deep(h1), .chat-md :deep(h2), .chat-md :deep(h3), .chat-md :deep(h4) { margin: 10px 0 4px; font-size: var(--fs-headline); font-weight: var(--fw-medium); }
+.chat-md :deep(ul) { margin: 4px 0 8px; padding-left: 20px; }
 .chat-md :deep(code) { padding: 1px 4px; border-radius: 4px; background: rgb(var(--text-rgb) / 0.08); font-family: var(--font-mono); font-size: 0.92em; }
-.chat-md :deep(.chat-code) { margin: 6px 0; padding: 8px 10px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.07); overflow: auto; white-space: pre; }
+.chat-md :deep(.chat-code) { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.06); overflow: auto; white-space: pre; scrollbar-width: none; }
 .chat-md :deep(.chat-code code) { background: transparent; padding: 0; }
-.chat-process { border-top: 0.5px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
-.chat-process-head { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-caption); text-align: left; padding: 2px 0; }
-.chat-process-head svg { transition: transform var(--quick) var(--ease); }
-.chat-process-head svg.closed { transform: rotate(-90deg); }
-.chat-process-head small { margin-left: auto; font-size: var(--fs-micro); }
-.chat-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; }
-.chat-tool { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); font-size: var(--fs-caption); min-width: 0; }
-.chat-tool strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-tool span { margin-left: auto; color: var(--muted); font-size: var(--fs-micro); white-space: nowrap; }
-.chat-tool small { flex-basis: 100%; color: var(--muted); font-size: var(--fs-micro); }
-.chat-tool-id { font-family: var(--font-mono); }
-.chat-tool[data-chat-tool-state="执行完成"] span { color: var(--success-text, #1e7e34); }
-.chat-tool[data-chat-tool-state="执行失败"] span, .chat-tool[data-chat-tool-state="已拒绝"] span, .chat-tool[data-chat-tool-state="权限被拒"] span, .chat-tool[data-chat-tool-state="执行被阻止"] span { color: var(--failed); }
-.chat-budget { display: flex; gap: 8px; padding: 11px 12px; border-radius: var(--radius-md); background: color-mix(in srgb, #ff9f0a 12%, transparent); font-size: var(--fs-caption); }
-.chat-budget strong { display: block; font-weight: var(--fw-medium); }
-.chat-budget p { margin: 3px 0; color: var(--muted); }
-.chat-budget-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0 3px; }
-.chat-budget-metrics span { padding: 2px 7px; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.06); color: var(--text); font-size: var(--fs-micro); }
-.chat-budget-resume-meta { font-size: var(--fs-micro); }
-.chat-budget-notice { color: var(--success-text, #1e7e34) !important; }
-.chat-budget-resume { margin-top: 6px; }
-.chat-budget-resume:disabled { opacity: 0.55; }
-.chat-budget-reason { display: block; margin-top: 5px; color: var(--muted); font-size: var(--fs-micro); }
-.chat-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 210px; overflow: auto; }
-.chat-events li { display: flex; align-items: baseline; gap: 7px; font-size: var(--fs-micro); }
-.chat-event-seq { color: var(--muted); min-width: 24px; }
-.chat-event-type { font-family: var(--font-mono); }
-.chat-events small { margin-left: auto; color: var(--muted); }
-.chat-event-payload { flex-basis: 100%; color: var(--muted); overflow-wrap: anywhere; }
-.chat-approvals { display: flex; flex-direction: column; gap: 6px; }
-.chat-approval { display: flex; gap: 8px; padding: 9px 11px; border-radius: var(--radius-md); background: color-mix(in srgb, #ff9f0a 10%, transparent); font-size: var(--fs-caption); }
-.chat-approval strong { display: block; font-weight: var(--fw-medium); }
-.chat-approval p { margin: 2px 0; }
-.chat-approval small { color: var(--muted); font-size: var(--fs-micro); }
-.chat-blocked { display: flex; gap: 8px; padding: 10px 12px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); font-size: var(--fs-caption); }
-.chat-blocked p { margin: 3px 0; color: var(--muted); }
+
+/* 任务卡（一等公民）：收起时一行摘要，展开列出每一步 */
+.chat-taskcard { border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.chat-taskcard-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 14px; text-align: left; color: var(--text); font-size: var(--fs-secondary); }
+.chat-taskcard-head small { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--fs-caption); text-align: right; }
+.chat-chev { flex: none; color: var(--muted); transition: transform var(--quick) var(--ease); }
+.chat-chev.open { transform: rotate(180deg); }
+.chat-steps { list-style: none; margin: 0; padding: 2px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
+.chat-steps li { display: flex; align-items: center; gap: 8px; font-size: var(--fs-caption); min-width: 0; }
+.chat-step-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.chat-steps small { flex: none; color: var(--muted); }
+.chat-step-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--text-rgb) / 0.3); }
+.chat-step-dot[data-tone="ok"] { background: #34c759; }
+.chat-step-dot[data-tone="run"] { background: #0a84ff; }
+.chat-step-dot[data-tone="wait"] { background: #ff9f0a; }
+.chat-step-dot[data-tone="bad"] { background: var(--failed); }
+
+.chat-card { display: flex; gap: 10px; padding: 12px 14px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); font-size: var(--fs-secondary); }
+.chat-card-warn { background: color-mix(in srgb, #ff9f0a 10%, transparent); }
+.chat-card strong { display: block; font-weight: var(--fw-medium); }
+.chat-card p { margin: 3px 0; color: var(--muted); }
+.chat-card small, .chat-card-meta { color: var(--muted); font-size: var(--fs-caption); }
 .chat-recovery { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-.chat-mini { margin-top: 6px; padding: 3px 9px; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.08); color: var(--text); font-size: var(--fs-micro); }
+.chat-mini { margin-top: 8px; padding: 4px 12px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.08); color: var(--text); font-size: var(--fs-caption); }
+.chat-mini:disabled { opacity: 0.55; }
+
+.chat-dock { padding: 4px 24px 16px; }
+.chat-dock > * { max-width: 720px; margin-left: auto; margin-right: auto; }
+.chat-error, .chat-hint { margin: 0 auto 8px; font-size: var(--fs-caption); }
+.chat-error { color: var(--failed); }
+.chat-hint { color: var(--muted); }
 .chat-send-stop { background: var(--text); color: rgb(var(--content-rgb)); }
-.chat-stream-note { margin: 0 28px 12px; color: var(--muted); font-size: var(--fs-micro); }
+
+.chat-panel { flex: none; width: 300px; min-height: 0; overflow: auto; scrollbar-width: none; padding: 12px 20px 16px 4px; display: flex; flex-direction: column; gap: 8px; }
+.chat-panel::-webkit-scrollbar { display: none; }
+.chat-panel h4 { margin: 8px 0 0; font-size: var(--fs-secondary); font-weight: var(--fw-medium); color: var(--muted); }
+.chat-panel-card { border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); padding: 4px 0; }
+.chat-kv { display: flex; justify-content: space-between; padding: 7px 14px; font-size: var(--fs-secondary); }
+.chat-kv span { color: var(--muted); }
+.chat-kv b { font-weight: var(--fw-regular); }
+.chat-steps-panel { padding: 10px 14px; }
+.chat-debug { font-size: var(--fs-caption); color: var(--muted); }
+.chat-debug summary { cursor: pointer; padding: 4px 0; }
+.chat-events { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.chat-events li { display: flex; gap: 8px; }
+.chat-event-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 960px) { .chat-panel { display: none; } }
+
+/* ── 原型对照（task-7）：两栏 / 右对齐实心气泡 / 助理圆球 / 输入区 chips ─── */
+.chat-app .chat-main { margin: 0; }
+.chat-app .split-main { padding: 0; padding-top: 0 !important; }
+.chat-app .chat-side { flex: 0 0 240px; width: 240px; margin-right: 0; padding-top: 44px; }
+.chat-app .pane-toolbar { height: 52px; margin: 0; padding: 0 20px; flex: none; }
+.chat-app .chat-dock { padding: 4px 24px 16px; }
+.chat-app .chat-scroll { padding: 16px 24px 8px; }
+.chat-toolbar .chat-model { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.06); color: var(--text); font-size: var(--fs-caption); list-style: none; cursor: default; }
+.chat-toolbar .chat-model::-webkit-details-marker { display: none; }
+.chat-device { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.05); color: var(--muted); font-size: var(--fs-micro); }
+.chat-menu { position: relative; }
+.chat-menu > summary { list-style: none; }
+.chat-menu > summary::-webkit-details-marker { display: none; }
+.chat-menu-body { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 230px; padding: 6px; display: flex; flex-direction: column; gap: 2px; border-radius: var(--radius-lg); background: rgb(var(--content-rgb) / 0.98); box-shadow: var(--elevation-2); }
+.chat-menu-body button { text-align: left; padding: 7px 10px; border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-caption); background: none; }
+.chat-menu-body button:hover:not(:disabled) { background: var(--row-hover); }
+.chat-menu-body button:disabled { color: var(--muted); opacity: 1; }
+.chat-menu-body button.on { background: rgb(var(--text-rgb) / 0.08); font-weight: var(--fw-medium); }
+.chat-menu-body button small { color: var(--muted); font-size: var(--fs-micro); margin-left: 4px; }
+.chat-menu-note { margin: 4px 8px 6px; color: var(--muted); font-size: var(--fs-micro); line-height: var(--lh-normal); }
+.chat-menu-right > summary { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-md); color: var(--muted); }
+
+.chat-msg { align-items: flex-start; }
+.chat-msg[data-role="user"] .chat-bubble { max-width: 78%; padding: 9px 14px; border-radius: 14px; background: var(--accent); color: var(--on-accent); white-space: pre-wrap; }
+.chat-msg-ai { gap: 9px; width: 100%; }
+.chat-orb { flex: none; width: 24px; height: 24px; margin-top: 3px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, rgb(var(--content-rgb) / 0.95), rgb(var(--text-rgb) / 0.28) 70%); box-shadow: inset 0 0 0 0.5px rgb(var(--text-rgb) / 0.12); }
+.chat-msg.chat-msg-ai .chat-bubble { flex: 1; min-width: 0; padding: 10px 14px; border-radius: 14px; background: rgb(var(--text-rgb) / 0.06); white-space: normal; }
+.chat-dock .chat-composer textarea { min-height: 36px; max-height: 140px; }
+.chat-dock .chat-composer { padding: 6px 10px; }
+.chat-msg-ai .chat-bubble .chat-taskcard { background: rgb(var(--text-rgb) / 0.05); }
+.chat-caret { display: inline-block; width: 7px; height: 15px; margin-left: 3px; border-radius: 1px; background: var(--text); animation: chat-caret 1s steps(2, start) infinite; vertical-align: -2px; }
+@keyframes chat-caret { 50% { opacity: 0; } }
+.chat-step-dot[data-tone="ok"], .chat-step-dot[data-tone="run"] { background: var(--text); }
+.chat-step-dot[data-tone="wait"] { background: var(--muted); }
+
+.chat-process { margin-top: 4px; padding: 10px 12px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.03); }
+.chat-process > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-caption); }
+.chat-process .chat-kv { padding: 5px 0; }
+.chat-process .chat-steps { padding: 4px 0; }
+
+.chat-composer { display: flex; flex-direction: column; gap: 8px; }
+.chat-composer-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chat-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.055); color: var(--muted); font-size: var(--fs-caption); }
+.chat-chip:hover:not(:disabled) { color: var(--text); background: rgb(var(--text-rgb) / 0.09); }
+.chat-chip:disabled { opacity: 0.6; }
+.chat-chip.is-static { cursor: default; }
+.chat-kbd { color: var(--muted); font-size: var(--fs-micro); }
+.chat-dock .chat-composer { border-radius: 16px; background: rgb(var(--text-rgb) / 0.045); padding: 10px 12px; }
+.chat-dock .chat-composer textarea { background: none; padding: 2px 0 4px; height: 34px; field-sizing: fixed; }
+
+/* task-8 final overrides */
+.chat-app .chat-side { margin: 8px 0 8px 8px !important; }
+.chat-app .chat-scroll { padding: 16px 20px 8px; }
+.chat-app .chat-thread { max-width: none; }
+.chat-dock .chat-composer { padding: 6px 10px; }
+.chat-dock .chat-composer textarea { height: 34px; }
+
+.chat-app .pane-toolbar { padding-right: 12px; }
+.chat-dock { padding-bottom: 15px; }
+.chat-app .chat-scroll { padding: 16px 20px 8px; }
+
+.chat-msg[data-role="user"] { width: 100%; }
+.chat-app .pane-toolbar { padding-right: 7px; }
+.chat-dock { padding-bottom: 10px; }
+.chat-dock .chat-composer textarea { height: 31px; }
+
+.chat-app .chat-scroll { padding-top: 8px; }
+.chat-msg[data-role="user"] { width: 100%; }
+.chat-msg[data-role="user"] .chat-bubble { margin-left: auto; }
+.chat-dock { padding-bottom: 8px; }
+
+.chat-app .chat-thread { align-items: stretch !important; width: 100% !important; }
+.chat-app .chat-msg[data-role="user"] { width: 100% !important; justify-content: flex-end !important; }
+.chat-app .chat-msg[data-role="user"] .chat-bubble { max-width: 414px; margin-left: auto !important; }
+.chat-app .chat-model { padding: 0 4px; }
+.chat-dock { padding-bottom: 3px; }
+
+.chat-app .chat-model { padding: 0 6px; margin-right: 4px; }
+.chat-dock { padding-bottom: 0; }
+.chat-dock .chat-composer textarea { height: 29px; }
+
+.chat-app .chat-msg[data-role="user"] .chat-bubble { width: 414px; flex: 0 0 414px; max-width: 414px; }
+.chat-dock .chat-composer textarea { height: 24px; }
+
+.chat-msg[data-role="user"] .chat-bubble { margin-right: 4px !important; }
+.chat-app .chat-composer { padding: 3px 10px; }
+
+.chat-dock { padding-bottom: 2px; }
+.chat-app .chat-composer { padding: 4px 10px; }
 </style>

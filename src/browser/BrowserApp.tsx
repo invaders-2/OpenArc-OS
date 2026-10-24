@@ -8,7 +8,7 @@
  *   3. 运行期事实（loading / 错误 / 下载 / 提示）来自 props —— 它们不是持久化状态。
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Download, RotateCw, X, Plus, ShieldAlert, ExternalLink, Globe, Bot } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, Download, Lock, RotateCw, Shield, ShieldAlert, X, Plus, ExternalLink, Globe, Bot } from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
 import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
 import { WebViewport } from "../desktop/components";
@@ -165,11 +165,11 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
                 role="tab"
                 aria-selected={active}
                 className="tab-main"
-                title={t.title || t.url || "新标签页"}
+                title={t.title || t.url || "起始页"}
                 onClick={() => onCommand({ type: "browser/tab-activate", id: win.id, tabId: t.tabId })}
               >
                 {rt.loading ? <span className="tab-spinner" data-tab-loading={t.tabId} /> : <Globe size={12} />}
-                <span className="tab-title">{t.title || t.url || "新标签页"}</span>
+                <span className="tab-title">{t.title || t.url || "起始页"}</span>
               </button>
               <button className="tab-close" aria-label={`关闭标签 ${t.title || t.tabId}`} onClick={() => closeTab(t.tabId)}>
                 <X size={11} />
@@ -210,12 +210,13 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
 
       <form
         className="addressbar"
+        data-browser-addr
         onSubmit={(e) => {
           e.preventDefault();
           submit();
         }}
       >
-        <button type="button" aria-label="后退" disabled={!activeRuntime.canGoBack} onClick={() => onAction(activeTab.tabId, "back")}>
+        <button type="button" data-browser-back aria-label="后退" disabled={!activeRuntime.canGoBack} onClick={() => onAction(activeTab.tabId, "back")}>
           <ArrowLeft size={17} />
         </button>
         <button type="button" aria-label="前进" disabled={!activeRuntime.canGoForward} onClick={() => onAction(activeTab.tabId, "forward")}>
@@ -229,26 +230,31 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
         >
           {activeRuntime.loading ? <X size={15} /> : <RotateCw size={16} />}
         </button>
-        <input
-          ref={inputRef}
-          aria-label="网页地址"
-          placeholder="输入完整地址，例如 https://example.com"
-          value={draft}
-          onFocus={() => setEditing(true)}
-          onBlur={() => setEditing(false)}
-          onChange={(e) => {
-            setEditing(true);
-            setDraft(e.target.value);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setDraft(activeTab?.url || "");
-              setEditing(false);
-              inputRef.current?.blur();
-            }
-          }}
-        />
-        <button className="primary">打开</button>
+        <div className="addr-url" data-browser-url>
+          <Lock size={12} className="addr-lock" />
+          <input
+            ref={inputRef}
+            aria-label="网页地址"
+            placeholder="openarc.local/start"
+            value={draft}
+            onFocus={() => setEditing(true)}
+            onBlur={() => setEditing(false)}
+            onChange={(e) => {
+              setEditing(true);
+              setDraft(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setDraft(activeTab?.url || "");
+                setEditing(false);
+                inputRef.current?.blur();
+              }
+            }}
+          />
+          <span className="addr-load" style={{ width: activeRuntime.loading ? "60%" : "0%", opacity: activeRuntime.loading ? 1 : 0 }} />
+        </div>
+        <span className="addr-badge" data-browser-isolation><Shield size={12} /> 隔离运行</span>
+        <button type="button" className="addr-bookmark" data-browser-bookmark aria-label="添加书签"><Bookmark size={15} /></button>
       </form>
 
       {activeRuntime.error ? (
@@ -362,7 +368,34 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
         </div>
       ) : null}
 
-      <WebViewport nativeVisible={nativeVisible} attached={activeRuntime.attached} error={undefined} />
+      {!nativeVisible ? (
+        <div className="browser-start" data-browser-webview data-browser-start>
+          <div className="browser-start-inner">
+            <h1 data-browser-start-title>起始页</h1>
+            <p>网页在独立进程中运行，不能读取你的资源库或本机文件。</p>
+            <div className="browser-fav" data-browser-fav>
+              {[
+                ["资源库", "#8e8e93", "openarc.local/library"],
+                ["项目", "#98989d", "openarc.local/projects"],
+                ["应用市场", "#7c7c80", "openarc.local/market"],
+                ["文稿", "#a1a1a6", "openarc.local/notes"],
+                ["日历", "#77777c", "openarc.local/calendar"],
+                ["设置", "#6b7280", "openarc.local/settings"],
+              ].map(([label, color, url]) => (
+                <button key={label} type="button" className="browser-fav-item" onClick={() => onNavigate(activeTab.tabId, url)}>
+                  <span style={{ background: color }}>{label.slice(0, 1)}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <h3>阅读列表</h3>
+            {["OpenArc 设计系统 · 动效规范", "本地优先：把数据留在设备上", "沙箱浏览器的隔离边界"].map((title) => (
+              <button key={title} type="button" className="browser-read" onClick={() => onNavigate(activeTab.tabId, "openarc.local/docs")}>{title}</button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {nativeVisible ? <WebViewport nativeVisible={nativeVisible} attached={activeRuntime.attached} error={undefined} /> : null}
     </div>
   );
 }

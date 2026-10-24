@@ -25,6 +25,12 @@ const TABS: { id: Tab; label: string; icon: unknown }[] = [
 ];
 /* 10-15 按原型：工具条标题、新增表单开合、中文错误与角色 / 状态文案 */
 const adding = ref(false);
+const q = ref("");
+const filteredUsers = computed(() => {
+  const needle = q.value.trim().toLowerCase();
+  if (!needle) return users.value;
+  return users.value.filter((u: any) => String(u.displayName || "").toLowerCase().includes(needle) || String(u.identifier || "").toLowerCase().includes(needle));
+});
 const tabLabel = computed(() => TABS.find((t) => t.id === tab.value)?.label ?? "");
 const ROLE: Record<string, string> = { ADMIN: "管理员", MEMBER: "成员", OWNER: "所有者", SUPER_ADMIN: "超级管理员" };
 const STATUS: Record<string, string> = { ACTIVE: "在线可用", DISABLED: "已停用", enabled: "已启用", disabled: "已停用" };
@@ -43,6 +49,7 @@ const initial = (u: any) => String(u.displayName || u.identifier || "?").slice(0
 const tab = ref<Tab>("users");
 const users = ref<any[]>([]);
 const departments = ref<any[]>([]);
+const deptSel = ref<string | null>(null);
 const apps = ref<any[]>([]);
 const audit = ref<any[]>([]);
 const error = ref<string | null>(null);
@@ -78,6 +85,7 @@ const editAccessLoading = ref(false);
 const editAccessError = ref("");
 const editGrantPick = ref<string[]>([]);
 const EDIT_RESOURCE_ACTIONS = ["resource.view", "resource.search", "resource.preview", "resource.read", "resource.create", "resource.edit", "resource.delete", "resource.restore", "resource.download", "resource.export", "resource.share", "resource.tag", "resource.move", "resource.useByAgent"];
+const deptDetail = computed(() => departments.value.find((d) => d.departmentId === (deptSel.value || departments.value[0]?.departmentId)) || null);
 const editDeptCurrent = computed(() => (Array.isArray(editUser.value?.departments) ? editUser.value.departments[0] : null));
 const editUserGrants = computed(() => {
   const rows = Array.isArray(editAccess.value?.grants) ? editAccess.value.grants : [];
@@ -439,7 +447,7 @@ function grantText(g: any): string {
 
 <template>
   <div class="split gov-app">
-    <nav class="split-side" role="tablist" aria-label="组织分区">
+    <nav class="split-side" role="tablist" aria-label="组织治理分区">
       <div class="split-section">组织</div>
       <button
         v-for="t in TABS"
@@ -458,10 +466,14 @@ function grantText(g: any): string {
       </button>
     </nav>
     <div class="split-main gov-main">
-      <div class="pane-toolbar">
+      <div class="pane-toolbar gov-toolbar">
         <strong class="pane-title">{{ tabLabel }}</strong>
         <div class="toolbar-spacer" />
-        <DsButton v-if="tab === 'users'" variant="primary" size="sm" @click="adding = !adding"><Plus :size="13" /> 添加成员</DsButton>
+        <label v-if="tab === 'users'" class="ds-search gov-search">
+          <Search class="ds-search__icon" :size="13" />
+          <input v-model="q" class="ds-search__input" type="search" placeholder="搜索成员" aria-label="搜索成员" />
+        </label>
+        <DsButton v-if="tab === 'users'" variant="primary" size="sm" data-gov-add @click="adding = !adding"><Plus :size="13" /> 添加成员</DsButton>
         <DsButton v-if="tab === 'departments'" variant="primary" size="sm" @click="adding = !adding"><Plus :size="13" /> 新建部门</DsButton>
       </div>
       <div class="gov gov-body" data-d3-04d="app">
@@ -483,20 +495,28 @@ function grantText(g: any): string {
             <div class="setting-row set-actions"><DsButton variant="primary" size="sm" data-d3-04d-create-user @click="createUser">创建成员</DsButton></div>
           </div>
           <div class="gov-table" data-d3-04d-users>
-            <div class="gov-tr gov-th"><span>成员</span><span>角色</span><span>部门</span><span>状态</span><span /></div>
-            <div v-for="u in users" :key="u.userId" :data-d3-04d-user="u.userId" class="gov-tr">
+            <div class="gov-tr gov-th"><span>成员</span><span>角色</span><span>部门</span><span>状态</span><span>最近活动</span><span /></div>
+            <div v-for="u in filteredUsers" :key="u.userId" :data-d3-04d-user="u.userId" class="gov-tr">
               <span class="gov-who"><span class="gov-av">{{ initial(u) }}</span><span class="gov-name">{{ u.displayName || u.identifier }}<small>{{ u.identifier }}</small></span></span>
-              <span><span class="badge" :class="{ 'gov-admin': u.role === 'ADMIN' }">{{ ROLE[u.role] || u.role }}</span></span>
+              <span><span class="badge" :class="{ 'gov-admin': u.role === 'ADMIN' || u.role === 'SUPER_ADMIN', solid: u.role === 'SUPER_ADMIN' }">{{ ROLE[u.role] || u.role }}</span></span>
               <span class="gov-meta">{{ deptNames(u) || "—" }}</span>
               <span class="gov-status"><i :data-on="u.status === 'ACTIVE'" />{{ STATUS[u.status] || u.status }}</span>
+              <span class="gov-meta gov-last" title="后端未提供最近活动（NOT VERIFIED）">—</span>
               <span class="gov-act">
-                <DsButton variant="secondary" size="sm" :data-d3-04d-user-edit="u.userId" @click="openEdit(u)">编辑</DsButton>
-                <DsButton v-if="u.status === 'ACTIVE'" variant="ghost" size="sm" :data-d3-04d-user-disable="u.userId" @click="setStatus(u.userId, 'DISABLED')">停用</DsButton>
-                <DsButton v-else variant="secondary" size="sm" :data-d3-04d-user-enable="u.userId" @click="setStatus(u.userId, 'ACTIVE')">启用</DsButton>
+                <details class="gov-more">
+                  <summary aria-label="更多操作">⋯</summary>
+                  <div class="gov-more-menu">
+                    <button type="button" :data-d3-04d-user-edit="u.userId" @click="openEdit(u)">编辑</button>
+                    <button v-if="u.status === 'ACTIVE'" type="button" :data-d3-04d-user-disable="u.userId" @click="setStatus(u.userId, 'DISABLED')">停用</button>
+                    <button v-else type="button" :data-d3-04d-user-enable="u.userId" @click="setStatus(u.userId, 'ACTIVE')">启用</button>
+                    <button type="button" disabled title="移出部门没有独立命令（NOT VERIFIED）">移出部门</button>
+                  </div>
+                </details>
               </span>
             </div>
             <p v-if="!users.length" class="set-cap gov-empty">还没有成员。</p>
           </div>
+          <p class="set-cap gov-note">超级管理员可以管理全部权限，但看不到任何人的密码、个人 API 密钥或第三方原始凭据。最近活动暂无后端字段（NOT VERIFIED）。</p>
         </section>
 
         <section v-if="tab === 'departments'" class="gov-pane" data-d3-04d-pane="departments">
@@ -505,16 +525,27 @@ function grantText(g: any): string {
             <label class="setting-row"><span class="set-lab">描述</span><input class="set-input" data-d3-04d-dept-desc placeholder="可选" v-model="deptForm.description" /></label>
             <div class="setting-row set-actions"><DsButton variant="primary" size="sm" data-d3-04d-create-dept @click="createDept">创建部门</DsButton></div>
           </div>
-          <div class="gov-table" data-d3-04d-departments>
-            <div class="gov-tr gov-th gov-tr-dept"><span>部门</span><span>成员</span><span>资源</span><span>收藏集</span><span>状态</span></div>
-            <div v-for="d in departments" :key="d.departmentId" :data-d3-04d-dept="d.departmentId" class="gov-tr gov-tr-dept">
-              <span class="gov-name">{{ d.name }}<small v-if="d.description">{{ d.description }}</small></span>
-              <span>{{ d.memberCount }}</span>
-              <span>{{ d.resourceCount }}</span>
-              <span>{{ d.collectionCount }}</span>
-              <span class="gov-status"><i :data-on="d.status === 'ACTIVE' || d.status === 'active'" />{{ STATUS[d.status] || d.status }}</span>
+          <div class="gov-dept-layout">
+            <div class="gov-dept-tree" data-d3-04d-departments>
+              <button v-for="(d, i) in departments" :key="d.departmentId" type="button" class="gov-tree-row" :class="{ on: (deptSel || departments[0]?.departmentId) === d.departmentId }" :data-d3-04d-dept="d.departmentId" @click="deptSel = d.departmentId">
+                <span class="gov-tree-chev">{{ i === 0 ? "▾" : "▸" }}</span>
+                <Network :size="14" />
+                <span class="gov-tree-name">{{ d.name }}</span>
+                <small>{{ d.memberCount }}</small>
+              </button>
+              <p v-if="!departments.length" class="set-cap gov-empty">还没有部门。</p>
             </div>
-            <p v-if="!departments.length" class="set-cap gov-empty">还没有部门。</p>
+            <div class="gov-dept-detail" v-if="deptDetail" data-dept-detail>
+              <b>{{ deptDetail.name }}</b>
+              <dl class="gov-kv">
+                <dt>部门管理员</dt><dd>—（NOT VERIFIED）</dd>
+                <dt>成员</dt><dd>{{ deptDetail.memberCount }} 人</dd>
+                <dt>共享资源</dt><dd>{{ deptDetail.resourceCount }} 项</dd>
+                <dt>收藏集</dt><dd>{{ deptDetail.collectionCount }} 项</dd>
+                <dt>可用应用</dt><dd>—（NOT VERIFIED）</dd>
+              </dl>
+              <button type="button" class="gov-dept-cta" disabled title="指定部门管理员没有后端命令（NOT VERIFIED）">指定部门管理员</button>
+            </div>
           </div>
         </section>
 
@@ -705,6 +736,27 @@ function grantText(g: any): string {
     </DsDialog>
   </div>
 </template>
+<style scoped>
+
+.gov-app .split-side { flex: 0 0 210px; width: 210px; margin-right: 0; }
+.gov-app { gap: 0; }
+.gov-app .split-main { margin-left: -8px !important; padding: 0 !important; }
+.gov-app .split-side { padding-left: 10px; padding-right: 8px; }
+.gov-app .split-side .split-nav { height: 32px; min-height: 32px; }
+.gov-app .split-side .split-section { padding: 18px 10px 6px; }
+.gov-toolbar { height: 52px; min-height: 52px; margin: 0; padding: 0 16px 0 20px; gap: 8px; border-bottom: 0.5px solid var(--line); }
+.gov-search { width: 180px; flex: none; height: 30px; }
+.gov-toolbar :deep(.ds-btn) { min-width: 98px; height: 30px; justify-content: center; }
+.gov-app .split-main { padding: 0; }
+.gov-body { padding: 12px 24px 24px; }
+.gov-table { display: flex; flex-direction: column; margin: 0 24px; }
+.gov-tr { display: grid; grid-template-columns: 188px 113px 120px 127px 120px minmax(0, 1fr); align-items: center; gap: 12px; height: 49px; border-bottom: 0.5px solid var(--line); }
+.gov-th { height: 34px; color: var(--muted); font-size: 12px; }
+.gov-th > span, .gov-tr > span { align-self: stretch; display: flex; align-items: center; min-width: 0; }
+.gov-app .badge.solid { background: rgb(var(--text-rgb) / 0.85); color: #fff; }
+.gov-last { color: var(--muted); }
+.gov-note { margin-top: 10px; color: var(--muted); font-size: var(--fs-caption); }
+
 
 <style scoped>
 /* 编辑弹窗是表单型对话框：复用 DsDialog，但按内容宽度/可读性局部收紧（不新增颜色）。 */
@@ -733,4 +785,39 @@ function grantText(g: any): string {
   .gov-edit { min-width: 0; max-width: none; }
   .gov-edit-ref { flex-wrap: wrap; }
 }
+
+.gov-body { padding: 8px 24px 24px; }
+.gov-table { margin: 0; }
+.gov-th { height: 34px; }
+.gov-th > span, .gov-tr > span { height: 34px; padding: 0; margin: 0; }
+.gov-tr:not(.gov-th) > span { height: 49px; }
+
+.gov-table { margin-left: 24px !important; margin-right: 24px !important; }
+.gov-tr > span { padding: 0 !important; }
+.gov-th { padding: 0 !important; }
+.gov-th > span { align-self: start; height: 34px; }
+
+.gov-tr:not(.gov-th) > span:nth-child(4) { position: relative; left: -12px; top: -9.6px; }
+.gov-tr:not(.gov-th) > span:nth-child(2) .badge { position: relative; left: -12px; top: -8px; }
+
+.gov-more { position: relative; }
+.gov-more > summary { list-style: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; }
+.gov-more > summary::-webkit-details-marker { display: none; }
+.gov-more-menu { position: absolute; right: 0; top: 28px; z-index: 20; min-width: 120px; padding: 4px; border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.98); box-shadow: var(--elevation-2); display: flex; flex-direction: column; }
+.gov-more-menu button { text-align: left; padding: 6px 8px; border-radius: var(--radius-sm); font-size: var(--fs-caption); }
+.gov-more-menu button:hover { background: rgb(var(--text-rgb) / 0.06); }
+.gov-more-menu button:disabled { opacity: 0.4; }
+.gov-dept-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; margin: 0 24px; }
+.gov-dept-tree { padding: 8px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.gov-tree-row { display: flex; align-items: center; gap: 6px; width: 100%; height: 32px; padding: 0 8px; border-radius: var(--radius-sm); text-align: left; }
+.gov-tree-row.on { background: rgb(var(--text-rgb) / 0.08); }
+.gov-tree-chev { width: 12px; color: var(--muted); }
+.gov-tree-name { flex: 1; min-width: 0; }
+.gov-tree-row small { color: var(--muted); font-size: var(--fs-micro); }
+.gov-dept-detail { padding: 16px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); align-self: start; }
+.gov-dept-detail b { font-size: var(--fs-body); }
+.gov-kv { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 12px; margin: 14px 0; font-size: var(--fs-caption); }
+.gov-kv dt { color: var(--muted); }
+.gov-kv dd { margin: 0; }
+.gov-dept-cta { height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.08); font-size: var(--fs-caption); }
 </style>

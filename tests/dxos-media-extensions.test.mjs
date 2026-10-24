@@ -10,7 +10,7 @@
  *   ⑥ Illustrator：默认结构化不可用；注入可用后配置/临时导出真实往返
  *   ⑦ Figma：注入 fetch 的清单解析；未注入 viteBuild 不可用；白名单过滤
  *   ⑧ 3D 模型目录：非法条目剔除、本地扫描与投影
- *   ⑨ publicMedia：本地映射、路径穿越拒绝、上传已移除断言；sharp 缺失
+ *   ⑨ publicMedia：本地映射、路径穿越拒绝、上传只经注入 uploader（不含图床常量）；sharp 缺失
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -499,7 +499,7 @@ test("3D 模型：非法条目剔除、本地扫描与条目投影", () => {
 });
 
 // ── ⑨ publicMedia 本地部分 ───────────────────────────────────────────────
-test("publicMedia：本地目录/URL 映射、路径穿越拒绝、上传已移除", async () => {
+test("publicMedia：本地目录/URL 映射、路径穿越拒绝、上传只经注入 uploader、不含图床常量", async () => {
   const dir = tempDir("dxos-media-ext-pub-");
   publicMedia.configurePublicMedia({ dataDir: dir, sharpLoader: null });
   const mediaDir = path.join(dir, "public-media");
@@ -515,11 +515,35 @@ test("publicMedia：本地目录/URL 映射、路径穿越拒绝、上传已移�
   assert.throws(() => publicMedia.publicMediaUrl("../secret"), (error) => error.code === "MEDIA_INVALID_INPUT" || error.code === "MEDIA_NOT_FOUND");
   assert.throws(() => publicMedia.resolvePublicMediaPath("missing.jpg"), (error) => error.code === "MEDIA_NOT_FOUND");
 
-  // 上传面已整段移除
+  // 上传面边界：不内置外部图床（PUBLIC_MEDIA_UPLOAD_REMOVED 语义不变），只经注入 uploader
   assert.equal(publicMedia.PUBLIC_MEDIA_UPLOAD_REMOVED, true);
   assert.equal(typeof publicMedia.uploadCanvasFreeMedia, "undefined");
   assert.equal(typeof publicMedia.verifyDirectMediaUrl, "undefined");
   assert.equal("LITTERBOX_UPLOAD_URL" in publicMedia, false);
+  assert.equal(typeof publicMedia.uploadPublicMedia, "function");
+  assert.equal(typeof publicMedia.uploadPublicMediaBytes, "function");
+  // 常量级断言：图床域名 / 图床常量只允许出现在 media-litterbox.cjs
+  const publicMediaSource = fs.readFileSync(path.join(process.cwd(), "electron", "media-public-media.cjs"), "utf8");
+  assert.doesNotMatch(publicMediaSource, /catbox\.moe/i, "图床域名不得出现在 media-public-media.cjs");
+  assert.equal(/LITTERBOX_[A-Z_]+\s*=/i.test(publicMediaSource), false, "图床常量必须留在 media-litterbox.cjs");
+
+  const uploads = [];
+  const injected = async (input) => {
+    uploads.push(input);
+    return { url: "https://uploaded.example/" + encodeURIComponent(input.fileName), service: "stub", expiresAt: 4102444800000 };
+  };
+  const fromFile = await publicMedia.uploadPublicMedia({ fileName: "pic.jpg", uploader: injected });
+  assert.equal(fromFile.url, "https://uploaded.example/pic.jpg");
+  assert.equal(fromFile.mime, "image/jpeg");
+  assert.equal(fromFile.service, "stub");
+  assert.equal(fromFile.expiresAt, 4102444800000);
+  assert.equal(fromFile.bytes, 64);
+  assert.equal(uploads[0].bytes.length, 64);
+  const inline = await publicMedia.uploadPublicMediaBytes({ fileName: "inline.png", bytes: Buffer.from("PNG"), mime: "image/png", uploader: injected });
+  assert.equal(inline.url, "https://uploaded.example/inline.png");
+  assert.equal(inline.mime, "image/png");
+  await assert.rejects(() => publicMedia.uploadPublicMedia({ fileName: "pic.jpg" }), (error) => error.code === "MEDIA_DEPENDENCY_UNAVAILABLE");
+  await assert.rejects(() => publicMedia.uploadPublicMediaBytes({ fileName: "../escape.png", bytes: Buffer.from("PNG"), mime: "image/png", uploader: injected }), (error) => error.code === "MEDIA_INVALID_INPUT");
 
   // 本地 JPEG 转换（sharp 存在）
   const sharp = require("sharp");
@@ -536,6 +560,39 @@ test("publicMedia：本地目录/URL 映射、路径穿越拒绝、上传已移�
     assert.equal(error.code, "MEDIA_DEPENDENCY_UNAVAILABLE");
     return true;
   });
+});
+
+test("publicMedia 上传命令：fileName 与 { name, mime, data } 两种载荷都只经注入 uploader", async () => {
+  const dir = tempDir("dxos-media-ext-upload-");
+  const received = [];
+  const bundle = openBundle(dir, {
+    publicMediaUploader: async (input) => {
+      received.push(input);
+      return { url: "https://uploaded.example/" + encodeURIComponent(input.fileName), service: "litterbox", expiresAt: 4102444800000 };
+    },
+  });
+
+  const inline = await exec(bundle, "media/public-media/upload", { name: "inline.png", mime: "image/png", data: Buffer.from("PNGDATA!").toString("base64") });
+  assert.equal(inline.ok, true, JSON.stringify(inline));
+  assert.equal(inline.value.media.url, "https://uploaded.example/inline.png");
+  assert.equal(inline.value.media.service, "litterbox");
+  assert.equal(inline.value.media.expiresAt, 4102444800000);
+  assert.equal(inline.value.media.bytes, 8);
+  assert.equal(inline.value.media.mime, "image/png");
+  assert.equal(received[0].fileName, "inline.png");
+  assert.equal(received[0].mime, "image/png");
+  assert.equal(Buffer.isBuffer(received[0].bytes), true);
+
+  const uploadDir = path.join(dir, "dxos", "media", "public-media");
+  fs.mkdirSync(uploadDir, { recursive: true });
+  fs.writeFileSync(path.join(uploadDir, "pic.jpg"), Buffer.alloc(64, 7));
+  const fromFile = await exec(bundle, "media/public-media/upload", { fileName: "pic.jpg" });
+  assert.equal(fromFile.ok, true, JSON.stringify(fromFile));
+  assert.equal(received[1].mime, "image/jpeg");
+
+  const noUploader = await exec(openBundle(tempDir("dxos-media-ext-upload2-")), "media/public-media/upload", { name: "x.png", mime: "image/png", data: Buffer.from("PNG").toString("base64") });
+  assert.equal(noUploader.ok, false);
+  assert.equal(noUploader.error, "MEDIA_DEPENDENCY_UNAVAILABLE");
 });
 
 test("依赖注入总线：configureMediaExtensions 可单独调用（未注入即结构化不可用）", () => {

@@ -96,7 +96,8 @@ import {
   toolbarEntryAvailability,
 } from "./governance/filesLibraryActions";
 import type { LibraryEntryId, LibraryRunResult } from "./governance/filesLibraryActions";
-import { CanvasHost } from "./canvas/CanvasHost";
+// 10-23：画布整体替换为 canvas-next（旧版 react-canvas/ReactCanvasApp 保留在仓库，回滚改回这一行即可）
+import { NextCanvasApp } from "./canvas/canvas-next/entry";
 import { ProjectsApp } from "./governance/ProjectsApp";
 import { TaskConsole } from "./projects/TaskConsole";
 import { McpCenter } from "./mcp/McpCenter";
@@ -383,17 +384,17 @@ const apps = [
   { id: "home", name: "应用中心", icon: "apps" },
   { id: "browser", name: "浏览器", icon: "safari" },
   { id: "files", name: "访达", icon: "finder" },
-  { id: "resource-library", name: "资源库", icon: "finder" },
+  { id: "resource-library", name: "资源库", icon: "library" },
   // 照片：复用既有 public/icons/photos.png，不新增图标资产。
   { id: "photos", name: "照片", icon: "photos" },
   { id: "canvas", name: "AI Studio", icon: "freeform" },
   { id: "projects", name: "项目", icon: "folder" },
-  { id: "organization", name: "组织治理", icon: "settings" },
+  { id: "organization", name: "组织治理", icon: "contacts" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
   // MCP 中心（D5-03：连接管理与能力发现；工具调用另由 mcp/toolInvocation/set 开关控制：
   // 默认关闭，开启后每次调用仍走审批链，未批准 0 外发；真正调用入口是 mcp/toolInvocation/call）。
-  // 图标复用既有图标集里的 shortcuts：与 canvas/browser 同风格，不为它新增图标资产。
-  { id: "mcp-center", name: "MCP 中心", icon: "shortcuts" },
+  // 图标用 mcp.png（task-2 起与协议中心、第三方集成区分）。
+  { id: "mcp-center", name: "MCP 中心", icon: "mcp" },
   { id: "settings", name: "系统设置", icon: "settings" },
   // 系统级回收站：固定在程序坞分隔线右侧（见 components.tsx 的 Dock）。
   // 图标用 macOS 原生 trashempty / trashfull（见 public/icons/trash.png 与 trash-full.png）。
@@ -2874,17 +2875,8 @@ function App() {
     // 照片：双视图（图库 / 图像工坊）在 PhotosApp 内部按 .split 模式渲染；
     // 这里只挂一个分支，不动其它窗口逻辑。
     if (w?.appId === "photos") return <PhotosApp />;
-    if (w?.appId === "canvas")
-      return (
-        <CanvasHost
-          win={w}
-          // 画布页唯一允许请求的宿主动作（无参数）：打开设置窗口并停在模型设置页。
-          onOpenModelSettings={() => {
-            setModelSettingsRequest((n) => n + 1);
-            activateApp("settings");
-          }}
-        />
-      );
+    // 画布窗口改用原生 React 画布；旧 CanvasHost/iframe 宿主保留文件但不再挂载。
+    if (w?.appId === "canvas") return <NextCanvasApp win={w} userName={identity.snapshot.displayName || ""} onOpenMcpCenter={() => activateApp("mcp-center")} onOpenModelSettings={() => { setModelSettingsRequest((n) => n + 1); activateApp("settings"); }} onOpenSettings={() => activateApp("settings")} onBackToWorkspace={() => onCommand({ type: "window/close", id: w.id })} />;
     if (w?.appId === "projects")
       return (
         <div className="split">

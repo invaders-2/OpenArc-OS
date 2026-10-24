@@ -799,3 +799,37 @@ test("界面接线：添加与编辑复用同一个 ProviderForm；四类面板�
   assert.ok(panel.includes("groupRemoteModels"), "分类只来自纯函数模块");
 });
 
+test("拉取模型：默认不加入、勾选才加、已加入可取消勾选＝移除（接线）", () => {
+  const settings = stripComments(read("src-vue/settings/ModelSettings.vue"));
+  const panel = stripComments(read("src-vue/settings/RemoteModelsPanel.vue"));
+  // 已加入的行不再是 disabled 勾选框：取消勾选＝本次移除
+  assert.equal(/:disabled="m\.registered"/.test(panel), false, "已加入的行必须能取消勾选");
+  assert.ok(panel.includes("curateRowChecked"), "行内勾选状态来自纯逻辑（已加入默认勾上、未加入默认不勾）");
+  assert.ok(panel.includes("buildCuratePlan"), "差异计算只来自纯逻辑模块");
+  for (const attr of ["data-d4-01-remote-remove-item", "data-d4-01-remote-register", "data-d4-01-remote-plan"]) {
+    assert.ok(panel.includes(attr), "缺少 " + attr);
+  }
+  assert.ok(panel.includes('t("移除")') && panel.includes('t("加入")'), "已加入行给「移除」，未加入行给「加入」");
+  assert.ok(panel.includes("将添加 {a} 个 / 将移除 {r} 个"), "底部按差异给出动作");
+  assert.ok(panel.includes("拉取到的模型默认都不加入"), "底部如实说明默认不加入");
+  // 事件：勾选/取消勾选/单个加入/单个移除/保存差异
+  for (const ev of ['"toggle-drop"', '"toggle-pick"', '"add-one"', '"remove-one"', "save"]) {
+    assert.ok(panel.includes(ev), "RemoteModelsPanel 缺少事件 " + ev);
+  }
+  // ModelSettings 接线：model/delete 真的被调用，部分失败如实报数
+  assert.ok(settings.includes("model/delete"), "ModelSettings 必须真正调用 model/delete");
+  assert.ok(settings.includes(':dropped="dropped[remoteOpenFor] || {}"'), "取消勾选的状态由 ModelSettings 持有并下传");
+  for (const ev of ["@toggle-drop=", "@remove-one=", "@save="]) assert.ok(settings.includes(ev), "ModelSettings 缺少接线 " + ev);
+  assert.equal(settings.includes("@register="), false, "旧的 register 事件已被勾选差异保存取代");
+  assert.ok(settings.includes("已添加 {a} 个 / 已移除 {r} 个（失败 {f}）"), "部分失败必须如实报数");
+  assert.ok(settings.includes('cmd("model/delete", { configId: target.configId })'), "按 providerId + remoteModelId 找到 configId 再删");
+  assert.ok(settings.includes("registerEntries") === false, "旧的批量注册函数已由 applyCurate 取代");
+  // 320 行时逐个点勾选框会丢点击：每个分类页给「全选本类 / 清空本类」，顶部给「清空已选」，一次整体写状态
+  for (const sel of ["data-d4-01-remote-select-section", "data-d4-01-remote-clear-section", "data-d4-01-remote-clear-all"]) {
+    assert.ok(panel.includes(sel), "缺少批量操作入口 " + sel);
+  }
+  assert.ok(panel.includes('t("全选本类")') && panel.includes('t("清空本类")') && panel.includes('t("清空已选")'), "批量按钮文案");
+  assert.ok(panel.includes("buildBulkPick") && panel.includes('emit("set-picks"'), "批量勾选走纯逻辑并整体回传");
+  assert.ok(settings.includes(':picked="picked[remoteOpenFor] || {}"') && settings.includes("@set-picks="), "ModelSettings 接批量状态");
+});
+

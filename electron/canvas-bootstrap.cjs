@@ -43,20 +43,82 @@ const RENDERER_COMMANDS = extendRendererCommands([
   "canvas/run",
   "canvas/runStop",
   "canvas/runState",
+  "canvas/runStatus",
   "canvas/runs",
   "canvas/runFinish",
   "canvas/modelChat",
   // 智能画布（上游 1e20abe5 起）的流式 LLM：与 canvas/modelChat 同一套前置，增量经 model:event 下行。
   "canvas/modelChatStream",
   "canvas/modelImage",
+  "canvas/modelImageEdit",
+  "canvas/model3d",
   "canvas/importAsset",
   "canvas/readAsset",
+  // 10-23：新画布发给模型的素材一律换成 https 临时链接（Litterbox 24h），不再塞 base64
+  "canvas/assetPublicUrl",
+  // 10-23：模型返回的远程结果（https）由主进程下载进资源库（画布页 CSP 不显示外链，且结果链接会过期）
+  "canvas/importRemote",
   // 10-16：画布「素材库」面板 = OpenArc 资源库里画布可引用的图片（缩略图 + 引用）
   "canvas/libraryList",
+  "canvas/feedback/submit",
 ]);
 const CANVAS_COMMAND_NOT_ALLOWED = "CANVAS_COMMAND_NOT_ALLOWED";
 
 const asStr = (v, max = 512) => (typeof v === "string" ? v.slice(0, max) : v == null ? undefined : String(v).slice(0, max));
+
+/**
+ * 画布图片面板的「风格 / 摄影机 / 联网」在**主进程边界**归一（只解析一次，后续链路不再猜）：
+ *   · style：字符串、trim 后 ≤40 字符；空 / 非字符串 → 不发送（不编造）；
+ *   · camera：{ body, lens, focal, aperture }。每个字段接受**字符串**（≤40）或**索引**；
+ *     索引按画布面板的取值表收敛到合法范围（越界夹到边界，不丢也不越权）；
+ *   · webSearch：只认 boolean true。
+ * 取值表与画布页 src/canvas/canvas-next/model.ts#CAMERAS 逐项一致（tests/style-camera-forward.test.mjs 做漂移核对）。
+ */
+const CAMERA_PARTS = Object.freeze({
+  body: Object.freeze(["Sony Venice", "ARRI Alexa 35", "RED V-Raptor", "iPhone 17 Pro"]),
+  lens: Object.freeze(["Zeiss Ultra Prime", "Cooke S7/i", "Canon K35"]),
+  focal: Object.freeze([8, 14, 24, 35, 50, 75, 125]),
+  aperture: Object.freeze(["ƒ/1.4", "ƒ/2", "ƒ/2.8", "ƒ/4", "ƒ/8"]),
+});
+const CAMERA_TEXT_MAX = 40;
+const STYLE_TEXT_MAX = 40;
+
+function sanitizeStyle(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim().slice(0, STYLE_TEXT_MAX);
+  return text || null;
+}
+
+function sanitizeCamera(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out = {};
+  for (const key of Object.keys(CAMERA_PARTS)) {
+    const raw = value[key];
+    if (raw == null || raw === "") continue;
+    if (typeof raw === "number") {
+      const parts = CAMERA_PARTS[key];
+      const index = Number.isFinite(raw) ? Math.trunc(raw) : 0;
+      out[key] = parts[Math.max(0, Math.min(parts.length - 1, index))];
+      continue;
+    }
+    const text = String(raw).trim().slice(0, CAMERA_TEXT_MAX);
+    if (text) out[key] = text;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** 面板选项 → modelCall/模型出口需要的三个字段（没有就不带键，避免「空值也发」）。 */
+function imagePanelOptions(payload) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const style = sanitizeStyle(source.style);
+  const camera = sanitizeCamera(source.camera);
+  const webSearch = source.webSearch === true;
+  return {
+    ...(style ? { style } : {}),
+    ...(camera ? { camera } : {}),
+    ...(webSearch ? { webSearch: true } : {}),
+  };
+}
 
 function createCanvasBundle({ identity = null, identityStore = null, resourceStore = null, resourceService = null, authService = null, authStore = null, clock = null, logger = null } = {}) {
   const idStore = identityStore || identity;
@@ -67,7 +129,7 @@ function createCanvasBundle({ identity = null, identityStore = null, resourceSto
   return { store, service };
 }
 
-function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID, extension = null }) {
+function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID, extension = null, assetPublicUrl = null, importRemote = null }) {
   if (typeof ipcMain.removeHandler === "function") {
     try { ipcMain.removeHandler("canvas:command"); } catch { /* not registered */ }
   }
@@ -131,9 +193,11 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
         case "canvas/assetStates": return service.assetStates({ context, refs: Array.isArray(payload.refs) ? payload.refs : [] });
         // ---- 生成运行：预算 / 停止 / 模型调用（唯一入口） ----
         case "canvas/run":
-          return service.startRun({ context, canvasId: asStr(payload.canvasId, 120), nodeId: asStr(payload.nodeId, 120), kind: asStr(payload.kind, 20) });
+          return service.startRun({ context, canvasId: asStr(payload.canvasId, 120), nodeId: asStr(payload.nodeId, 120), kind: asStr(payload.kind, 20), configId: asStr(payload.configId, 120) || null });
         case "canvas/runStop":
           return service.stopRun({ context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120), reason: asStr(payload.reason, 60) });
+        case "canvas/runStatus":
+          return service.runStatus({ context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120) });
         case "canvas/runState":
           return service.runState({ context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120) });
         case "canvas/runs":
@@ -149,17 +213,136 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           return service.modelChatStream({
             context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120),
             messages: Array.isArray(payload.messages) ? payload.messages.slice(0, 64) : [], configId: asStr(payload.configId, 120),
-            requestId: asStr(payload.requestId, 80),
+            requestId: asStr(payload.requestId, 80), webSearch: payload.webSearch === true,
           });
-        case "canvas/modelImage":
-          return service.modelCall({
-            context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120), kind: "image",
-            prompt: asStr(payload.prompt, 4000), size: asStr(payload.size, 32), count: Math.max(1, Math.min(4, Number(payload.count) || 1)), configId: asStr(payload.configId, 120),
-          });
+        case "canvas/modelImage": {
+          const canvasId = asStr(payload.canvasId, 120);
+          const params = {
+            prompt: asStr(payload.prompt, 4000), size: asStr(payload.size, 32), ratio: asStr(payload.ratio, 32) || null, resolution: asStr(payload.resolution, 32) || null, customSize: asStr(payload.customSize, 64) || null, customRatio: asStr(payload.customRatio, 32) || null, count: Math.max(1, Math.min(4, Number(payload.count) || 1)), configId: asStr(payload.configId, 120),
+            // 风格 / 摄影机 / 联网：只在这里解析一次，再原样交给 canvas-service → model-service
+            ...imagePanelOptions(payload),
+          };
+          if (payload.async === true) {
+            let runId = asStr(payload.runId, 120) || null;
+            if (!runId) {
+              const started = service.startRun({ context, canvasId, nodeId: asStr(payload.nodeId, 120) || null, kind: "image", configId: params.configId || null });
+              if (!started || started.ok !== true) return started || { ok: false, error: "RUN_UNAVAILABLE" };
+              runId = started.runId;
+            } else {
+              const run = service.store.runById(runId);
+              if (!run || String(run.canvas_id) !== String(canvasId) || run.status !== "RUNNING") return { ok: false, error: "RUN_NOT_FOUND" };
+            }
+            const launched = service.startAsyncModelCall({ context, canvasId, runId, nodeId: asStr(payload.nodeId, 120) || null, ...params });
+            if (!launched || launched.ok !== true) return launched;
+            return { ok: true, async: true, runId, taskId: launched.taskId || null };
+          }
+          return service.modelCall({ context, canvasId, runId: asStr(payload.runId, 120), kind: "image", ...params });
+        }
+        case "canvas/modelImageEdit": {
+          const canvasId = asStr(payload.canvasId, 120);
+          if (!canvasId) return { ok: false, error: "INVALID_INPUT" };
+          const requestedRunId = asStr(payload.runId, 120) || null;
+          let started = null;
+          let ownsRun = false;
+          if (requestedRunId) {
+            const existing = service.store.runById(requestedRunId);
+            if (!existing || String(existing.canvas_id) !== String(canvasId) || existing.status !== "RUNNING") return { ok: false, error: "RUN_NOT_FOUND", detail: "run-must-be-running-on-canvas" };
+            started = { ok: true, runId: requestedRunId };
+          } else {
+            started = service.startRun({ context, canvasId, nodeId: asStr(payload.nodeId, 120) || null, kind: "image" });
+            if (!started || started.ok !== true) return started && started.ok === false ? started : { ok: false, error: "RUN_UNAVAILABLE" };
+            ownsRun = true;
+          }
+          let terminal = "FAILED";
+          try {
+            // 10-23：优先走模型配置自带凭据的编辑出口（Lovart：重绘 / 擦除 / 扩图 / 多角度 / 重打光 / 增强 / 抠图 / 图生图）
+            if (typeof service.modelService.editImage === "function") {
+              const inputs = (Array.isArray(payload.inputDataUrls) ? payload.inputDataUrls : []).filter((x) => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 12 * 1024 * 1024));
+              let sourceDataUrl = typeof payload.sourceDataUrl === "string" ? payload.sourceDataUrl.slice(0, 12 * 1024 * 1024) : "";
+              // 局部重绘 / 擦除：挖空图之外再带一张原图（支持遮罩的模型按「原图 + 遮罩」发，才看得到要改的东西）
+              const originalDataUrl = typeof payload.originalDataUrl === "string" && payload.originalDataUrl.startsWith("data:image/") ? payload.originalDataUrl.slice(0, 12 * 1024 * 1024) : "";
+              const maskPngDataUrl = typeof payload.maskPngDataUrl === "string" && payload.maskPngDataUrl.startsWith("data:image/png") ? payload.maskPngDataUrl.slice(0, 8 * 1024 * 1024) : "";
+              if (!sourceDataUrl && typeof payload.sourceRef === "string" && payload.sourceRef) {
+                const ref = asStr(payload.sourceRef, 2000);
+                if (/^https:\/\//i.test(ref)) inputs.unshift(ref); // 远程原图：交给适配器下载后上传成附件
+                else { const r = service.readAsset({ context, ref }); if (r && r.ok && r.dataUrl) sourceDataUrl = r.dataUrl; }
+              }
+              const direct = await service.modelService.editImage({ context: { ...context, appId: "canvas" }, configId: asStr(payload.configId, 120) || null, mode: asStr(payload.mode, 20) || "prompt", prompt: asStr(payload.prompt, 4000), sourceDataUrl, originalDataUrl, maskPngDataUrl, inputs, requestId: "canvas_edit_" + started.runId });
+              if (!(direct && direct.ok === false && direct.detail === "adapter-no-image-edit")) {
+                if (!direct || direct.ok !== true) return direct && direct.ok === false ? direct : { ok: false, error: "IMAGE_EDIT_FAILED" };
+                terminal = "DONE";
+                return { ok: true, images: Array.isArray(direct.images) ? direct.images : [], runId: started.runId };
+              }
+            }
+            const resolved = service.modelService.resolveModel({ context: { ...context, appId: "canvas" }, capability: "image-generation", configId: asStr(payload.configId, 120) || null });
+            if (!resolved || resolved.ok !== true) return resolved && resolved.ok === false ? resolved : { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
+            const protocol = service.modelService.providerProtocol && service.modelService.providerProtocol.service;
+            if (!protocol || typeof protocol.generateImageEdit !== "function") return { ok: false, error: "IMAGE_EDIT_UNAVAILABLE", detail: "lovart-image-edit-required" };
+            const result = await protocol.generateImageEdit({ providerId: resolved.snapshot.providerId, model: resolved.snapshot.modelId, prompt: asStr(payload.prompt, 4000), mode: asStr(payload.mode, 20) || "redraw", sourceDataUrl: typeof payload.sourceDataUrl === "string" ? payload.sourceDataUrl.slice(0, 12 * 1024 * 1024) : "", requestId: "canvas_edit_" + started.runId });
+            if (!result || result.ok !== true) return result && result.ok === false ? result : { ok: false, error: "IMAGE_EDIT_FAILED" };
+            terminal = "DONE";
+            return { ok: true, images: Array.isArray(result.images) ? result.images : [], runId: started.runId };
+          } finally {
+            if (ownsRun) { try { service.finishRun({ context, canvasId, runId: started.runId, status: terminal }); } catch { /* ignore */ } }
+          }
+        }
+        case "canvas/model3d": {
+          const canvasId = asStr(payload.canvasId, 120);
+          if (!canvasId) return { ok: false, error: "INVALID_INPUT" };
+          const started = service.startRun({ context, canvasId, nodeId: asStr(payload.nodeId, 120) || null, kind: "3d", configId: asStr(payload.configId, 120) || null });
+          // 没开成运行时直接把原因带回（之前会回一个没有 runId 的「成功」，前端无从查询进度、什么也不发生）
+          if (!started || started.ok !== true) return started && started.ok === false ? started : { ok: false, error: "RUN_UNAVAILABLE" };
+          if (payload.async === true) {
+            const runId = started.runId;
+            service.asyncRuns.set(runId, { status: "RUNNING", result: null, error: null, startedAt: Date.now(), finishedAt: null, canvasId });
+            void (async () => {
+              try {
+                const resolved = service.modelService.resolveModel({ context: { ...context, appId: "canvas" }, capability: "3d-generation", configId: asStr(payload.configId, 120) || null });
+                if (!resolved || resolved.ok !== true) throw new Error(String((resolved && resolved.error) || "MODEL_CONFIG_UNAVAILABLE"));
+                const protocol = service.modelService.providerProtocol && service.modelService.providerProtocol.service;
+                if (!protocol || typeof protocol.generate3d !== "function") throw new Error("MODEL_3D_UNAVAILABLE");
+                const mode3d = asStr(payload.mode, 10) === "image" ? "image" : "text";
+                const result = await protocol.generate3d({ providerId: resolved.snapshot.providerId, model: resolved.snapshot.modelId, prompt: asStr(payload.prompt, 4000), imageDataUrl: typeof payload.sourceDataUrl === "string" ? payload.sourceDataUrl.slice(0, 12 * 1024 * 1024) : null, mode: mode3d, requestId: "canvas_3d_" + runId });
+                const current = service.asyncRuns.get(runId);
+                if (current && current.status === "STOPPED") return;
+                if (result && result.ok === true) service.asyncRuns.set(runId, { ...(service.asyncRuns.get(runId) || {}), status: "DONE", result: { ok: true, modelUrl: result.modelUrl, mediaPath: result.mediaPath, taskId: result.taskId }, finishedAt: Date.now() });
+                else service.asyncRuns.set(runId, { ...(service.asyncRuns.get(runId) || {}), status: "FAILED", error: String((result && (result.error || result.detail)) || "MODEL_3D_FAILED"), finishedAt: Date.now() });
+              } catch (error) { service.asyncRuns.set(runId, { ...(service.asyncRuns.get(runId) || {}), status: "FAILED", error: String((error && error.message) || "MODEL_3D_FAILED"), finishedAt: Date.now() }); }
+              finally { const entry = service.asyncRuns.get(runId); if (entry && entry.status !== "STOPPED") { try { service.finishRun({ context, canvasId, runId, status: entry.status === "DONE" ? "DONE" : "FAILED" }); } catch { /* ignore */ } } }
+            })();
+            return { ok: true, async: true, runId, taskId: started.taskId || null };
+          }
+          if (!started || started.ok !== true) return started && started.ok === false ? started : { ok: false, error: "RUN_UNAVAILABLE" };
+          let terminal = "FAILED";
+          try {
+            const resolved = service.modelService.resolveModel({ context: { ...context, appId: "canvas" }, capability: "3d-generation", configId: asStr(payload.configId, 120) || null });
+            if (!resolved || resolved.ok !== true) return resolved && resolved.ok === false ? resolved : { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
+            const protocol = service.modelService.providerProtocol && service.modelService.providerProtocol.service;
+            if (!protocol || typeof protocol.generate3d !== "function") return { ok: false, error: "MODEL_3D_UNAVAILABLE", detail: "tripo-3d-provider-required" };
+            const mode3d = asStr(payload.mode, 10) === "image" ? "image" : "text";
+            const result = await protocol.generate3d({ providerId: resolved.snapshot.providerId, model: resolved.snapshot.modelId, prompt: asStr(payload.prompt, 4000), imageUrl: asStr(payload.imageUrl, 2000) || null, imageDataUrl: typeof payload.sourceDataUrl === "string" ? payload.sourceDataUrl.slice(0, 12 * 1024 * 1024) : null, mode: mode3d, requestId: "canvas_3d_" + started.runId });
+            if (!result || result.ok !== true) {
+              if (result && result.error === "CREDIT_INSUFFICIENT") return { ok: false, error: "CREDIT_INSUFFICIENT", code: "2010", detail: "Tripo 额度不足" };
+              return result && result.ok === false ? result : { ok: false, error: "MODEL_3D_FAILED" };
+            }
+            terminal = "DONE";
+            return { ok: true, modelUrl: result.modelUrl, mediaPath: result.mediaPath, taskId: result.taskId, runId: started.runId };
+          } finally {
+            try { service.finishRun({ context, canvasId, runId: started.runId, status: terminal }); } catch { /* ignore */ }
+          }
+        }
+        case "canvas/feedback/submit":
+          return service.submitFeedback({ context, category: asStr(payload.category, 20), text: asStr(payload.text, 4000), canvasId: asStr(payload.canvasId, 120) || null, nodeId: asStr(payload.nodeId, 120) || null, appVersion: asStr(payload.appVersion, 80) || null });
         case "canvas/importAsset":
-          return service.importAsset({ context, canvasId: asStr(payload.canvasId, 120), name: asStr(payload.name, 120), dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl.slice(0, 12 * 1024 * 1024) : "" });
+          return service.importAsset({ context, canvasId: asStr(payload.canvasId, 120), name: asStr(payload.name, 120), dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl.slice(0, 280 * 1024 * 1024) : "" });
         case "canvas/readAsset":
           return service.readAsset({ context, ref: asStr(payload.ref, 200) });
+        case "canvas/assetPublicUrl":
+          if (typeof assetPublicUrl !== "function") return { ok: false, error: "DEPENDENCY_UNAVAILABLE", detail: "asset-public-url-not-ready" };
+          return await assetPublicUrl({ context, canvasId: asStr(payload.canvasId, 120), ref: asStr(payload.ref, 200), dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl : null });
+        case "canvas/importRemote":
+          if (typeof importRemote !== "function") return { ok: false, error: "DEPENDENCY_UNAVAILABLE", detail: "import-remote-not-ready" };
+          return await importRemote({ context, canvasId: asStr(payload.canvasId, 120), url: asStr(payload.url, 4000), name: asStr(payload.name, 120) });
         case "canvas/libraryList":
           return service.libraryList({ context, limit: Number(payload.limit) || 60, query: asStr(payload.query, 120) || "" });
         default: {
@@ -175,7 +358,8 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           return { ok: false, error: CANVAS_COMMAND_NOT_ALLOWED, detail: asStr(command, 80) || null };
         }
       }
-    } catch {
+    } catch (err) {
+      try { console.error("[canvas] command failed", { command: typeof raw.command === "string" ? raw.command : raw.type, message: err && err.message ? String(err.message).slice(0, 300) : "unknown" }); } catch { /* ignore */ }
       return { ok: false, error: "INTERNAL_ERROR" };
     }
   });
@@ -187,4 +371,8 @@ function disposeCanvasIpc({ ipcMain } = {}) {
   }
 }
 
-module.exports = { createCanvasBundle, registerCanvasIpc, disposeCanvasIpc, RENDERER_COMMANDS, CANVAS_COMMAND_NOT_ALLOWED, HOST_APP_ID };
+module.exports = {
+  createCanvasBundle, registerCanvasIpc, disposeCanvasIpc, RENDERER_COMMANDS, CANVAS_COMMAND_NOT_ALLOWED, HOST_APP_ID,
+  // 面板参数边界归一（单测直接核对；与画布页 CAMERAS 表做漂移核对）
+  CAMERA_PARTS, STYLE_TEXT_MAX, sanitizeStyle, sanitizeCamera, imagePanelOptions,
+};

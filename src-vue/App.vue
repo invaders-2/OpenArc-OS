@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch, watchEffect } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
 import { useShellStore } from "./stores/shell";
 import { useIdentityStore } from "./stores/identity";
 import { installNativeSync } from "./shell/native-sync";
@@ -46,8 +46,18 @@ let disposeBrowserRuntime: (() => void) | null = null;
  * 注意 class 字符串里的空格：既有实现用模板字符串拼出来，是 "desktop  "（两个空格）
  * 这种形态；这里保持同形，避免后续按 className 对齐契约时出现假差异。
  */
+const themeSwitching = ref(false);
+let themeSwitchTimer = 0;
+watch(
+  () => [shell.dark, shell.glass, shell.wallpaper],
+  () => {
+    themeSwitching.value = true;
+    window.clearTimeout(themeSwitchTimer);
+    themeSwitchTimer = window.setTimeout(() => { themeSwitching.value = false; }, 180);
+  },
+);
 const rootClass = computed(
-  () => "desktop " + (shell.dark ? "dark" : "") + " " + (shell.reduced ? "reduced" : ""),
+  () => "desktop " + (shell.dark ? "dark" : "") + " " + (shell.reduced ? "reduced" : "") + (themeSwitching.value ? " theme-switching" : ""),
 );
 
 /**

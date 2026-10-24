@@ -101,10 +101,10 @@ function createMarketBundle(options = {}) {
 
   function catalogStatus() {
     const read = readRawManifest();
-    if (!read.ok) return { present: false, valid: false, manifestName, appCount: 0, skillPackCount: 0, reason: read.error.code };
+    if (!read.ok) return { present: false, valid: false, manifestName, appCount: 0, skillPackCount: 0, templateCount: 0, reason: read.error.code };
     const normalized = marketDomain.normalizeLocalManifest(read.raw, { generatedAt: clock() });
-    if (!normalized.ok) return { present: true, valid: false, manifestName, appCount: 0, skillPackCount: 0, reason: normalized.error.code };
-    return { present: true, valid: true, manifestName, appCount: normalized.value.apps.length, skillPackCount: normalized.value.skillPacks.length, reason: null };
+    if (!normalized.ok) return { present: true, valid: false, manifestName, appCount: 0, skillPackCount: 0, templateCount: 0, reason: normalized.error.code };
+    return { present: true, valid: true, manifestName, appCount: normalized.value.apps.length, skillPackCount: normalized.value.skillPacks.length, templateCount: (normalized.value.templates || []).length, reason: null };
   }
 
   function findApp(id) {

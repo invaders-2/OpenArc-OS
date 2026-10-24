@@ -46,6 +46,9 @@ const {
   probeOnnxAvailability,
 } = require("./media-service.cjs");
 const { registerMediaIpc } = require("./media-bootstrap.cjs");
+// 公共媒体上传出口：临时图床协议 / 域名校验只在本文件，media 域通过注入的 uploader 调用。
+const { createLitterboxUploader } = require("./media-litterbox.cjs");
+const { createAssetPublicUrl, createImportRemote } = require("./canvas-asset-public-url.cjs");
 // 媒体 → 资源库登记桥（短剧出图 / 成片导出共用；只经 resourceService.importManaged 入库）。
 const { createMediaResourceRegistrar } = require("./media-resource-registrar.cjs");
 // B6a：自动化域装配（定义 / 运行记录 / 主进程内调度器，无云依赖）与 automation:command / automation:event 通道。
@@ -831,7 +834,13 @@ app.whenReady().then(async () => {
     canvasBundle = { service: identity.canvasDocService };
     // B5d：画布域扩展命令（素材库 / 协作 / 内核能力 / Agent 附件 / .dxcanvas）接在同一个 canvas:command；
     // 未装配扩展时白名单内的扩展命令回落 CANVAS_COMMAND_NOT_ALLOWED，不新建第二套画布通道。
-    registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted, extension: identity.canvasDxosExtension });
+    // 10-23：canvas/assetPublicUrl —— 画布素材 → Litterbox 24h 直链（复用媒体域上传器的域名白名单与直链复验）
+    const canvasAssetPublicUrl = createAssetPublicUrl(identity.canvasDocService, {
+      uploader: createLitterboxUploader({ fetchImpl: createGuardedFetch(typeof fetch === "function" ? fetch : null), retention: "24h", maxBytes: 200 * 1024 * 1024 }),
+    });
+    // 下载模型结果属于模型出口：走模型出网代理（与生成请求同一条网络路径，服务商 CDN 才连得上）
+    const canvasImportRemote = createImportRemote(identity.canvasDocService, { fetchImpl: createGuardedFetch(modelEgressFetch || (typeof fetch === "function" ? fetch : null)) });
+    registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted, extension: identity.canvasDxosExtension, assetPublicUrl: canvasAssetPublicUrl, importRemote: canvasImportRemote });
 
     // D4-04：Renderer 可发起真实 AI Task（Task Runtime + official dsh + Tool Facade），
     // sessionRef/appId 由主进程注入；进度经 task:event 推送。
@@ -1070,6 +1079,8 @@ app.whenReady().then(async () => {
       illustratorAvailable: probeIllustratorAvailability(),
       // 本仓无随包 Vite 构建器（vite 仅 devDependency）→ 如实 null。
       viteBuild: null,
+      // 公共媒体上传：图床只经注入的 uploader；media-public-media.cjs 不内置图床地址。
+      publicMediaUploader: createLitterboxUploader({ fetchImpl: mediaFetchImpl }),
       // 出图 / 成片导出 → 资源库（未装配时命令侧如实回 MEDIA_DEPENDENCY_UNAVAILABLE）。
       resourceRegistrar: mediaResourceRegistrar,
       // 导出到访达：绝对路径只交给 shell.showItemInFolder，渲染层只拿 relativePath。

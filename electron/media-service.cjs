@@ -1454,9 +1454,17 @@ function createMediaBundle(options = {}) {
         }) };
       }
       case "media/public-media/upload": {
-        return { media: await mediaPublicMedia.uploadPublicMedia({
-          fileName: requireStr(payload.fileName, 255),
-          uploader: typeof options.publicMediaUploader === "function" ? options.publicMediaUploader : null,
+        // uploader 只从宿主装配注入；命令分支不认任何图床域名。
+        const uploader = typeof options.publicMediaUploader === "function" ? options.publicMediaUploader : null;
+        const fileName = requireStr(payload.fileName, 255);
+        if (fileName) return { media: await mediaPublicMedia.uploadPublicMedia({ fileName, uploader }) };
+        const name = requireStr(payload.name, 255);
+        if (!name) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "fileName 或 name 必填");
+        return { media: await mediaPublicMedia.uploadPublicMediaBytes({
+          fileName: name,
+          bytes: decodeBase64(payload, "base64"),
+          mime: requireStr(payload.mime, 120),
+          uploader,
         }) };
       }
 

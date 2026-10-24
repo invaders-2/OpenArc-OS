@@ -258,8 +258,8 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
         <button type="button" role="switch" class="switch" :aria-checked="weatherOn" :aria-label="t('天气联网')" @click="setWeather(!weatherOn)" />
       </div>
       <div class="setting-row">
-        <span class="set-lab">{{ t("应用与工具权限") }}<small>{{ t("哪些应用可用、可以调用哪些工具，由「组织」统一授予") }}</small></span>
-        <button class="planned-today" @click="shell.activateApp('organization')">{{ t("打开组织") }}</button>
+        <span class="set-lab">{{ t("应用与工具权限") }}<small>{{ t("哪些应用可用、可以调用哪些工具，由「组织治理」统一授予") }}</small></span>
+        <button class="planned-today" @click="shell.activateApp('organization')">{{ t("打开组织治理") }}</button>
       </div>
     </div>
     <section class="set-sec">
@@ -407,7 +407,7 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
       </div>
       <p v-if="!apps.length" class="set-cap gov-empty">{{ t("没有可管理的应用。") }}</p>
     </div>
-    <div class="set-sec"><button class="planned-today" @click="shell.activateApp('organization')">{{ t("在「组织」中管理") }}</button></div>
+    <div class="set-sec"><button class="planned-today" @click="shell.activateApp('organization')">{{ t("在「组织治理」中管理") }}</button></div>
   </template>
 
   <!-- 磁盘空间 -->
@@ -522,7 +522,7 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
 
 <style scoped>
 .set-subtitle { margin: var(--space-4) 0 var(--space-2); font-size: var(--fs-caption); font-weight: var(--fw-medium); }
-.set-select { min-height: 26px; padding: 2px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-caption); }
+.set-select { min-height: 26px; padding: 2px var(--space-2); border: 0; border-radius: var(--radius-md); background: var(--sunken); color: var(--text); font-size: var(--fs-caption); }
 .update-assets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; width: 100%; }
 .update-assets li { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; padding: 2px 0; }
 .update-link { overflow-wrap: anywhere; }

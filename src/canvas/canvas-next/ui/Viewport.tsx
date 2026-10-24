@@ -1,0 +1,199 @@
+/**
+ * 视口：平移 / 缩放 / 拖动节点 / 框选 / 调整大小 / 从 ⊕ 拉线（磁吸）/ 右键 / 双击 / 拖放文件。
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
+import { addFiles, commitText, connect } from "../actions";
+import { connectBlock, genOf, inputsOf, isGenKind, outOf, srcOf } from "../model";
+import { batchOf } from "../table";
+import { useCtl, useS } from "./ctx";
+import { Edges } from "./Edges";
+import { addMenu, blankMenu, nodeMenu, portMenu, onNodeAct } from "./menus";
+import { NodeView } from "./NodeView";
+import { closePop } from "./overlay";
+
+type Drag =
+  | { kind: "pan"; sx: number; sy: number; vx: number; vy: number; moved: boolean }
+  | { kind: "node"; start: { x: number; y: number }; moved: boolean; orig: Array<{ id: string; x: number; y: number }> }
+  | { kind: "resize"; id: string; sx: number; sy: number; w: number; h: number; ar: number; keepRatio: boolean }
+  | { kind: "conn" }
+  | { kind: "marq"; sx: number; sy: number };
+
+export function Viewport() {
+  const ctl = useCtl(); const store = ctl.store;
+  const doc = useS((s) => s.doc); const view = useS((s) => s.view); const ui = useS((s) => s.ui); const runtime = useS((s) => s.runtime);
+  const vpRef = useRef<HTMLDivElement>(null); const drag = useRef<Drag | null>(null); const space = useRef(false);
+  const [marq, setMarq] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [panning, setPanning] = useState(false);
+  useEffect(() => { ctl.vp = vpRef.current; }, [ctl]);
+
+  // 空格拖动画布
+  useEffect(() => {
+    const dn = (e: KeyboardEvent) => { if (e.key === " " && !isTyping()) space.current = true; };
+    const up = (e: KeyboardEvent) => { if (e.key === " ") space.current = false; };
+    addEventListener("keydown", dn); addEventListener("keyup", up); return () => { removeEventListener("keydown", dn); removeEventListener("keyup", up); };
+  }, []);
+
+  const portPos = (n: CanvasNode, side: "in" | "out") => ({ x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 });
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button === 2) return;
+    closePop();
+    const vp = vpRef.current!; const st = store.state; const t = e.target as HTMLElement;
+    if (e.button === 1 || space.current) { e.preventDefault(); drag.current = { kind: "pan", sx: e.clientX, sy: e.clientY, vx: st.view.x, vy: st.view.y, moved: true }; setPanning(true); vp.setPointerCapture(e.pointerId); return; }
+    if (t.closest(".nhead .t.rename")) return;
+    const nodeEl = t.closest(".node") as HTMLElement | null;
+    // Agent 选择上下文 / 选择输入
+    if (nodeEl && st.ui.agentPick) { const id = nodeEl.dataset.id!; window.dispatchEvent(new CustomEvent("cn:agent-pick", { detail: id })); return; }
+    if (nodeEl && st.ui.pick) { const target = st.ui.pick; const id = nodeEl.dataset.id!; if (id !== target) connect(store, id, target); store.setUI({ pick: target, sel: new Set([target]) }); return; }
+    const rz = t.closest("[data-rz]");
+    if (rz && nodeEl) { const n = store.node(nodeEl.dataset.id)!; store.snapshot(); drag.current = { kind: "resize", id: n.id, sx: e.clientX, sy: e.clientY, w: n.w, h: n.h, ar: n.h / n.w, keepRatio: n.kind === "image" || n.kind === "video" }; vp.setPointerCapture(e.pointerId); return; }
+    const port = t.closest("[data-port]") as HTMLElement | null;
+    if (st.ui.editText && !(nodeEl && nodeEl.dataset.id === st.ui.editText)) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur();
+    if (port && nodeEl) {
+      const n = store.node(nodeEl.dataset.id)!; const out = port.dataset.port === "out";
+      store.setUI({ conn: { id: n.id, rev: !out, a: portPos(n, out ? "out" : "in"), p: ctl.toWorld(e.clientX, e.clientY), sx: e.clientX, sy: e.clientY, over: null } });
+      vp.closest(".cn-root")?.classList.add("connecting"); vp.setPointerCapture(e.pointerId); drag.current = { kind: "conn" }; return;
+    }
+    if (nodeEl) {
+      const id = nodeEl.dataset.id!;
+      if (t.closest("[data-act]")) return; // 节点内按钮自己处理
+      if (t.closest("textarea:not([readonly]),input:not([readonly])")) return;
+      let sel = st.ui.sel;
+      if (e.shiftKey || e.metaKey) { sel = new Set(sel); sel.has(id) ? sel.delete(id) : sel.add(id); }
+      else if (!sel.has(id)) sel = new Set([id]);
+      store.setUI({ sel, edge: null });
+      // 拖分组 = 连同组内节点一起移动
+      const moving = new Set(sel); sel.forEach((sid) => { const g = store.node(sid); if (g && g.kind === "group") (g.children || []).forEach((c) => { if (store.node(c)) moving.add(c); }); });
+      drag.current = { kind: "node", start: ctl.toWorld(e.clientX, e.clientY), moved: false, orig: [...moving].map((sid) => { const n = store.node(sid)!; return { id: sid, x: n.x, y: n.y }; }) };
+      vp.setPointerCapture(e.pointerId); return;
+    }
+    const edgeEl = t.closest("[data-edge]") as HTMLElement | null;
+    if (edgeEl) { store.setUI({ edge: edgeEl.dataset.edge!, sel: new Set() }); return; }
+    if (st.ui.cmtMode) { window.dispatchEvent(new CustomEvent("cn:place-comment", { detail: ctl.toWorld(e.clientX, e.clientY) })); return; }
+    if (st.ui.pick) { store.setUI({ pick: null }); return; }
+    if (e.shiftKey) { drag.current = { kind: "marq", sx: e.clientX, sy: e.clientY }; vp.setPointerCapture(e.pointerId); return; }
+    drag.current = { kind: "pan", sx: e.clientX, sy: e.clientY, vx: st.view.x, vy: st.view.y, moved: false }; vp.setPointerCapture(e.pointerId);
+  }, [store, ctl]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    const d = drag.current; if (!d) return; const st = store.state;
+    if (d.kind === "pan") { const dx = e.clientX - d.sx, dy = e.clientY - d.sy; if (Math.abs(dx) + Math.abs(dy) > 3 && !d.moved) { d.moved = true; setPanning(true); } store.setView({ ...st.view, x: d.vx + dx, y: d.vy + dy }); }
+    else if (d.kind === "node") {
+      const p = ctl.toWorld(e.clientX, e.clientY); const dx = p.x - d.start.x, dy = p.y - d.start.y;
+      if (!d.moved && Math.abs(dx) + Math.abs(dy) < 3 / st.view.k) return;
+      if (!d.moved) { store.snapshot(); d.moved = true; store.setUI({ dragging: true }); }
+      const pos = new Map(d.orig.map((o) => { let x = o.x + dx, y = o.y + dy; if (st.ui.snap) { x = Math.round(x / 20) * 20; y = Math.round(y / 20) * 20; } return [o.id, { x: Math.round(x), y: Math.round(y) }]; }));
+      store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (pos.has(n.id) ? { ...n, ...pos.get(n.id)! } : n)) }));
+    } else if (d.kind === "resize") {
+      const dx = (e.clientX - d.sx) / st.view.k, dy = (e.clientY - d.sy) / st.view.k;
+      const w = Math.round(Math.max(140, Math.min(900, d.w + dx))); const h = d.keepRatio ? Math.round(w * d.ar) : Math.round(Math.max(80, Math.min(900, d.h + dy)));
+      store.updateNode(d.id, (n) => ({ ...n, w, h }));
+    } else if (d.kind === "conn" && st.ui.conn) {
+      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest(".node") as HTMLElement | null;
+      const c = st.ui.conn; let over = el && el.dataset.id !== c.id ? el.dataset.id! : null;
+      if (over && connectBlock(st.doc, c.rev ? over : c.id, c.rev ? c.id : over)) over = null;
+      store.setUI({ conn: { ...c, p: ctl.toWorld(e.clientX, e.clientY), over } });
+    } else if (d.kind === "marq") {
+      const r = vpRef.current!.getBoundingClientRect();
+      setMarq({ x: Math.min(e.clientX, d.sx) - r.left, y: Math.min(e.clientY, d.sy) - r.top, w: Math.abs(e.clientX - d.sx), h: Math.abs(e.clientY - d.sy) });
+      const a = ctl.toWorld(Math.min(e.clientX, d.sx), Math.min(e.clientY, d.sy)), b = ctl.toWorld(Math.max(e.clientX, d.sx), Math.max(e.clientY, d.sy));
+      store.setUI({ sel: new Set(st.doc.nodes.filter((n) => n.x < b.x && n.x + n.w > a.x && n.y < b.y && n.y + n.h + 24 > a.y).map((n) => n.id)) });
+    }
+  }, [store, ctl]);
+
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    const d = drag.current; if (!d) return; drag.current = null; setPanning(false); const st = store.state;
+    if (d.kind === "pan" && !d.moved) { if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur(); store.setUI({ sel: new Set(), edge: null, editCell: null }); }
+    if (d.kind === "node" && d.moved) store.setUI({ dragging: false });
+    if (d.kind === "marq") setMarq(null);
+    if (d.kind === "conn") {
+      vpRef.current?.closest(".cn-root")?.classList.remove("connecting"); const c = st.ui.conn; store.setUI({ conn: null }); if (!c) return;
+      if (!c.over && Math.hypot(e.clientX - c.sx, e.clientY - c.sy) < 5) { portMenu(ctl, store.node(c.id)!, c.rev ? "in" : "out", { x: e.clientX + 14, y: e.clientY - 20 }); return; }
+      if (c.over) connect(store, c.rev ? c.over : c.id, c.rev ? c.id : c.over);
+      else if (!c.rev) { const p = ctl.toWorld(e.clientX, e.clientY); addMenu(ctl, { x: e.clientX + 6, y: e.clientY + 6 }, { x: p.x + 140, y: p.y }, c.id); }
+    }
+  }, [store, ctl]);
+
+  // 滚轮：平移；⌘/Ctrl+滚轮 或触控板捏合：缩放
+  useEffect(() => {
+    const vp = vpRef.current!;
+    const onWheel = (e: WheelEvent) => {
+      if ((e.target as HTMLElement).closest?.(".tgrid,.ntext")) { const el = (e.target as HTMLElement).closest(".tgrid,.ntext") as HTMLElement; if (el.scrollHeight > el.clientHeight && !(e.ctrlKey || e.metaKey) && store.state.ui.sel.has((el.closest(".node") as HTMLElement)?.dataset.id || "")) return; }
+      e.preventDefault(); const v = store.state.view;
+      if (e.ctrlKey || e.metaKey) ctl.zoomAt(v.k * Math.exp(-e.deltaY * .0025), e.clientX, e.clientY);
+      else store.setView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY });
+    };
+    vp.addEventListener("wheel", onWheel, { passive: false }); return () => vp.removeEventListener("wheel", onWheel);
+  }, [store, ctl]);
+
+  // ⊕ 磁吸：80px 感应区内 ⊕ 朝指针偏移（纵向 ≈1:1，横向滞后约一半，TapNow 实测）
+  const pzCur = useRef<HTMLElement | null>(null);
+  const onHover = (e: React.PointerEvent) => {
+    if (drag.current) return; const z = (e.target as HTMLElement).closest?.(".pz") as HTMLElement | null;
+    if (pzCur.current && pzCur.current !== z) { const f = pzCur.current.querySelector(".pf") as HTMLElement | null; if (f) f.style.transform = ""; }
+    pzCur.current = z; if (!z) return;
+    const r = z.getBoundingClientRect(); const k = store.state.view.k; const R = 26;
+    let tx = ((e.clientX - (r.left + r.width / 2)) / k) * .5, ty = ((e.clientY - (r.top + r.height / 2)) / k) * .9; const dd = Math.hypot(tx, ty); if (dd > R) { tx *= R / dd; ty *= R / dd; }
+    (z.querySelector(".pf") as HTMLElement).style.transform = `translate(${tx.toFixed(1)}px,${ty.toFixed(1)}px)`;
+  };
+
+  const onDouble = (e: React.MouseEvent) => {
+    const tg = (document.elementFromPoint(e.clientX, e.clientY) || e.target) as HTMLElement;
+    const nodeEl = tg.closest(".node") as HTMLElement | null;
+    const tt = tg.closest(".nhead .t") as HTMLElement | null;
+    if (tt && nodeEl) { renameInline(nodeEl.dataset.id!, tt); return; }
+    if (nodeEl) { const n = store.node(nodeEl.dataset.id)!; if (n.kind === "table") { /* 指针被画布捕获后双击到不了单元格：按位置找到单元格进入编辑 */ const cell = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest("[data-cell]") as HTMLElement | null; if (cell?.dataset.cell) { store.snapshot(); store.setUI({ editCell: cell.dataset.cell, sel: new Set([n.id]) }); } return; } if (n.kind === "text" && !tg.closest("[data-act]")) { window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: n.id })); return; } if (outOf(n)) window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: n.id })); return; }
+    if (tg.closest("[data-edge]")) return;
+    const w = ctl.toWorld(e.clientX, e.clientY); addMenu(ctl, { x: e.clientX + 4, y: e.clientY + 4 }, w);
+  };
+  const renameInline = (id: string, el: HTMLElement) => {
+    const n = store.node(id); if (!n || !isGenKind(n.kind)) return;
+    el.contentEditable = "true"; el.classList.add("rename"); el.focus(); const r = document.createRange(); r.selectNodeContents(el); const s = getSelection()!; s.removeAllRanges(); s.addRange(r);
+    const done = (save: boolean) => { el.contentEditable = "false"; el.classList.remove("rename"); const v = (el.textContent || "").trim().slice(0, 40); const old = genOf(n).title; if (save && v && v !== old) { store.patchGen(id, { title: v }, { history: true }); store.toast(`已重命名为「${v}」，引用它的提示词需要同步修改`); } else el.textContent = old; };
+    el.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); el.onblur = null; done(true); } if (ev.key === "Escape") { el.onblur = null; done(false); } };
+    el.onblur = () => done(true);
+  };
+
+  const onContext = (e: React.MouseEvent) => {
+    e.preventDefault(); const nodeEl = (e.target as HTMLElement).closest(".node") as HTMLElement | null;
+    if (nodeEl) { const id = nodeEl.dataset.id!; if (!store.state.ui.sel.has(id)) store.setUI({ sel: new Set([id]), edge: null }); nodeMenu(ctl, { x: e.clientX, y: e.clientY }); }
+    else blankMenu(ctl, { x: e.clientX, y: e.clientY }, ctl.toWorld(e.clientX, e.clientY));
+  };
+
+  const k = view.k; const gs = 24 * (k < .45 ? 2 : 1) * k;
+  const conn = ui.conn;
+  return (
+    <div id="vp" ref={vpRef} className={(panning ? "panning" : "") + (ui.pick || ui.agentPick ? " picking" : "") + (ui.cmtMode ? " commenting" : "")}
+      style={{ backgroundSize: `${gs}px ${gs}px`, backgroundPosition: `${view.x}px ${view.y}px` }}
+      onPointerDown={onPointerDown} onPointerMove={(e) => { onPointerMove(e); onHover(e); if (store.state.collab.transport) window.dispatchEvent(new CustomEvent("cn:cursor", { detail: ctl.toWorld(e.clientX, e.clientY) })); }} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
+      onPointerLeave={() => { if (store.state.collab.transport) window.dispatchEvent(new CustomEvent("cn:cursor", { detail: null })); }}
+      onDoubleClick={onDouble} onContextMenu={onContext}
+      onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const files = [...(e.dataTransfer?.files || [])]; if (files.length) void addFiles(store, files, ctl.toWorld(e.clientX, e.clientY)); }}>
+      <div id="world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${k})` }}>
+        <Edges />
+        <div id="nodes">
+          {[...doc.nodes].sort((a, b) => (a.kind === "group" ? 0 : 1) - (b.kind === "group" ? 0 : 1)).map((n) => {
+            const run = runtime[n.id];
+            const loadSrc = run ? srcOf(n) || inputsOf(doc, n.id).map((x) => srcOf(x.node)).find(Boolean) : undefined;
+            const bj = run ? null : batchOf(n).journal;
+            const batchInfo = bj && n.kind !== "table" ? `${bj.rows.filter((r) => r.status === "completed").length}/${bj.rows.length} 行` : undefined;
+            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id} noconn={!!conn && conn.over !== n.id && !!connectBlock(doc, conn.rev ? n.id : conn.id, conn.rev ? conn.id : n.id)} hl={ui.hlNode === n.id} loadSrc={loadSrc} batchInfo={batchInfo}
+              onAct={(node, act, ev) => onNodeAct(ctl, node, act, ev)} onTextCommit={(id, text) => commitText(store, id, text)} />;
+          })}
+        </div>
+        <PeerCursors k={k} />
+      </div>
+      {marq ? <div id="marquee" style={{ display: "block", left: marq.x, top: marq.y, width: marq.w, height: marq.h }} /> : null}
+    </div>
+  );
+}
+
+/** 协作者的光标（画布坐标）：按 clientId 取一个灰阶色，不用彩色 */
+function PeerCursors({ k }: { k: number }) {
+  const peers = useS((s) => s.collab.peers);
+  return <>{peers.filter((p) => p.cursor).map((p, i) => <div key={p.id} className="peer-cur" style={{ transform: `translate(${p.cursor!.x}px,${p.cursor!.y}px) scale(${1 / k})` }}>
+    <svg width="16" height="18" viewBox="0 0 16 18"><path d="M1 1l13 7-6 1.6L5 16z" /></svg><span>{p.name || "协作者 " + (i + 1)}</span></div>)}</>;
+}
+
+export function isTyping() { const a = document.activeElement as HTMLElement | null; return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable) && !(a as HTMLInputElement).readOnly; }

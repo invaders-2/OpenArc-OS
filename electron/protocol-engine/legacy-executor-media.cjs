@@ -1142,7 +1142,20 @@ async function generateMusic(provider, model, params, timeoutMs = 900000, transp
       headers: { Accept: "application/json", "Content-Type": "application/json", ...(def.headers || {}), ...buildAuthHeaders(def, provider.api_key) },
       body: JSON.stringify(protocolId === "volcengine-speech"
         ? { model: "seed-audio-1.0", text_prompt: prompt, audio_config: { format: "mp3", sample_rate: 48000 } }
-        : { model, prompt, title: params.title || "", lyrics: params.lyrics || "", style: params.style || "", instrumental: params.instrumental === true }),
+        : (() => {
+            // Suno 族必填：version（v6 / v6-wild / v6-mini）与 custom_model_id 二选一、至少一个，否则 400。
+            // 与 provider-adapter-apimart.cjs#generateAudio 同口径；非 Suno 模型不加这个字段。
+            const body = { model, prompt, title: params.title || "", lyrics: params.lyrics || "", style: params.style || "", instrumental: params.instrumental === true };
+            if (/^suno/i.test(String(model || ""))) {
+              const customModelId = String(params.custom_model_id || "").trim();
+              const custom = params.custom === true;
+              body.custom = custom;
+              body.prompt = prompt.slice(0, custom ? 5000 : 3000);
+              if (customModelId) body.custom_model_id = customModelId;
+              else body.version = String(params.version || "v6");
+            }
+            return body;
+          })()),
       signal: ctrl.signal,
     });
     const text = await resp.text();

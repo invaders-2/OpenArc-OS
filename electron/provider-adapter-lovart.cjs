@@ -320,6 +320,128 @@ function mapCatalogItem(raw) {
   };
 }
 
+/**
+ * 面板规格（uiSpec）：模型族 → 画布面板能选的控件值。
+ *
+ * Lovart 是**对话式**接口：比例 / 清晰度 / 时长 / 有声都是写进提示词的要求
+ * （见 generateVideo 的【生成要求】、model-service 的 SIZE_VIA_PROMPT），不是独立 wire 字段。
+ * 这里按 catalog 的 category + 已知模型族给出「面板该显示什么」，前端据此决定控件，
+ * 不再按模型名交给 PRESETS 猜（那是「联网 / 风格 / 摄影机」假可用的根源）。
+ *
+ * 字段口径与 provider-adapter-apimart.cjs#uiSpec 一致：
+ *   kind / ratios / sizes / batch / maxRefs / i2i / mask
+ *   kind / ratios / res / durs / modes / maxRefs / times / audio
+ *   显式布尔：search / style / camera / audio；capabilitiesSource 标明来源。
+ *
+ * 明确的能力边界（不写就是猜，写了 false 就是这条链路不支持）：
+ *   · style / camera：图片族 true —— canvas/modelImage 现在会解析并透传，model-service 会把它们
+ *     写进提示词的【画面要求】（generateComplete 也消费 params.style/camera，做同样的事）。
+ *   · search：恒 false。图片链路没有联网能力（Lovart 的 catalog 也没有联网入口），不冒充。
+ *   · batch 恒 [1]：一次对话只出一个结果，适配器不读取 count。
+ *   · 视频 audio 只在文档/族契约本身带音轨的族标 true（见 VIDEO_FAMILIES.audio）。
+ *   · maxRefs 取适配器真实上限 8（toAttachments 的 max；generateImageEdit 另加 7 张参考）。
+ */
+const LOOK_IMAGE_RATIOS = Object.freeze({
+  gpt2: ["自适应", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"],
+  gem: ["自适应", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+  gem31: ["自适应", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"],
+  seedream: ["自适应", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "2:1", "1:2", "21:9", "9:21"],
+  seed5: ["自适应", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "2:1", "1:2", "21:9"],
+  basic7: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
+});
+
+/** Lovart catalog 的真实 id 形如 generate_image_* / generate_video_*（见 artifacts/lovart-live/tools-catalog.json）。 */
+const IMAGE_FAMILIES = Object.freeze([
+  { re: /^generate_image_gpt_image_2_5/, ratios: LOOK_IMAGE_RATIOS.gpt2, sizes: ["1K", "2K", "4K"], mask: true },
+  { re: /^generate_image_gpt_image_2/, ratios: LOOK_IMAGE_RATIOS.gpt2, sizes: ["1K", "2K", "4K"], mask: true },
+  { re: /^generate_image_gpt_image_1_5/, ratios: ["1:1", "3:2", "2:3"], sizes: ["1K"], mask: true },
+  { re: /^generate_image_nano_banana_2_1/, ratios: LOOK_IMAGE_RATIOS.gem31, sizes: ["1K", "2K", "4K"] },
+  { re: /^generate_image_nano_banana_pro/, ratios: LOOK_IMAGE_RATIOS.gem, sizes: ["1K", "2K", "4K"] },
+  { re: /^generate_image_nano_banana_2_lite/, ratios: LOOK_IMAGE_RATIOS.gem, sizes: ["1K"] },
+  { re: /^generate_image_nano_banana_2/, ratios: LOOK_IMAGE_RATIOS.gem31, sizes: ["1K", "2K", "4K"] },
+  { re: /^generate_image_seedream_v5_pro/, ratios: LOOK_IMAGE_RATIOS.seed5, sizes: ["1K", "1.5K", "2K"] },
+  { re: /^generate_image_seedream_v5/, ratios: LOOK_IMAGE_RATIOS.seed5, sizes: ["1K", "2K", "4K"] },
+  { re: /^generate_image_seedream_v4_5/, ratios: LOOK_IMAGE_RATIOS.seedream, sizes: ["2K", "4K"] },
+  { re: /^generate_image_seedream_v4/, ratios: LOOK_IMAGE_RATIOS.seedream, sizes: ["1K", "2K", "4K"] },
+  { re: /^generate_image_luma_uni_1/, ratios: ["1:1", "16:9", "9:16", "4:3", "3:4"], sizes: ["1K", "2K"] },
+  { re: /^generate_image_flux_2/, ratios: ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"], sizes: ["1K", "2K"] },
+  { re: /^generate_image_midjourney/, ratios: ["1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2"], sizes: ["2K"] },
+  { re: /^generate_image_(ideogram_v4|p_image_ideogram)/, ratios: ["1:1", "16:9", "9:16", "4:3", "3:4"], sizes: ["1K", "2K"] },
+  { re: /^generate_image_qwen_image3/, ratios: LOOK_IMAGE_RATIOS.basic7, sizes: ["1K", "2K"] },
+]);
+
+const VIDEO_FAMILIES = Object.freeze([
+  { re: /^generate_video_seedance_v2_5/, ratios: ["自适应", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], res: ["480p", "720p", "1080p"], durs: [5, 10, 15, 20, 30], modes: ["文生视频", "首帧", "首尾帧", "参考生视频"], maxRefs: 8, audio: true },
+  { re: /^generate_video_seedance_v2_0/, ratios: ["自适应", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], res: ["480p", "720p"], durs: [5, 10, 15], modes: ["文生视频", "首帧", "首尾帧", "参考生视频"], maxRefs: 8, audio: true },
+  { re: /^generate_video_kling_v3_omni/, ratios: ["16:9", "9:16", "1:1"], res: ["720p", "1080p", "4k"], durs: [5, 10, 15], modes: ["文生视频", "首帧", "首尾帧", "参考生视频"], maxRefs: 8, audio: true },
+  { re: /^generate_video_kling_v3/, ratios: ["16:9", "9:16", "1:1"], res: ["720p", "1080p", "4k"], durs: [5, 10, 15], modes: ["文生视频", "首帧", "首尾帧"], maxRefs: 8, audio: true },
+  { re: /^generate_video_kling_v2_6/, ratios: ["16:9", "9:16", "1:1"], res: ["720p", "1080p"], durs: [5, 10], modes: ["文生视频", "首帧", "首尾帧"], maxRefs: 8, audio: false },
+  { re: /^generate_video_kling_omni_v1/, ratios: ["16:9", "9:16", "1:1"], res: ["720p", "1080p"], durs: [5, 10], modes: ["文生视频", "首帧", "首尾帧"], maxRefs: 8, audio: false },
+  { re: /^generate_video_minimax_h3_max/, ratios: ["自适应", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], res: ["480p", "768p", "1080p"], durs: [5, 10, 15], modes: ["文生视频", "首帧", "首尾帧", "参考生视频"], maxRefs: 8, audio: true },
+  { re: /^generate_video_minimax_h3/, ratios: ["自适应", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], res: ["768p", "2K"], durs: [5, 10, 15], modes: ["文生视频", "首帧", "首尾帧", "参考生视频"], maxRefs: 8, audio: true },
+  { re: /^generate_video_wan_v3/, ratios: ["自适应", "16:9", "4:3", "1:1", "3:4", "9:16"], res: ["480p", "720p", "1080p"], durs: [5, 10, 15, 30], modes: ["文生视频", "首帧", "首尾帧"], maxRefs: 8, audio: true },
+  { re: /^generate_video_wan_v2_6/, ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"], res: ["720p", "1080p"], durs: [5, 10, 15], modes: ["文生视频", "首帧"], maxRefs: 8, audio: false },
+  { re: /^generate_video_veo3_1/, ratios: ["16:9", "9:16"], res: ["720p", "1080p", "4k"], durs: [8], modes: ["文生视频", "首帧", "首尾帧"], maxRefs: 8, audio: true },
+  { re: /^generate_video_veo3/, ratios: ["16:9", "9:16"], res: ["720p", "1080p", "4k"], durs: [8], modes: ["文生视频", "首帧", "首尾帧"], maxRefs: 8, audio: true },
+  { re: /^generate_video_hailuo_v2_3/, ratios: [], res: ["768p", "1080p"], durs: [6, 10], modes: ["文生视频", "首帧"], maxRefs: 8, audio: false },
+  { re: /^generate_video_vidu_q2/, ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"], res: ["720p", "1080p"], durs: [5, 10], modes: ["文生视频", "首帧", "首尾帧"], maxRefs: 8, audio: false },
+  { re: /^generate_video_gemini_omni/, ratios: ["16:9", "9:16"], res: ["360p", "720p", "1080p", "4k"], durs: [5, 10], modes: ["文生视频", "首帧", "首尾帧"], maxRefs: 8, audio: true },
+]);
+
+const IMAGE_UI_DEFAULT_REFS = 8;
+
+function lovartImageSpec(family) {
+  return {
+    kind: "image",
+    ratios: [...family.ratios],
+    sizes: [...family.sizes],
+    batch: [1],
+    maxRefs: IMAGE_UI_DEFAULT_REFS,
+    i2i: true,
+    mask: family.mask === true,
+    search: false,
+    style: true,
+    camera: true,
+    audio: false,
+    capabilitiesSource: "spec",
+  };
+}
+
+function lovartVideoSpec(family) {
+  return {
+    kind: "video",
+    ratios: [...family.ratios],
+    res: [...family.res],
+    durs: [...family.durs],
+    modes: [...family.modes],
+    maxRefs: family.maxRefs,
+    times: [1],
+    batch: [1],
+    search: false,
+    style: false,
+    camera: false,
+    audio: family.audio === true,
+    capabilitiesSource: "spec",
+  };
+}
+
+/**
+ * 模型 id → 画布面板规格。已知族 = spec；只认得出 category 的 id 给**最小 guess 规格**
+ * （kind + 显式 false，交给前端显示「未验证」）；完全认不出的返回 null。
+ */
+function uiSpec(model) {
+  const id = String(model == null ? "" : model).trim().toLowerCase();
+  if (!id) return null;
+  const image = IMAGE_FAMILIES.find((family) => family.re.test(id));
+  if (image) return lovartImageSpec(image);
+  const video = VIDEO_FAMILIES.find((family) => family.re.test(id));
+  if (video) return lovartVideoSpec(video);
+  const guessBase = { batch: [1], search: false, style: false, camera: false, audio: false, capabilitiesSource: "guess" };
+  if (id.startsWith("generate_image_")) return { kind: "image", ...guessBase };
+  if (id.startsWith("generate_video_")) return { kind: "video", ...guessBase };
+  return null;
+}
+
 /** catalog → 归一模型清单（id / displayName / category / premium / 能力建议）。 */
 function mapCatalog(data) {
   const seen = new Set();
@@ -492,11 +614,57 @@ async function sendTask({ baseUrl, credential, prompt, projectId, model = null, 
 }
 
 /**
+ * 风格 / 摄影机 / 联网 → 提示词里的【画面要求】片段。
+ *
+ * model-service 对对话式适配器（SIZE_VIA_PROMPT）已经写过一次；这里再调是给**直接调用本适配器**的
+ * 路径兜底。两处共用同一段文案，且都按「提示词里已有 风格：/摄影机：/联网 就不再写」去重，
+ * 所以不会重复；没有提供的要求一个都不写（不编造）。
+ */
+const LOVART_STYLE_MAX = 40;
+const LOVART_CAMERA_MAX = 40;
+
+function cameraRequirement(camera) {
+  if (!camera || typeof camera !== "object" || Array.isArray(camera)) return null;
+  const read = (key) => (camera[key] == null ? "" : String(camera[key]).trim().slice(0, LOVART_CAMERA_MAX));
+  const parts = [];
+  if (read("body")) parts.push("机身 " + read("body"));
+  if (read("lens")) parts.push("镜头 " + read("lens"));
+  if (read("focal")) parts.push("焦段 " + (/mm$/i.test(read("focal")) ? read("focal") : read("focal") + "mm"));
+  if (read("aperture")) parts.push("光圈 " + read("aperture"));
+  return parts.length ? parts.join("，") : null;
+}
+
+function withVisualRequirements(prompt, params) {
+  const base = String(prompt == null ? "" : prompt);
+  const p = params && typeof params === "object" ? params : {};
+  const style = typeof p.style === "string" ? p.style.trim().slice(0, LOVART_STYLE_MAX) : "";
+  const camera = cameraRequirement(p.camera);
+  const clauses = [];
+  if (style && !/风格[:：]/.test(base)) clauses.push("风格：" + style);
+  if (camera && !/摄影机[:：]/.test(base)) clauses.push("摄影机：" + camera);
+  if (p.webSearch === true && !/联网/.test(base)) clauses.push("联网搜索参考资料后再画");
+  if (!clauses.length) return base;
+  const text = clauses.join("；");
+  const marker = "【画面要求】";
+  const index = base.lastIndexOf(marker);
+  if (index >= 0) {
+    const head = base.slice(0, index + marker.length);
+    const tail = base.slice(index + marker.length).trimEnd();
+    if (tail.endsWith("。")) return head + tail.slice(0, -1) + "；" + text + "。";
+    return head + (tail ? tail + "；" : "") + text + "。";
+  }
+  return base + (base.trim() ? "\n\n" : "") + marker + text + "。";
+}
+
+/**
  * 生成主流程：project（缺省自动建）→ send → watch → result。
  * kind: "image" | "video" | "chat"。返回 { ok, artifacts, text, status, threadId, projectId, polls, failures }。
+ *
+ * params 里的 style / camera / webSearch 会写进提示词的【画面要求】（见 withVisualRequirements）：
+ * 对话式接口没有独立字段，这是唯一能让面板选项真正生效的载体。
  */
 async function generateComplete({
-  baseUrl, apiKey, kind = "image", model = null, prompt = "", projectId = null, mode = null, attachments = null,
+  baseUrl, apiKey, kind = "image", model = null, prompt = "", projectId = null, mode = null, attachments = null, params = {},
   signal = null, fetchImpl = fetch, timeoutMs = 300000, pollIntervalMs = 3000, maxPolls = 100, settleMs = 3000, onEvent = null,
 } = {}) {
   const credential = parseCredential(apiKey);
@@ -504,6 +672,7 @@ async function generateComplete({
   const emit = typeof onEvent === "function" ? onEvent : () => {};
   const startedAt = Date.now();
   const remaining = () => Math.max(1000, Number(timeoutMs || 300000) - (Date.now() - startedAt));
+  const visualPrompt = withVisualRequirements(prompt, params);
 
   let pid = projectId ? String(projectId) : "";
   if (!pid) {
@@ -517,7 +686,7 @@ async function generateComplete({
     if (!pid) return { ok: false, error: modelDomain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: "lovart-project-missing-id" };
   }
 
-  const sent = await sendTask({ baseUrl, credential, prompt, projectId: pid, model, kind, mode, attachments, signal, fetchImpl, timeoutMs: Math.min(60000, remaining()) });
+  const sent = await sendTask({ baseUrl, credential, prompt: visualPrompt, projectId: pid, model, kind, mode, attachments, signal, fetchImpl, timeoutMs: Math.min(60000, remaining()) });
   if (!sent.ok) return { ...sent, projectId: pid };
   const threadId = sent.threadId;
   emit({ type: "progress", phase: "sent", threadId, projectId: pid });
@@ -610,6 +779,19 @@ async function chatStream({ baseUrl, apiKey, model, messages, params = {}, signa
   return { text: out.text || "", toolCalls: [], usage: null };
 }
 
+/** Upload URLs are attachments, not download targets: require https + Lovart-owned host. */
+function isLovartAttachmentUrl(raw) {
+  let url;
+  try { url = new URL(String(raw || "")); } catch { return false; }
+  if (url.username || url.password) return false;
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHostname(url.hostname))) return false;
+  const host = url.hostname.toLowerCase();
+  return host === "lovart.ai" || host.endsWith(".lovart.ai");
+}
+function safeHost(raw) {
+  try { return new URL(String(raw || "")).hostname; } catch { return ""; }
+}
+
 /* ─────────────────────────── 产物下载白名单 ─────────────────────────── */
 
 /** 同源永远允许；否则只看白名单（未观察到的 CDN 主机保持拒绝）。 */
@@ -666,8 +848,127 @@ function errorCodeFor({ status = 0, kind = "" } = {}) {
   return modelDomain.normalizeError({ status, kind });
 }
 
+/** Upload a PNG buffer to Lovart openapi file/upload. Returns a whitelisted CDN URL. */
+async function uploadFile({ baseUrl, apiKey, data, mime = "image/png", filename = "mask.png", fetchImpl = fetch, signal = null, timeoutMs = 60000 } = {}) {
+  const credential = parseCredential(apiKey);
+  if (!credential.ok) return credential;
+  if (!data || !data.length) return { ok: false, error: modelDomain.ERROR_CODE.INVALID_INPUT, detail: "empty-file" };
+  const boundary = "----openarc" + crypto.randomBytes(12).toString("hex");
+  const head = Buffer.from("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + String(filename).replace(/"/g, "") + "\"\r\nContent-Type: " + mime + "\r\n\r\n");
+  const tail = Buffer.from("\r\n--" + boundary + "--\r\n");
+  const body = Buffer.concat([head, Buffer.from(data), tail]);
+  const url = buildUrl(baseUrl, ENDPOINTS.fileUpload);
+  const headers = { ...authHeaders({ credential, method: "POST", path: ENDPOINTS.fileUpload }), "content-type": "multipart/form-data; boundary=" + boundary, "content-length": String(body.length) };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("timeout")), Math.max(1000, Number(timeoutMs) || 60000));
+  const onAbort = () => controller.abort(signal && signal.reason);
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    const response = await fetchImpl(url, { method: "POST", headers, body, signal: controller.signal, redirect: "error" });
+    const parsed = await response.json().catch(() => null);
+    if (!response.ok || !parsed || parsed.code !== 0 || !parsed.data || !parsed.data.url) {
+      return { ok: false, error: errorFromStatus(response.status) || modelDomain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: parsed && parsed.message ? String(parsed.message).slice(0, 200) : "upload-failed" };
+    }
+    const artifactUrl = String(parsed.data.url);
+    if (!isLovartAttachmentUrl(artifactUrl)) return { ok: false, error: "ARTIFACT_HOST_BLOCKED", detail: "uploaded-url", uploadedHost: safeHost(artifactUrl) };
+    return { ok: true, url: artifactUrl };
+  } catch (error) {
+    if (signal && signal.aborted) return { ok: false, error: modelDomain.ERROR_CODE.CANCELLED };
+    if (controller.signal.aborted) return { ok: false, error: modelDomain.ERROR_CODE.MODEL_TIMEOUT };
+    return { ok: false, error: modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE, detail: String((error && error.message) || error).slice(0, 200) };
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+/** Image-to-image via Lovart: transparent-hole PNG upload + attachments=[url]. */
+async function generateImageEdit({ baseUrl, apiKey, model, prompt, mode = "redraw", sourceDataUrl, uploadedUrl = null, referenceUrls = [], signal = null, fetchImpl = fetch, timeoutMs = 300000 } = {}) {
+  let uploaded;
+  if (uploadedUrl) {
+    uploaded = isLovartAttachmentUrl(String(uploadedUrl)) ? { ok: true, url: String(uploadedUrl) } : { ok: false, error: "ARTIFACT_HOST_BLOCKED", detail: "uploaded-url", uploadedHost: safeHost(uploadedUrl) };
+  } else {
+    const match = /^data:([^;,]+)?;base64,(.*)$/i.exec(String(sourceDataUrl || ""));
+    if (!match) return { ok: false, error: modelDomain.ERROR_CODE.INVALID_INPUT, detail: "sourceDataUrl-base64-required" };
+    uploaded = await uploadFile({ baseUrl, apiKey, data: Buffer.from(match[2] || "", "base64"), mime: match[1] || "image/png", filename: "masked-" + mode + ".png", fetchImpl, signal });
+  }
+  if (!uploaded.ok) return uploaded;
+  const prompts = {
+    erase: "Naturally redraw the transparent-channel area in the image. Do not generate new objects that do not exist in the scene. Blend the transparent area into the surrounding environment.",
+    redraw: "Naturally redraw only the transparent-channel area in the image. The last image is the main image with transparency to redraw; keep the original content and aspect ratio of that image.\n\nRedraw prompt: " + String(prompt || ""),
+    outpaint: "Seamlessly extend the image into the empty transparent areas around it. Carefully analyze the existing scene. Only generate new content in the transparent regions, blending invisibly with the existing edges.",
+  };
+  const attachments = [uploaded.url].concat(Array.isArray(referenceUrls) ? referenceUrls.slice(0, 7) : []);
+  const out = await generateComplete({ baseUrl, apiKey, kind: "image", model, prompt: prompts[mode] || prompts.redraw, attachments, signal, fetchImpl, timeoutMs });
+  if (!out.ok) return out;
+  return { ...out, uploadedUrl: uploaded.url };
+}
+
+/**
+ * 10-23 · 视频生成（图生视频 / 首尾帧 / 参考）：Lovart 是对话式接口——
+ *   参考素材先传成 Lovart 自家附件（data: 直接上传；外部 https 先下载再上传；*.lovart.ai 原样用），
+ *   比例 / 清晰度 / 时长 / 有声 / 附件角色写进提示词的「生成要求」。
+ */
+/** 输入素材 → Lovart 附件地址（data: 上传；外部 https 先下载再上传；*.lovart.ai 原样） */
+async function toAttachments({ baseUrl, apiKey, inputs = [], signal = null, fetchImpl = fetch, max = 8 } = {}) {
+  const attachments = [];
+  for (const raw of (Array.isArray(inputs) ? inputs : []).slice(0, max)) {
+    const value = String(raw || "");
+    if (isLovartAttachmentUrl(value)) { attachments.push(value); continue; }
+    let data = null; let mime = "image/png";
+    const m = /^data:([^;,]+)?;base64,(.*)$/is.exec(value);
+    if (m) { data = Buffer.from(m[2] || "", "base64"); mime = m[1] || mime; }
+    else if (/^https:\/\//i.test(value)) {
+      try { const res = await fetchImpl(value, { signal }); if (res && res.ok) { data = Buffer.from(await res.arrayBuffer()); mime = String(res.headers.get("content-type") || mime).split(";")[0]; } } catch { /* 下载失败就跳过这一个 */ }
+    }
+    if (!data || !data.length) continue;
+    const ext = (mime.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "png";
+    const up = await uploadFile({ baseUrl, apiKey, data, mime, filename: "canvas-input-" + attachments.length + "." + ext, fetchImpl, signal });
+    if (!up || !up.ok) return { ok: false, error: (up && up.error) || modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE, detail: "lovart-upload-input: " + String((up && up.detail) || "") };
+    attachments.push(up.url);
+  }
+  return { ok: true, attachments };
+}
+
+/** 10-23 · 带参考图的图片生成 / 编辑（多角度、重打光、增强、抠图、标注改图、图生图）：附件 + 原样提示词 */
+async function generateImageWithInputs({ baseUrl, apiKey, model = null, prompt = "", inputs = [], signal = null, fetchImpl = fetch, timeoutMs = 300000 } = {}) {
+  const att = await toAttachments({ baseUrl, apiKey, inputs, signal, fetchImpl });
+  if (!att.ok) return att;
+  return generateComplete({ baseUrl, apiKey, kind: "image", model, prompt: String(prompt || ""), attachments: att.attachments.length ? att.attachments : null, signal, fetchImpl, timeoutMs });
+}
+
+async function generateVideo({ baseUrl, apiKey, model = null, prompt = "", inputs = [], params = {}, signal = null, fetchImpl = fetch, timeoutMs = 600000 } = {}) {
+  const att = await toAttachments({ baseUrl, apiKey, inputs, signal, fetchImpl });
+  if (!att.ok) return att;
+  const attachments = att.attachments;
+  const p = params && typeof params === "object" ? params : {};
+  const roleText = { first_frame: "首帧", last_frame: "尾帧", reference: "参考图", portrait: "人像" };
+  const roles = Array.isArray(p.imageRoles) ? p.imageRoles : [];
+  const hints = [];
+  if (attachments.length) hints.push("附件按顺序：" + attachments.map((_, i) => "第" + (i + 1) + "个=" + (roleText[roles[i]] || "参考素材")).join("，"));
+  if (p.ratio) hints.push("画面比例 " + p.ratio);
+  if (p.resolution) hints.push("清晰度 " + p.resolution);
+  if (p.duration) hints.push("时长 " + p.duration + " 秒");
+  if (p.generateAudio === false) hints.push("不要声音");
+  if (p.generateAudio === true) hints.push("同时生成声音");
+  if (p.multiShot) hints.push("多镜头");
+  const base = String(prompt || "");
+  return generateComplete({
+    baseUrl, apiKey, kind: "video", model,
+    prompt: hints.length ? base + "\n\n【生成要求】" + hints.join("；") + "。" : base,
+    attachments: attachments.length ? attachments : null, signal, fetchImpl, timeoutMs,
+  });
+}
+
 module.exports = {
+  generateVideo,
+  generateImageWithInputs,
+  toAttachments,
+  uploadFile,
+  generateImageEdit,
   ADAPTER_TYPE,
+  /** 对话式入口：请求体只有提示词，没有 size / aspect_ratio 字段（尺寸由 model-service 写进提示词）。 */
+  SIZE_VIA_PROMPT: true,
   DEFAULT_BASE_URL,
   API_PREFIX,
   ENDPOINTS,
@@ -686,6 +987,10 @@ module.exports = {
   authHeaders,
   buildRequest,
   capabilitiesForCategory,
+  uiSpec,
+  withVisualRequirements,
+  IMAGE_FAMILIES,
+  VIDEO_FAMILIES,
   catalogTools,
   mapCatalog,
   listModels,
@@ -698,6 +1003,7 @@ module.exports = {
   chatComplete,
   chatStream,
   isAllowedArtifactUrl,
+  isLovartAttachmentUrl,
   downloadArtifact,
   errorCodeFor,
 };

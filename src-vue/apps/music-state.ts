@@ -107,6 +107,11 @@ export function step(delta: number): void {
   void playAt(next);
 }
 
+export function setVolume(value: number): void {
+  const el = ensureAudio();
+  if (el) el.volume = Math.max(0, Math.min(1, Number(value) || 0));
+}
+
 export function seek(seconds: number): void {
   const player = ensureAudio();
   if (!player || !Number.isFinite(seconds)) return;

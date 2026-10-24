@@ -253,12 +253,32 @@ export type OpenArcMediaCommand =
   | "media/render/heartbeat"
   | "media/render/recover"
   | "media/artifact/list"
-  | "media/health";
+  | "media/health"
+  | "media/public-media/upload";
 
 /** 命令体：{ command, payload }；payload 缺省时退化为命令体本身（与 skill/agent 域同形）。 */
 export interface OpenArcMediaCommandRequest {
   command: OpenArcMediaCommand;
   payload?: Record<string, unknown>;
+}
+
+/** media/public-media/upload 的载荷：data 是图片字节的**标准 base64**（含 + / 与 = 填充，不是 base64url）。 */
+export interface OpenArcMediaPublicUploadPayload {
+  name: string;
+  mime: string;
+  data: string;
+}
+
+/**
+ * media/public-media/upload 的 value.media：第三方免费临时图床的直链回执。
+ * expiresAt 由图床决定（本仓后端回毫秒时间戳）；界面只展示，不据此删除任何本地文件。
+ */
+export interface OpenArcMediaPublicUploadValue {
+  url: string;
+  service: string;
+  expiresAt?: number | string;
+  bytes: number;
+  fileName: string;
 }
 
 /** ffprobe 探测结果（electron/media-domain.cjs parseFfprobeOutput）。 */

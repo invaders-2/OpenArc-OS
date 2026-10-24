@@ -159,3 +159,22 @@ const groups = computed(() => {
     </div>
   </div>
 </template>
+<style scoped>
+
+.settings-split .split-side { flex: 0 0 230px; width: 230px; overflow-x: clip; }
+.settings-search { margin: 4px 2px 6px; height: 30px; width: calc(100% - 4px); box-sizing: border-box; }
+.settings-account { margin-left: 2px; width: calc(100% - 2px); box-sizing: border-box; }
+.split-nav[data-settings-pane] { margin-left: 2px; width: calc(100% - 2px); box-sizing: border-box; }
+.settings-content { padding: 0 !important; margin-left: -8px !important; }
+.settings-toolbar { height: 52px; min-height: 52px; margin: 0; padding: 0 24px; }
+.settings-toolbar .pane-title { font-size: var(--fs-heading); font-weight: var(--fw-medium); }
+.settings-body { max-width: 780px; width: 100%; box-sizing: border-box; padding: 4px 24px 24px; }
+.settings-body :deep(.wallpaper-grid) { position: relative; top: 5px; }
+.settings-body :deep(.setting-row) { min-height: 54px; box-sizing: border-box; }
+.settings-body :deep(.setting-row:has(input[type="range"])) { min-height: 48px; padding-top: 6px; padding-bottom: 6px; }
+@container (max-width: 800px) {
+  .settings-split .split-side { flex-basis: 200px; width: 200px; }
+  .settings-split .split-side .split-nav { padding-left: 8px; padding-right: 8px; }
+  .settings-search { max-width: 100%; box-sizing: border-box; }
+}
+</style>

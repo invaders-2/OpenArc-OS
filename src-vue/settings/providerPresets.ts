@@ -1,9 +1,9 @@
 /**
- * 「模型与服务商」的 8 条服务商预设（纯 TS：无 DOM、无网络、无 I/O，可离线单测）。
+ * 「模型与服务商」的 9 条服务商预设（纯 TS：无 DOM、无网络、无 I/O，可离线单测）。
  *
  * 数据来源：调研包 artifacts/provider-presets/presets.json（逐条官方 baseUrl / 模型 id /
  * 能力 / docsUrl 与实测状态码）。这里**不编模型**：有官方清单的按调研原样落表；
- * 没有公开模型清单的（Lovart）models 为空并标 modelsSource:"catalog"，
+ * 没有公开模型清单的（Lovart、APIMart）models 为空并标 modelsSource:"catalog"，
  * 由 provider/models 拉取后再勾选，绝不用编造的模型名凑数。
  *
  * 协议契约（只消费，不实现）：
@@ -197,6 +197,17 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
       { id: "claude-fable-5-1", capabilities: ["llm.chat", "llm.chat.vision"] },
     ],
     notes: "官方 Messages 协议（POST /v1/messages，x-api-key + anthropic-version）；不走 OpenAI 兼容层。无图像/视频/音频生成。",
+  },
+  {
+    id: "apimart",
+    name: "APIMart",
+    baseUrl: "https://api.apimart.ai/v1",
+    adapterType: "apimart",
+    docsUrl: "https://docs.apimart.ai/cn",
+    credentialMode: "single",
+    modelsSource: "catalog",
+    models: [],
+    notes: "apib.ai 是同一家的镜像域名，适配器按主机名自动识别，两个域名填哪个都行；不要再用 openai-compatible 手配。图片 / 视频 / 音频都是异步任务（提交拿 task_id，再轮询 /v1/tasks/{id}），对话即使不要流式也回 SSE。生成的链接有过期时间，要留档请及时转存。模型有数百个，靠「拉取模型」经 /v1/models?expand=category 按类别取（catalog），不在预设里手抄残清单。本机没有外网代理时，先在「模型出网代理」里配好，否则请求出不去。",
   },
 ];
 

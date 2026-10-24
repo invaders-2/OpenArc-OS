@@ -22,7 +22,7 @@ const DESC: Record<string, string> = {
   "mcp-center": "连接外部工具与服务",
   skills: "可复用的工作流程",
   projects: "项目与成员",
-  organization: "组织、部门与权限",
+  organization: "组织治理、部门与权限",
   canvas: "无限画布 · AI 创作",
   chat: "与助理对话 · 交代任务",
   automation: "定时让助理完成任务",

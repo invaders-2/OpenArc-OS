@@ -17,8 +17,8 @@ import { t } from "../i18n";
  *   2) 在线歌词 / 在线刮削需要注入 fetch，未注入时明确报「未接入」。
  */
 import { computed, onMounted, ref } from "vue";
-import { Disc3, FileText, FolderOpen, ListMusic, Music2, Pause, Play, RefreshCw, Settings2, SkipBack, SkipForward, Upload } from "lucide-vue-next";
-import { currentTrack, ensureLoaded, musicState, playAt as playFinderTrack, seek as seekFinder, step as stepFinder, toggle as toggleFinder } from "./music-state";
+import { Clock, Disc3, FileText, FolderOpen, Heart, ListMusic, Music2, Pause, Play, RefreshCw, Settings2, Shuffle, SkipBack, SkipForward, Upload, Volume2 } from "lucide-vue-next";
+import { currentTrack, ensureLoaded, musicState, playAt as playFinderTrack, seek as seekFinder, setVolume, step as stepFinder, toggle as toggleFinder } from "./music-state";
 import type { MusicTrack } from "./music-state";
 import DsButton from "../design-system/DsButton.vue";
 import DsDialog from "../design-system/DsDialog.vue";
@@ -527,6 +527,9 @@ const filteredFinderTracks = computed(() => {
   if (!needle) return finderTracks.value;
   return finderTracks.value.filter((track) => track.name.toLowerCase().includes(needle) || track.folder.toLowerCase().includes(needle));
 });
+const volume = ref(0.8);
+function onVolume(e: Event) { const value = Number((e.target as HTMLInputElement).value); volume.value = value; setVolume(value); }
+function shuffleFinder() { if (!finderTracks.value.length) return; playFinderAt(Math.floor(Math.random() * finderTracks.value.length)); }
 const finderEmpty = computed(() => musicState.loaded && !musicState.loading && !finderFailure.value && finderTracks.value.length === 0);
 const finderNoResult = computed(() => musicState.loaded && finderTracks.value.length > 0 && filteredFinderTracks.value.length === 0);
 const libNoResult = computed(() => libTracks.value.length > 0 && filteredLibTracks.value.length === 0);
@@ -559,42 +562,32 @@ onMounted(() => {
 
 <template>
   <div class="split music-app" data-music-app="1" :data-music-source="source" :data-music-library-state="libState">
-    <nav class="split-side" :aria-label="t('音乐')">
-      <div class="split-section">{{ t("来源") }}</div>
+    <nav class="split-side music-side" :aria-label="t('音乐')">
+      <div class="split-section">{{ t("资料库") }}</div>
       <button type="button" class="split-nav" :aria-current="source === 'library' ? 'true' : undefined" @click="selectSource('library')">
-        <Music2 :size="16" :stroke-width="1.25" />
-        <span class="split-nav-label">{{ t("音乐库") }}</span>
-        <small class="music-count">{{ libConfigured ? libTracks.length : t("未配置") }}</small>
+        <Music2 :size="16" :stroke-width="1.25" /><span class="split-nav-label">{{ t("全部歌曲") }}</span>
+        <small class="music-count">{{ libConfigured ? libTracks.length : "—" }}</small>
       </button>
+      <button type="button" class="split-nav music-nav-muted" disabled title="最近播放没有后端数据（NOT VERIFIED）"><Clock :size="16" /> <span class="split-nav-label">{{ t("最近播放") }}</span></button>
+      <button type="button" class="split-nav music-nav-muted" disabled title="喜欢没有后端数据（NOT VERIFIED）"><Heart :size="16" /> <span class="split-nav-label">{{ t("喜欢") }}</span></button>
       <button type="button" class="split-nav" :aria-current="source === 'finder' ? 'true' : undefined" @click="selectSource('finder')">
-        <FolderOpen :size="16" :stroke-width="1.25" />
-        <span class="split-nav-label">{{ t("访达") }}</span>
-        <small class="music-count">{{ finderTracks.length }}</small>
+        <FolderOpen :size="16" :stroke-width="1.25" /><span class="split-nav-label">{{ t("访达音频") }}</span><small class="music-count">{{ finderTracks.length }}</small>
       </button>
-
-      <template v-if="source === 'library'">
-        <div class="split-section">{{ t("扫描目录") }}</div>
-        <ul v-if="libDirs.length" class="music-dirs" data-music-dirs>
-          <li v-for="(dir, i) in libDirs" :key="dir" class="music-dir">
-            <ListMusic :size="12" :stroke-width="1.5" aria-hidden="true" />
-            <span class="music-dir__name" :title="dir">{{ libDirNames[i] || baseName(dir) }}</span>
-          </li>
-        </ul>
-        <p v-else class="music-side-note">{{ t("还没有扫描目录。加一个本机文件夹后，应用会索引其中的音频（只读）。") }}</p>
-        <div class="music-side-actions">
-          <DsButton size="sm" variant="secondary" @click="openDirs">
-            <Settings2 :size="13" :stroke-width="1.5" /> {{ t("管理扫描目录") }}
-          </DsButton>
-        </div>
-      </template>
-      <template v-else>
-        <p class="music-side-note">{{ t("桌面与各文件夹里的音频，经只读文件协议播放，不暴露磁盘路径。") }}</p>
-      </template>
+      <div class="split-section">{{ t("歌单") }}</div>
+      <p class="music-side-note" data-music-playlists-unverified>{{ t("还没有歌单；歌单能力未接入（NOT VERIFIED）。") }}</p>
+      <div class="split-section">{{ t("扫描目录") }}</div>
+      <ul v-if="libDirs.length" class="music-dirs" data-music-dirs>
+        <li v-for="(dir, i) in libDirs" :key="dir" class="music-dir"><ListMusic :size="12" :stroke-width="1.5" aria-hidden="true" /><span class="music-dir__name" :title="dir">{{ libDirNames[i] || baseName(dir) }}</span></li>
+      </ul>
+      <p v-else class="music-side-note">{{ t("还没有扫描目录。加一个本机文件夹后，应用会索引其中的音频（只读）。") }}</p>
+      <div class="music-side-actions"><DsButton size="sm" variant="secondary" @click="openDirs"><Settings2 :size="13" :stroke-width="1.5" /> {{ t("管理扫描目录") }}</DsButton></div>
     </nav>
 
     <div class="split-main music-main">
       <div class="music-toolbar">
         <strong class="music-title">{{ source === "library" ? t("全部歌曲") : t("访达音频") }}</strong>
+        <span class="toolbar-spacer" />
+        <button type="button" class="music-shuffle" :disabled="source !== 'finder' || !finderTracks.length" :title="source === 'library' ? '随机播放只对访达音频可用' : '随机播放'" data-music-shuffle @click="shuffleFinder"><Shuffle :size="14" /> {{ t("随机播放") }}</button>
         <div class="music-search">
           <DsSearchField :value="query" :placeholder="source === 'library' ? t('按曲名 / 歌手 / 专辑筛选') : t('按文件名筛选')" label="筛选曲目" @update:value="query = $event" />
         </div>
@@ -610,6 +603,9 @@ onMounted(() => {
       <p v-if="source === 'library' && libFailure && libTracks.length" class="music-banner" role="alert" :data-music-error-code="libFailureCode">刷新音乐库未完成：{{ libFailure }}</p>
       <p v-if="source === 'finder' && finderFailure" class="music-banner" role="alert" data-music-finder-error>{{ finderFailure }}</p>
 
+      <div v-if="(source === 'library' && libState === 'ready') || (source === 'finder' && !musicState.loading && !finderEmpty && !finderFailure)" class="music-table-head" data-music-list-header>
+        <span>#</span><span>{{ t("标题") }}</span><span>{{ t("艺人") }}</span><span>{{ t("时长") }}</span>
+      </div>
       <template v-if="source === 'library'">
         <DsPageState v-if="libState === 'unavailable'" kind="unavailable" :title="t('音乐库不可用')" description="当前环境没有 window.openarc.media 媒体桥；访达来源仍然可用。" data-music-unavailable="media-bridge" />
         <DsPageState v-else-if="libState === 'loading'" kind="loading" :title="t('正在读取音乐库…')" :description="t('第一次读取会扫描目录并解析标签，曲目多时需要一会儿；界面不显示假进度。')" />
@@ -627,14 +623,10 @@ onMounted(() => {
             :data-music-track-id="track.id"
             @click="openTrack(track)"
           >
-            <span class="music-art" aria-hidden="true"><Disc3 :size="18" :stroke-width="1.25" /></span>
-            <span class="music-track-main">
-              <span class="music-name">{{ track.title }}</span>
-              <span class="music-sub">{{ trackSubLine(track) }}</span>
-            </span>
-            <span class="music-meta">{{ track.folder || t("根目录") }}</span>
-            <span class="music-meta">{{ fmt(track.duration) }}</span>
-            <span class="music-meta music-ext">{{ track.ext.toUpperCase() }}<template v-if="track.hasLyrics"> {{ t("· 歌词") }}</template></span>
+            <span class="music-row-no">{{ filteredLibTracks.indexOf(track) + 1 }}</span>
+            <span class="music-row-title"><span class="music-art" aria-hidden="true"><Disc3 :size="16" :stroke-width="1.25" /></span><span class="music-name">{{ track.title }}</span></span>
+            <span class="music-row-artist">{{ track.artist || track.ext.toUpperCase() }}</span>
+            <span class="music-row-dur">{{ fmt(track.duration) }}</span>
           </button>
         </div>
       </template>
@@ -655,16 +647,20 @@ onMounted(() => {
             @dblclick="playFinderAt(finderTracks.indexOf(track))"
             @keydown.enter="playFinderAt(finderTracks.indexOf(track))"
           >
-            <span class="music-no">{{ currentTrack && currentTrack.key === track.key && musicState.playing ? "♪" : finderTracks.indexOf(track) + 1 }}</span>
-            <span class="music-name">{{ baseNameOf(track.name) }}</span>
-            <span class="music-meta">{{ track.ext.toUpperCase() }}</span>
-            <span class="music-meta">{{ track.folder }}</span>
-            <span class="music-meta">{{ sizeText(track.size) }}</span>
+            <span class="music-row-no"><span v-if="currentTrack && currentTrack.key === track.key && musicState.playing" class="music-eq" data-music-playing-eq><i /><i /><i /></span><template v-else>{{ finderTracks.indexOf(track) + 1 }}</template></span>
+            <span class="music-row-title"><span class="music-art" aria-hidden="true"><Disc3 :size="16" :stroke-width="1.25" /></span><span class="music-name">{{ baseNameOf(track.name) }}</span></span>
+            <span class="music-row-artist">{{ track.ext.toUpperCase() }} · {{ track.folder }}</span>
+            <span class="music-row-dur">{{ currentTrack && currentTrack.key === track.key && musicState.duration ? fmt(musicState.duration) : "—" }}</span>
           </button>
         </div>
       </template>
 
       <div class="music-bar" data-music-player :data-music-player-mode="source">
+        <div class="music-now-cover"><Disc3 :size="22" :stroke-width="1.2" /></div>
+        <div class="music-now-text">
+          <b class="music-now-name">{{ playerTitle }}</b>
+          <span class="music-now-meta">{{ playerMeta }}</span>
+        </div>
         <div class="music-ctrls">
           <button class="icon-button" :aria-label="t('上一首')" :disabled="source !== 'finder' || !finderTracks.length" @click="stepFinder(-1)"><SkipBack :size="15" /></button>
           <button class="music-play" :aria-label="source === 'library' ? t('音乐库曲目暂不能播放') : musicState.playing ? t('暂停') : t('播放')" :disabled="source !== 'finder' || !currentTrack" @click="toggleFinder">
@@ -672,17 +668,12 @@ onMounted(() => {
           </button>
           <button class="icon-button" :aria-label="t('下一首')" :disabled="source !== 'finder' || !finderTracks.length" @click="stepFinder(1)"><SkipForward :size="15" /></button>
         </div>
-        <div class="music-now">
-          <div class="music-now-name">{{ playerTitle }}</div>
-          <div class="music-now-meta">{{ playerMeta }}</div>
-          <div class="music-progress">
-            <small>{{ fmt(musicState.time) }}</small>
-            <input type="range" min="0" :max="musicState.duration || 0" step="0.1" :value="musicState.time" :aria-label="t('播放进度')" :disabled="source !== 'finder' || !currentTrack" @input="onSeek" />
-            <small>{{ fmt(musicState.duration) }}</small>
-          </div>
-          <p v-if="source === 'library'" class="music-playback-note" data-music-playback-unavailable>{{ t("音乐库里的曲目暂时还不能播放；访达里的音频可以正常播放。") }}</p>
-          <p v-if="source === 'library' && finderPlayingHint" class="music-playback-note" data-music-shared-player>{{ finderPlayingHint }}</p>
+        <div class="music-progress">
+          <small>{{ fmt(musicState.time) }}</small>
+          <input type="range" min="0" :max="musicState.duration || 0" step="0.1" :value="musicState.time" :aria-label="t('播放进度')" :disabled="source !== 'finder' || !currentTrack" @input="onSeek" />
+          <small>{{ fmt(musicState.duration) }}</small>
         </div>
+        <div class="music-volume"><Volume2 :size="14" /><input type="range" min="0" max="1" step="0.01" :value="volume" aria-label="音量" @input="onVolume" /></div>
       </div>
     </div>
 
@@ -1088,4 +1079,53 @@ onMounted(() => {
     display: none;
   }
 }
+
+/* task-13：原型布局（侧栏 200 / 工具条 52 / 表格行 56 / 播放条 72） */
+.music-app .split-side { flex: 0 0 200px; margin: 8px 0 8px 8px !important; padding: 44px 8px 10px; }
+.music-app .split-main { padding: 0; padding-top: 0 !important; }
+.music-side .split-section { padding: 12px 10px 4px; font-size: var(--fs-micro); font-weight: var(--fw-medium); color: var(--muted); }
+.music-side .split-nav { min-height: 32px; padding: 0 10px; gap: 9px; }
+.music-nav-muted { opacity: 0.5; cursor: default; }
+.music-toolbar { height: 52px; min-height: 52px; margin: 0; padding: 0 20px; border-bottom: 0.5px solid var(--line); }
+.music-title { font-size: 15px; font-weight: var(--fw-medium); }
+.music-shuffle { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-caption); }
+.music-table-head { display: grid; grid-template-columns: 40px minmax(0, 1fr) 200px 72px; align-items: center; gap: 10px; height: 30px; padding: 0 20px; color: var(--muted); font-size: var(--fs-micro); border-bottom: 0.5px solid var(--line); }
+.music-table-head span:last-child { text-align: right; }
+.music-list { padding: 0 20px; }
+.music-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 200px 72px; align-items: center; gap: 10px; height: 56px; padding: 0; border-radius: 0; border-bottom: 0.5px solid var(--line); text-align: left; }
+.music-row:hover { background: rgb(var(--text-rgb) / 0.04); }
+.music-row[aria-current="true"] { background: rgb(var(--text-rgb) / 0.08); }
+.music-row-no { display: flex; align-items: center; justify-content: flex-start; color: var(--muted); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.music-row-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.music-row-title .music-art { width: 28px; height: 28px; flex: none; border-radius: 5px; display: grid; place-items: center; background: rgb(var(--text-rgb) / 0.08); color: var(--muted); }
+.music-row-title .music-name { font-size: var(--fs-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-row-artist { color: var(--muted); font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-row-dur { text-align: right; color: var(--muted); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.music-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.music-eq i { width: 3px; background: var(--text); animation: music-eq 0.9s ease-in-out infinite alternate; }
+.music-eq i:nth-child(1) { height: 6px; }
+.music-eq i:nth-child(2) { height: 11px; animation-delay: 0.15s; }
+.music-eq i:nth-child(3) { height: 8px; animation-delay: 0.3s; }
+@keyframes music-eq { from { transform: scaleY(0.5); } to { transform: scaleY(1); } }
+.music-bar { flex: none; height: 72px; margin: 0; padding: 0 20px; display: flex; align-items: center; gap: 14px; border-top: 0.5px solid var(--line); background: rgb(var(--content-rgb) / 0.6); }
+.music-now-cover { width: 44px; height: 44px; flex: none; border-radius: 8px; display: grid; place-items: center; background: rgb(var(--text-rgb) / 0.1); color: var(--muted); }
+.music-now-text { width: 150px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.music-now-text b { font-size: var(--fs-caption); font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-now-text span { color: var(--muted); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-bar .music-ctrls { flex: none; }
+.music-bar .music-progress { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.music-bar .music-progress input { flex: 1; }
+.music-bar .music-progress small { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.music-volume { flex: none; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.music-volume input { width: 90px; }
+
+.music-list { padding: 0 12px; }
+.music-table-head { grid-template-columns: 44px 279px minmax(0, 1fr) 72px; padding: 0 12px; }
+.music-row { grid-template-columns: 44px 279px minmax(0, 1fr) 72px; height: 40px; }
+.music-bar .music-progress { flex: none; width: 196px; margin-left: 24px; }
+.music-volume { margin-left: auto; }
+
+.music-table-head { margin: 0 12px; padding: 0; width: auto; }
+.music-bar .music-progress { height: 16px; align-items: center; }
+.music-bar .music-progress input { height: 16px; }
 </style>
