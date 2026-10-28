@@ -107,6 +107,8 @@ const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/
 
 /** 画布 Agent 思考强度（TapNow Off / Light / Standard / Heavy） */
 const THINKING_LEVELS = Object.freeze(["off", "light", "standard", "heavy"]);
+/** 画布 Agent 执行方式：confirm = 先出计划等用户确认（本轮不写画布）；auto = 规划后连续执行。两者写入都仍需可信批准。 */
+const PLAN_MODES = Object.freeze(["confirm", "auto"]);
 
 function normalizeCanvasTaskContext(raw) {
   if (raw == null) return { ok: true, context: null };
@@ -118,11 +120,13 @@ function normalizeCanvasTaskContext(raw) {
   if (!strings(raw.resourceRefs, 16, /^(?:openarc-asset:|resource:\/\/)[A-Za-z0-9_.#:-]{1,160}$/)) return { ok: false, error: "INVALID_INPUT" };
   if (!strings(raw.completionConditions, 4, /^[^\u0000-\u001f]{1,160}$/)) return { ok: false, error: "INVALID_INPUT" };
   if (raw.thinking != null && !THINKING_LEVELS.includes(raw.thinking)) return { ok: false, error: "INVALID_INPUT" };
+  if (raw.planMode != null && !PLAN_MODES.includes(raw.planMode)) return { ok: false, error: "INVALID_INPUT" };
   const context = {
     type: "canvas.task.v1", schemaVersion: 1, canvasId,
     selectedNodeIds: [...new Set(raw.selectedNodeIds)], resourceRefs: [...new Set(raw.resourceRefs)],
     completionConditions: raw.completionConditions.slice(),
     ...(raw.thinking ? { thinking: raw.thinking } : {}),
+    ...(raw.planMode ? { planMode: raw.planMode } : {}),
   };
   if (JSON.stringify(context).length > 3500) return { ok: false, error: "INVALID_INPUT" };
   return { ok: true, context };

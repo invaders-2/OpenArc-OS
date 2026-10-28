@@ -20,7 +20,7 @@ export function FolderButton({ ctl, a }: { ctl: Ctl; a: AgentState }) {
   const [name, setName] = useState("");
   useEffect(() => { const cmd = command(); if (!cmd) return; void cmd({ type: "canvas/folder/grants" }).then((r) => { if (r.grants?.[0]) setName(r.grants[0].name); }).catch(() => undefined); }, []);
   const files = (grantId: string) => {
-    openModal(() => <FolderFiles ctl={ctl} a={a} grantId={grantId} onName={setName} />);
+    openModal(() => <FolderFiles ctl={ctl} a={a} grantId={grantId} onName={setName} />, "m-md");
   };
   return <button className={"ib" + (name ? " on" : "")} id="aFolder" aria-label={name ? "已选目录：" + name : "选择本地文件夹"} title={name || "选择本地文件夹"} onClick={(e) => openPop(e.currentTarget, (close) => <FolderMenu ctl={ctl} a={a} close={close} onChoose={files} onName={setName} />, "up")}><Icon name="folder" size="s" /></button>;
 }
@@ -57,7 +57,7 @@ export function CaptureButton({ ctl, a }: { ctl: Ctl; a: AgentState }) {
 
 function captureSource(ctl: Ctl, a: AgentState, mode: "screenshot" | "recording", recorder?: React.MutableRefObject<MediaRecorder | null>, stream?: React.MutableRefObject<MediaStream | null>, chunks?: React.MutableRefObject<Blob[]>, setRecording?: (v: boolean) => void) {
   const cmd = command(); if (!cmd) return ctl.store.toast("截图与录屏只在桌面版可用");
-  openModal(() => <CaptureSources ctl={ctl} a={a} mode={mode} recorder={recorder} stream={stream} chunks={chunks} setRecording={setRecording} />);
+  openModal(() => <CaptureSources ctl={ctl} a={a} mode={mode} recorder={recorder} stream={stream} chunks={chunks} setRecording={setRecording} />, "m-md");
 }
 
 function CaptureSources({ ctl, a, mode, recorder, stream, chunks, setRecording }: { ctl: Ctl; a: AgentState; mode: "screenshot" | "recording"; recorder?: React.MutableRefObject<MediaRecorder | null>; stream?: React.MutableRefObject<MediaStream | null>; chunks?: React.MutableRefObject<Blob[]>; setRecording?: (v: boolean) => void }) {

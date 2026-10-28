@@ -22,6 +22,8 @@ import { useEditorState } from "./editors/registry";
 import { draftToFinal, smartClip, trimToNode } from "../videoTools";
 import { videoAiMenu } from "./VideoTools";
 import type { CanvasStore } from "../store";
+import { kbd } from "../keys";
+import { ModelMenu } from "./ModelMenu";
 
 export function SelectionUI() {
   const ctl = useCtl(); const ui = useS((s) => s.ui); const doc = useS((s) => s.doc); useS((s) => s.view); const runtime = useS((s) => s.runtime);
@@ -38,8 +40,10 @@ export function SelectionUI() {
     // 左侧竖排工具栏（#lb）所在的高度范围内，浮层不压到它上面：左边界让到工具栏右侧
     const lb = (tbRef.current || gpRef.current)?.closest(".cn-root")?.querySelector("#lb")?.getBoundingClientRect();
     const minLeft = (top: number, h: number) => (lb && lb.width && top < lb.bottom - sr.top && top + h > lb.top - sr.top ? Math.max(8, lb.right - sr.left + 8) : 8);
-    if (tbRef.current) { const tw = tbRef.current.offsetWidth, th = tbRef.current.offsetHeight; const ty = a.y - sr.top - 52; const top = Math.max(8, ty); tb = ty > sr.height - 60 || b.y < sr.top ? { left: -9999, top: -9999 } : { left: clamp(cx - tw / 2, minLeft(top, th), sr.width - tw - 8), top }; }
-    if (gpRef.current) { const gw = gpRef.current.offsetWidth, gh = gpRef.current.offsetHeight; let top = b.y - sr.top + 14; const safeB = gpRef.current.closest(".cn-root.in-win") ? 76 : 8; /* 嵌在系统窗口里：底部给会弹出的 Dock 让位 */ if (top + gh > sr.height - safeB) top = Math.max(8, sr.height - gh - safeB); gp = { left: clamp(cx - gw / 2, minLeft(top, gh), sr.width - gw - 8), top }; }
+    // 节点上方放不下工具条（会压到顶部标题栏和节点标题）时，工具条改放到节点下方，生成面板再往下让
+    const TOP_SAFE = 64; let below = 0;
+    if (tbRef.current) { const tw = tbRef.current.offsetWidth, th = tbRef.current.offsetHeight; const ty = a.y - sr.top - 52; let top = ty; if (ty < TOP_SAFE) { top = b.y - sr.top + 10; below = th + 10; if (top > sr.height - th - 8) { top = TOP_SAFE; below = 0; } /* 节点比屏幕还高：贴在顶部栏下方 */ } tb = ty > sr.height - 60 || b.y < sr.top ? { left: -9999, top: -9999 } : { left: clamp(cx - tw / 2, minLeft(top, th), sr.width - tw - 8), top }; }
+    if (gpRef.current) { const gw = gpRef.current.offsetWidth, gh = gpRef.current.offsetHeight; let top = b.y - sr.top + 14 + below; const safeB = gpRef.current.closest(".cn-root.in-win") ? 76 : 8; /* 嵌在系统窗口里：底部给会弹出的 Dock 让位 */ if (top + gh > sr.height - safeB) top = Math.max(8, sr.height - gh - safeB); gp = { left: clamp(cx - gw / 2, minLeft(top, gh), sr.width - gw - 8), top }; }
     if (JSON.stringify(tb) !== JSON.stringify(pos.tb) || JSON.stringify(gp) !== JSON.stringify(pos.gp)) setPos({ tb, gp });
   });
   if (!node) return null;
@@ -230,11 +234,14 @@ function GenPanel({ node }: { node: CanvasNode }) {
         {hasLast ? <><button className="vp-swap tipB" data-p="vswap" data-fram-swap data-tip="交换首尾帧" disabled={busy || !first || !last} onClick={swap}><Icon name="branch" size="xs" /></button>{slot("last", "尾帧", last)}</> : null}
         <button className="vp-add tipB" data-p="addin" data-tip="添加参考图" onClick={(e) => addMenu(e.currentTarget)}><Icon name="plus" size="s" /></button>
         {m?.modes?.includes("视频编辑") ? <button className="vp-object" data-p="object-replace" disabled={busy} onClick={() => { set({ mode: "视频编辑" }); const next = draft.trim() || "替换源视频中的目标对象，保持其他人物、背景、光照、镜头运动和场景连续性不变"; setDraft(next); commitPrompt(next); }}><Icon name="wand" size="xs" />对象替换</button> : null}
+        <span className="grow" />
+        <button className={"linkbtn" + (preview ? " on" : "")} data-p="preview" onClick={() => store.setUI({ preview: !preview })}><Icon name="text" size="xs" />请求预览</button>
       </div>
       <textarea id="gpPrompt" className="vp-prompt" placeholder={ph} value={draft}
         onChange={(e) => { setDraft(e.target.value); if (e.target.value.endsWith("@")) refMenu(e.target); }} onBlur={() => commitPrompt(draft)}
         onKeyDown={(e) => { e.stopPropagation(); if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } if (e.key === "Escape") { (e.target as HTMLTextAreaElement).blur(); store.setUI({ sel: new Set(), pick: null }); } }} />
       {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
+      {preview ? <div className="gp-prev"><pre>{JSON.stringify(previewOf(ctl, node), null, 2)}</pre></div> : null}
       <div className="vp-foot">
         <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>
         <button className="vp-model" data-p="model" onClick={(e) => paramPop(ctl, node, "model", e.currentTarget)} title={m?.name || "未配置模型"}>{m?.name || "未配置模型"}</button>
@@ -249,10 +256,13 @@ function GenPanel({ node }: { node: CanvasNode }) {
           <button data-p="dur" data-vval="dur" disabled={busy || !m} onClick={(e) => paramPop(ctl, node, "dur", e.currentTarget)}>{videoDurLabel(vp.dur)}</button>
         </span>
         <span className="grow" />
+        {/* 与图片 / 文本面板一致：语音输入 + 预计耗时 */}
+        <button className="vp-mic" data-p="mic" title="语音输入" onClick={(e) => voice(ctl, node, e.currentTarget, (v) => { setDraft(v); commitPrompt(v); })}><Icon name="mic" size="s" /></button>
+        {est ? <span className="vp-est tnum" title="预计耗时">{est}</span> : null}
         <button className="vp-times tnum" data-p="vtimes" disabled={busy || !m || (m.times || [1]).length < 2} onClick={(e) => paramPop(ctl, node, "vtimes", e.currentTarget)}>{videoTimesLabel(vp.times)}</button>
         {run
           ? <button className="vp-send busy" data-p="stop" title="停止生成" onClick={() => stopNode(store, node.id)}><span className="sqr" /></button>
-          : <button className="vp-send" data-p="send" title="生成 ⌘↵" onClick={send}><Icon name="send" size="s" /></button>}
+          : <button className="vp-send" data-p="send" title={kbd("生成 ⌘↵")} onClick={send}><Icon name="send" size="s" /></button>}
       </div>
     </>;
   }
@@ -317,7 +327,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
         {/* 没配模型时 est 为空：不渲染空药丸（否则看起来像没渲染完），也不占位 */}
         {est ? <span className="est tnum" title="预计耗时">{est}{m?.local ? " · 本机" : ""}</span> : null}
         {run ? <button className="send busy" data-p="stop" title="停止生成" onClick={() => stopNode(store, node.id)}><i className="ring"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="sqr" /></button>
-          : <button className="send" data-p="send" title="生成 ⌘↵" onClick={send}><Icon name="send" size="s" /></button>}
+          : <button className="send" data-p="send" title={kbd("生成 ⌘↵")} onClick={send}><Icon name="send" size="s" /></button>}
       </div>
     </div>
     {kind === "image" && camOpen ? <CamLayer node={node} anchor={camRef.current} onClose={() => setCamOpen(false)} /> : null}
@@ -398,16 +408,9 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   const set = (patch: Record<string, unknown>) => store.patchGen(node.id, (gg) => ({ params: { ...gg.params, ...patch } as typeof gg.params }));
   if (k === "model") {
     const list = store.modelsOf(kind);
-    return openPop(anchor, (close) => <>
-      <div className="mh">{TYPE_LABEL[kind]}模型 · 来自 设置 › 模型</div>
-      {list.map((x) => <button key={x.id} className={"mi" + (x.id === cur().m?.id ? " on" : "")} data-v={x.id} onClick={() => { close(); store.rememberModel(kind, x.id); store.patchGen(node.id, (gg) => ({ params: clampParams(kind, gg.params, x) })); if (kind === "video") afterInputsChanged(store, node.id); }}>
-        <span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{x.name}{x.tags.map((t) => <span key={t} className={"tag" + (t === "NEW" ? " new" : "")}>{t}</span>)}{x.specSource === "guess" ? <span className="tag" data-spec-source="guess" title="服务商没有提供该模型的参数规格，下面的比例 / 档位 / 选项是按模型名推断的，以实际生成为准">未验证</span> : null}</span>
-          {kind === "video" ? <span className="mtags">{x.res?.length && !x.tags.some((t) => t.toLowerCase() === x.res![x.res!.length - 1].toLowerCase()) ? <span className="tag">{x.res[x.res.length - 1]}</span> : null}{x.durs?.length ? <span className="tag tnum">{Math.min(...x.durs) === Math.max(...x.durs) ? x.durs[0] + "S" : Math.min(...x.durs) + "-" + Math.max(...x.durs) + "S"}</span> : null}{x.audio ? <span className="tag"><Icon name="audio" size="xs" /></span> : null}<span className="tag">{(x.modes || []).length} 种方式</span></span> : null}
-          <span className="d">{x.vendor}{kind === "image" ? ` · ${x.i2i ? "最多 " + x.maxRefs + " 张参考图" : "仅文生图"}` : kind === "video" ? "" : kind === "text" ? (x.vision ? " · 能读图" : " · 只读文字") : ""}{x.specSource === "guess" ? " · 参数按名字推断" : ""}</span></span>
-      </button>)}
-      {!list.length ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>还没有配置{TYPE_LABEL[kind]}模型</span></div> : null}
-      {ctl.host.openModelSettings ? <><div className="msep" /><button className="mi" onClick={() => { close(); ctl.host.openModelSettings!(); }}><Icon name="settings" size="s" />模型设置</button></> : null}
-    </>, "up");
+    return openPop(anchor, (close) => <ModelMenu kind={kind} list={list} currentId={cur().m?.id} close={close}
+      onPick={(x) => { store.rememberModel(kind, x.id); store.patchGen(node.id, (gg) => ({ params: clampParams(kind, gg.params, x) })); if (kind === "video") afterInputsChanged(store, node.id); }}
+      onSettings={ctl.host.openModelSettings ? () => ctl.host.openModelSettings!() : undefined} />, "up", "left", "pop-model");
   }
   const { m } = cur();
   // 没配置模型：仍把同一套控件渲染出来（灰显），顶部保留引导 + 「打开模型设置」；有模型时行为不变。
@@ -425,7 +428,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   if (k === "ratio") return pop(() => <RatioPop node={node} model={mm} disabled={dis} />);
   if (k === "count") return pop((close) => <><div className="mh">一次生成几张</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + ((cur().g.params as ImageParams).count === c ? " on" : "")} disabled={dis || !mm.batch?.includes(c)} onClick={() => { close(); set({ count: c }); }}>{c}×<span className="k">{!dis && mm.batch?.includes(c) ? (c > 1 ? (store.state.ui.batchMode === "stack" ? "堆叠在本节点" : "铺开成新节点") : "") : "该模型不支持"}</span></button>)}</>);
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);
-  if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{(Object.keys(VMODES) as Array<keyof typeof VMODES>).map((x) => { const ok = (mm.modes || []).includes(x); return <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={!ok || dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{ok ? (x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need) : mm.name + " 不支持"}</span></span><span className="k tnum">{VMODES[x].api}</span></button>; })}</>);
+  if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{(Object.keys(VMODES) as Array<keyof typeof VMODES>).map((x) => { const ok = (mm.modes || []).includes(x); return <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={!ok || dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{ok ? (x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need) : mm.name + " 不支持"}</span></span></button>; })}</>); /* 不再显示 text_to_video 这类接口名 */
   if (k === "vratio") return pop(() => <VRatioPop node={node} m={mm} disabled={dis} />);
   if (k === "vres") { const rr = resRange(mm); const vp0 = cur().g.params as VideoParams; return pop((close) => <><div className="mh">清晰度</div><div className="seg wrap">{(mm.res || []).map((r) => <button key={r} className={vp0.res === r && !vp0.draft ? "on" : ""} disabled={dis} onClick={() => { close(); set({ res: r, draft: false }); }}>{r}</button>)}</div>
     <div className="msep" />

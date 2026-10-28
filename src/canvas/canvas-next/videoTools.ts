@@ -16,6 +16,7 @@ import { connect } from "./actions";
 import { regenAsNew, runNode } from "./engine";
 import { clampTrim, defaultParams, genOf, outOf, resRange, trimIsFull, uid, type ModelSpec, type VideoMode, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
+import { kbd } from "./keys";
 
 export type VideoAiOp = "replace" | "remove" | "extend" | "retake";
 export const RETAKE_CAMERAS = ["推近特写", "拉远全景", "环绕运镜", "俯拍", "仰拍", "侧面机位", "跟拍", "手持晃动"];
@@ -98,7 +99,7 @@ export async function smartClip(store: CanvasStore, n: CanvasNode) {
   if (r.shots.length < 2) { store.toast("只检测到 1 个镜头，不需要拆分"); return []; }
   const res = await segmentsToNodes(store, n, r.shots, "镜头", { data });
   const extra = [r.capped ? "镜头较多，最后一段包含剩余部分" : "", res.real && res.note ? res.note : ""].filter(Boolean).join("，");
-  store.toast(`已按镜头拆成 ${res.nodes.length} 个视频节点${res.real ? "" : res.note ? `（${res.note}，按区间播放）` : "（按区间播放）"}${extra ? "；" + extra : ""} · ⇧S 可堆叠`, 5200);
+  store.toast(`已按镜头拆成 ${res.nodes.length} 个视频节点${res.real ? "" : res.note ? `（${res.note}，按区间播放）` : "（按区间播放）"}${extra ? "；" + extra : ""} · ${kbd("⇧S")} 可堆叠`, 5200);
   return res.nodes;
 }
 

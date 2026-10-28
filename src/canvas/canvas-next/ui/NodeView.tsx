@@ -6,7 +6,7 @@ import { Markdown, TextSkeleton } from "./markdown";
 import { GroupBody, Model3DBody, NoteBody, Scene3DBody, TimelineBody } from "./LegacyNodes";
 import { memo, useEffect, useRef, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { bgColor, clampTrim, formatClock, genOf, isGenKind, outOf, tagColor, TYPE_ICON, TYPE_LABEL, videoResLabel, type GenOutput, type VideoParams, type VideoTrim } from "../model";
+import { bgColor, clampTrim, fitMediaBox, formatClock, genOf, withGen, isGenKind, outOf, tagColor, TYPE_ICON, TYPE_LABEL, videoResLabel, type GenOutput, type VideoParams, type VideoTrim } from "../model";
 import type { RunState } from "../store";
 import { Icon } from "./Icon";
 import { TableNodeBody } from "./TableNode";
@@ -81,19 +81,24 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
         <Icon name={TYPE_ICON[node.kind]} size="xs" /><span className="t">{g.title}</span>
         {node.kind === "video" ? <span className="kindtag" data-kindtag>视频</span> : null}
         {g.tag || g.pinned ? <i className="tagdot" title="颜色标记" style={{ background: tagColor(g.tag || "red")! }} /> : null}{g.agent ? <span className="pinmark">Agent</span> : null}
+        {p.sel && out && node.kind === "text" ? <span className="nhb" data-badges="text"><span data-badge="model">{p.modelName || "未配置模型"}</span>{g.hist.length > 1 ? <span className="tnum" data-badge="version"> · 第 {g.hi + 1}/{g.hist.length} 版</span> : null}</span> : null}
         {running ? <span className="st tnum" style={{ color: "var(--fg2)" }}>{run!.batch ? `${run!.batch.done}/${run!.batch.total}` : <i className="runsig" role="status" aria-label="生成中" />}</span>
           : g.err ? <span className="st" style={{ color: "var(--bad)" }}><Icon name="alert" size="xs" /></span>
           : out ? <span className="st" style={{ color: "var(--fg3)" }}><Icon name="check" size="xs" /></span> : null}
       </div>
       <div className={"nbody" + (g.bg ? " tinted" : "")} style={{ height: node.h, ...(g.bg ? { ["--tint" as string]: bgColor(g.bg)! } : {}) }}>
         <Body {...p} out={out} running={running} />
-        {p.sel && out ? <div className="nbadges" data-badges={node.kind}>
+        {/* 文本节点的角标放到标题栏，不压正文 */}
+        {p.sel && out && node.kind !== "text" ? <div className="nbadges" data-badges={node.kind}>
           <span className="nb model" data-badge="model">{p.modelName || (isGenKind(node.kind) ? "未配置模型" : node.kind)}</span>
           {g.hist.length > 1 ? <span className="nb ver tnum" data-badge="version">第 {g.hi + 1}/{g.hist.length} 版</span> : null}
         </div> : null}
-        {g.hist.length > 1 && !running && node.kind !== "text" ? <div className="vstrip tnum"><button data-act="vprev" onPointerDown={(e) => p.onAct(node, "vprev", e)}><Icon name="left" size="xs" /></button><button className="vnum" data-act="vmenu" title="版本操作" onPointerDown={(e) => p.onAct(node, "vmenu", e)}>{g.hi + 1}/{g.hist.length}</button><button data-act="vnext" onPointerDown={(e) => p.onAct(node, "vnext", e)}><Icon name="right" size="xs" /></button></div> : null}
+        {/* 右上角一行：替换 + 版本切换，横向排开不重叠 */}
+        <div className="ntr">
+          {(node.kind === "image" || node.kind === "video" || node.kind === "audio") && out && !running ? <button className="node-replace" data-act="replace" title="替换素材（位置 / 尺寸 / 连线 / 提示词保留）" style={{ height: 24, padding: "0 9px", borderRadius: 7, background: "rgba(0,0,0,.62)", color: "#fff", fontSize: 11, gap: 3, zIndex: 3, whiteSpace: "nowrap", alignItems: "center" }} onPointerDown={(e) => { e.stopPropagation(); p.onAct(node, "replace", e); }}><Icon name="upload" size="xs" />替换</button> : null}
+          {g.hist.length > 1 && !running && node.kind !== "text" ? <div className="vstrip tnum"><button data-act="vprev" onPointerDown={(e) => p.onAct(node, "vprev", e)}><Icon name="left" size="xs" /></button><button className="vnum" data-act="vmenu" title="版本操作" onPointerDown={(e) => p.onAct(node, "vmenu", e)}>{g.hi + 1}/{g.hist.length}</button><button data-act="vnext" onPointerDown={(e) => p.onAct(node, "vnext", e)}><Icon name="right" size="xs" /></button></div> : null}
+        </div>
         {node.kind === "image" && out && !running ? <button className={"favstar" + (g.fav ? " on" : "")} data-act="fav" title={g.fav ? "取消收藏" : "收藏到素材库"} onPointerDown={(e) => p.onAct(node, "fav", e)}><Icon name="star" size="s" /></button> : null}
-        {(node.kind === "image" || node.kind === "video" || node.kind === "audio") && out && !running ? <button className="node-replace" data-act="replace" title="替换素材（位置 / 尺寸 / 连线 / 提示词保留）" style={{ height: 24, padding: "0 9px", borderRadius: 7, background: "rgba(0,0,0,.62)", color: "#fff", fontSize: 11, gap: 3, zIndex: 3, whiteSpace: "nowrap", position: "absolute", left: "50%", top: 8, transform: "translateX(-50%)", alignItems: "center" }} onPointerDown={(e) => { e.stopPropagation(); p.onAct(node, "replace", e); }}><Icon name="upload" size="xs" />替换</button> : null}
         {p.batchInfo && !running ? <span className="bbadge tnum">{p.batchInfo}</span> : null}
         {g.err && !running ? (() => {
           // 主行只出现人话（engine 写入的 err），原始码单独一行灰字；没有可用模型时重试禁用并说明原因
@@ -134,7 +139,7 @@ function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean }) {
     return <div className="ph"><Icon name="text" /><span>双击直接书写，或在下方写指令让模型生成</span></div>;
   }
   if (node.kind === "video") {
-    if (out && (out.frame || out.url)) return <VideoBody node={node} out={out} res={(genOf(node).params as VideoParams).res || out.res} />;
+    if (out && (out.frame || out.url)) return <VideoBody node={node} out={out} res={out.res || (!out.meta?.model && out.w && out.h ? Math.min(out.w, out.h) + "p" /* 上传的视频：显示文件真实分辨率，不套节点默认参数 */ : (genOf(node).params as VideoParams).res)} />;
     return <div className="ph"><Icon name="video" /><span>连入图片作为首帧 / 尾帧 / 参考，或直接写提示词</span></div>;
   }
   if (out) return <AudioBody out={out} />;
@@ -179,19 +184,28 @@ function VideoBody({ node, out, res }: { node: CanvasNode; out: GenOutput; res?:
     const t = clampTrim(out.dur, next);
     store.patchGen(node.id, (g) => ({ hist: g.hist.map((h, i) => (i === g.hi ? { ...h, trim: t } : h)) }));
   };
+  // 上传时没读到宽高（部分编码浏览器读不了元数据）：视频元素加载出来后补上真实宽高，并把节点改回原比例
+  const learnSize = (el: HTMLVideoElement) => {
+    const vw = el.videoWidth, vh = el.videoHeight; if (!vw || !vh || (out.w && out.h)) return;
+    const b = fitMediaBox(vw, vh, node.w);
+    store.updateNode(node.id, (n) => withGen({ ...n, ...(b ? { w: b.w, h: b.h } : {}) }, { hist: genOf(n).hist.map((h, i) => (i === genOf(n).hi ? { ...h, w: vw, h: vh, ...(h.dur ? {} : Number.isFinite(el.duration) && el.duration > 0 ? { dur: Math.round(el.duration * 100) / 100 } : {}) } : h)) }));
+  };
+  const pref = useRef<HTMLVideoElement>(null);
+  // 视频已经加载过、之后宽高才丢失（旧数据 / 换版本）时，元数据事件不会再触发：这里补一次
+  useEffect(() => { const el = vref.current || pref.current; if (el && el.readyState >= 1) learnSize(el); });
   const chips = <>
     <span className="vdur tnum" data-vdur>{formatClock(now != null ? now : out.dur)}</span>
     {resText && resText !== "自适应" ? <span className="vres tnum" data-vres>{resText}</span> : null}
   </>;
   if (playing && url) return <>
-    <video ref={vref} src={url} autoPlay controls onEnded={() => { setPlaying(false); setNow(null); }}
+    <video ref={vref} src={url} autoPlay controls onLoadedMetadata={(e) => learnSize(e.currentTarget)} onEnded={() => { setPlaying(false); setNow(null); }}
       onPlay={(e) => { if (trim && e.currentTarget.currentTime < trim.in - 0.05) seekTo(e.currentTarget, trim.in); }}
       onTimeUpdate={(e) => onTick(e.currentTarget)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
     {chips}
     {showTrim ? <TrimBar trim={trim} dur={out.dur} playing onSeek={(t) => seekTo(vref.current, t)} onTrim={saveTrim} /> : null}
   </>;
   return <>
-    {frame ? <img src={frame} alt="" draggable={false} /> : url ? <video src={url} muted preload="metadata" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+    {frame ? <img src={frame} alt="" draggable={false} /> : url ? <video ref={pref} src={url} muted preload="metadata" onLoadedMetadata={(e) => learnSize(e.currentTarget)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
     <button className="play" data-act="play" onPointerDown={(e) => { e.stopPropagation(); if (url) setPlaying(true); }}><Icon name="play" /></button>
     {chips}
     {showTrim ? <TrimBar trim={trim} dur={out.dur} onSeek={() => undefined} onTrim={saveTrim} /> : null}

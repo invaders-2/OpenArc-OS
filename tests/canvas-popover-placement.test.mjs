@@ -84,3 +84,16 @@ test("点锚点（坐标为点，宽高 0）与 menu 标记", () => {
   const up = placePopover({ anchor: { x: 300, y: 500, width: 0, height: 0 }, popup, viewport, dir: "up", align: "left" });
   assert.equal(up.menu, false, "向上弹层不套 menu 动画");
 });
+
+test("左对齐放不下而右对齐放得下：换成右对齐，不被视口边缘挤歪", () => {
+  const p = placePopover({ anchor: { x: 1100, y: 400, width: 40, height: 30 }, popup, viewport, dir: "up", align: "left" });
+  assert.equal(p.x + p.maxWidth, 1140);
+});
+
+test("上下都放不下：留在空间大的一侧，限高并滚动（不盖住锚点区域）", () => {
+  const region = { x: 400, y: 200, width: 560, height: 300 }; // 例如生成面板整块
+  const tall = { x: 0, y: 0, width: 300, height: 420 };
+  const p = placePopover({ anchor: region, popup: tall, viewport, dir: "up", align: "left" });
+  assert.equal(p.scrollY, true);
+  assert.ok(p.y + p.maxHeight <= region.y - 8 + 0.001 || p.y >= region.y + region.height + 8 - 0.001);
+});

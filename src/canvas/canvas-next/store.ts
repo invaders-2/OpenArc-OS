@@ -202,7 +202,7 @@ export class CanvasStore {
     this.state = { ...this.state, doc: next, undo, redo: opts.history ? [] : this.state.redo }; this.emit(); this.scheduleSave();
   }
   snapshot() { this.state = { ...this.state, undo: [...this.state.undo.slice(-59), this.state.doc], redo: [] }; }
-  undo() { const u = this.state.undo; if (!u.length) return this.toast("没有可撤销的操作"); this.state = { ...this.state, doc: u[u.length - 1], undo: u.slice(0, -1), redo: [...this.state.redo, this.state.doc] }; this.cleanSel(); this.stopOrphanRuns(); this.emit(); this.scheduleSave(); }
+  undo() { const u = this.state.undo; if (!u.length) return this.toast("没有可撤销的操作"); this.state = { ...this.state, doc: u[u.length - 1], undo: u.slice(0, -1), redo: [...this.state.redo, this.state.doc], toasts: this.state.toasts.filter((t) => !t.html.includes("撤销")) }; /* 已经撤销了，「…⌘Z 撤销」的提示同时收起 */ this.cleanSel(); this.stopOrphanRuns(); this.emit(); this.scheduleSave(); }
   redo() { const r = this.state.redo; if (!r.length) return this.toast("没有可重做的操作"); this.state = { ...this.state, doc: r[r.length - 1], redo: r.slice(0, -1), undo: [...this.state.undo, this.state.doc] }; this.cleanSel(); this.stopOrphanRuns(); this.emit(); this.scheduleSave(); }
   /** 撤销 / 重做 / 远端改动让正在生成的节点消失时，停掉它的生成（否则继续计费，结果也无处可写） */
   private stopOrphanRuns() { const ids = new Set(this.state.doc.nodes.map((n) => n.id)); for (const [id, r] of Object.entries(this.state.runtime)) if (!ids.has(id)) r.abort.abort(); }
@@ -267,7 +267,9 @@ export class CanvasStore {
   /* ---------- 提示 ---------- */
   toast(html: string, ms = 2600) {
     if (this.disposed) return;
-    const id = ++this.toastSeq; this.set({ toasts: [...this.state.toasts, { id, html }] });
+    const id = ++this.toastSeq;
+    // 同一句不重复堆叠；最多同时留 3 条（含新的一条），旧的直接让位
+    this.set({ toasts: [...this.state.toasts.filter((t) => t.html !== html && !t.out).slice(-2), { id, html }] });
     const first = setTimeout(() => {
       this.toastTimers.delete(first);
       if (this.disposed) return;

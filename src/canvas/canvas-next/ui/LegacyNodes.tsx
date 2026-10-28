@@ -14,6 +14,7 @@ import { useCtl, useS } from "./ctx";
 import { Icon } from "./Icon";
 import { useAssetUrl } from "./useAsset";
 import { confirmRunGroup, groupLabel, runnableIds } from "./StackNode";
+import { kbd } from "../keys";
 
 const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 const clipLen = (c: TimelineClip) => Math.max(0, c.outPoint - c.inPoint);
@@ -32,7 +33,7 @@ export function NoteBody({ node }: { node: CanvasNode }) {
 export function GroupBody({ node }: { node: CanvasNode }) {
   const store = useCtl().store; const n = (node.children || []).filter((id) => store.node(id)).length;
   const ctl = useCtl();
-  return <div className="lg-group"><span>{n} 个节点</span><small>拖动标题移动整组 · ⇧⌘G 取消分组</small>
+  return <div className="lg-group"><span>{n} 个节点</span><small>{kbd("拖动标题移动整组 · ⇧⌘G 取消分组")}</small>
     <span className="lg-group-acts">
       <button className="linkbtn" data-act="rungroup" onPointerDown={stop} onClick={() => confirmRunGroup(ctl, runnableIds(store, [node]), groupLabel(node))}><Icon name="play" size="xs" />运行分组</button>
       <button className="linkbtn" data-act="ungroup" onPointerDown={stop} onClick={() => ungroup(store, node.id)}>取消分组</button>

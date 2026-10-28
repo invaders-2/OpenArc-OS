@@ -24,6 +24,8 @@ export type AgentMsg = {
   procOpen?: boolean;
   /** 问答卡（TapNow：Agent 先问清楚，最多 4 个问题） */
   qa?: import("./qa").QaCard;
+  /** 手动确认模式下 Agent 给出的执行计划（确认后才执行） */
+  plan?: import("./plan").PlanCard;
   skillInstall?: import("./skillInstallIntent").SkillInstallMessage;
 };
 export type ThinkingLevel = "off" | "light" | "standard" | "heavy";
@@ -31,7 +33,7 @@ export const THINKING: Array<[ThinkingLevel, string, string]> = [
   ["off", "关闭", "直接回答和执行，最快"],
   ["light", "轻度", "简单想一下再动手"],
   ["standard", "标准", "先规划步骤，信息不够时先问你"],
-  ["heavy", "深度", "充分推敲方案和风险，适合复杂任务，耗时更长"],
+  ["heavy", "深度", "充分推敲方案和风险，适合复杂任务"],
 ];
 export const normThinking = (v: unknown): ThinkingLevel => (v === "off" || v === "light" || v === "heavy" ? v : "standard");
 export type Skill = { id?: string; name: string; desc: string; kw: string; src: "官方" | "我的"; on: boolean; md: string };

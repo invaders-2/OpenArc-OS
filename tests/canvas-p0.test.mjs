@@ -158,11 +158,12 @@ test("C5 多选工具条：已选 N 个 / 对齐 / 批量运行 / 下载 / 删�
   assert.match(gen, /const id = ui\.sel\.size === 1 && !ui\.dragging && !editing \? \[\.\.\.ui\.sel\]\[0\] : null;/);
 });
 
-test("C6 小地图：默认跟随缩放，手动偏好保留", () => {
+test("C6 小地图：默认跟随缩放，点一次就切换可见并保留手动偏好", () => {
   const src = read("src/canvas/canvas-next/ui/Chrome.tsx");
   assert.match(src, /minimapVisible\(ui\.mini, view\.k\)/);
   assert.match(src, /data-mini-pref=\{ui\.mini === null \? "auto"/);
-  assert.match(src, /store\.setUI\(\{ mini: ui\.mini === null \? false : ui\.mini \? null : true \}\)/);
+  // 按钮按「当前是否可见」取反：一次点击一定有可见变化
+  assert.match(src, /store\.setUI\(\{ mini: !showMini \}\)/);
   assert.match(read("src/canvas/canvas-next/store.ts"), /mini: boolean \| null;/);
   assert.match(read("src/canvas/canvas-next/store.ts"), /agentFull: false, mini: null,/);
 });

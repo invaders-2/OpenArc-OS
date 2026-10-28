@@ -38,8 +38,12 @@ export function createMockBackend(opts: MockOptions = {}): CanvasBackend {
     }
   }
 
+  // 模拟「我的默认对话模型」：独立页里也能试切换
+  let chatDefault: string | null = models.find((m) => m.kind === "text")?.id || null;
   return {
     kind: "mock",
+    async defaultChatModel() { return chatDefault; },
+    async setDefaultChatModel(configId: string) { if (!models.some((m) => m.id === configId && m.kind === "text")) return { ok: false, error: "INVALID_INPUT" }; chatDefault = configId; return { ok: true }; },
     available: () => true,
     listModels: async () => models,
     async loadDoc(canvasId) {

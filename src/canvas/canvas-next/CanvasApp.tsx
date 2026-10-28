@@ -28,7 +28,7 @@ import { hiddenIds, isStack, stackSelection } from "./stack";
 function Root({ children, inset }: { children: React.ReactNode; inset?: number }) {
   const theme = useS((s) => s.ui.theme); const ref = useRef<HTMLDivElement>(null);
   // 响应式按画布自身宽度：窄 < 760 < 中 < 1280 < 宽
-  useEffect(() => { const el = ref.current; if (!el) return; const ro = new ResizeObserver(() => { const w = el.clientWidth; el.dataset.w = w < 760 ? "narrow" : w < 1280 ? "mid" : "wide"; }); ro.observe(el); return () => ro.disconnect(); }, []);
+  useEffect(() => { const el = ref.current; if (!el) return; const ro = new ResizeObserver(() => { const w = el.clientWidth; el.dataset.w = w < 760 ? "narrow" : w < 1280 ? "mid" : "wide"; el.dataset.h = el.clientHeight < 760 ? "short" : "tall"; }); ro.observe(el); return () => ro.disconnect(); }, []);
   return <div ref={ref} className={"cn-root" + (inset ? " in-win" : "")} data-theme={theme} style={inset ? ({ ["--win-inset" as string]: inset + "px" } as React.CSSProperties) : undefined}>{children}</div>;
 }
 
