@@ -22,3 +22,7 @@ docs/incidents/
 # 私钥绝不入库；只提交 resources/app-update-keys.json 里的公钥。
 .keys/
 dist-updates/
+public/camera-tiles/
+public/export-source.webm
+public/market-previews/
+tests/fixtures/photos/
