@@ -14,6 +14,7 @@ const {
   protocol,
   dialog,
   shell,
+  Notification,
 } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -100,6 +101,18 @@ const { registerCliIpc } = require("./cli-bootstrap.cjs");
 const { BrowserControlAuthority } = require("./browser-control-authority.cjs");
 
 let win;
+// 全局 AI 后台任务：窗口不在前台时，任务跑完 / 需要确认就发系统通知；点通知回到对应对话。
+let agentNotifier = null;
+function getAgentNotifier() {
+  if (!agentNotifier) {
+    agentNotifier = require("./agent-notify.cjs").createAgentNotifier({
+      Notification,
+      getWindow: () => win,
+      sendTaskEvent: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
+    });
+  }
+  return agentNotifier;
+}
 let trusted;
 let identity;
 let mcpAgentBridge = null;
@@ -297,6 +310,7 @@ function registerRuntimeDomains(context) {
     sendSideEffect: (event) => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
       win.webContents.send("sideeffect:event", event);
+      if (event && event.type === "sideEffect/approvalRequested") { try { getAgentNotifier().approvalNeeded(event.request); } catch { /* 通知失败不影响审批 */ } }
     },
   });
 
@@ -395,6 +409,7 @@ function registerRuntimeDomains(context) {
       canvasService: identity.canvasDocService,
       isTrusted: trusted,
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
+      onResult: (r) => { try { getAgentNotifier().taskFinished(r); } catch { /* 通知失败不影响结果 */ } },
     });
 
     let dxosFsAdapter = null;

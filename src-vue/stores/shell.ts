@@ -55,6 +55,8 @@ export interface ShellNotice {
   title: string;
   body: string;
   time: number;
+  /** 全局 AI 后台任务：点这条通知打开对应对话。 */
+  taskId?: string;
 }
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -227,6 +229,10 @@ export const useShellStore = defineStore("shell", {
     recentLaunch: readJson<string[]>("oa-recent-apps", []).filter((x) => typeof x === "string"),
     /** 通知中心列表（新的在前）与右上角浮动通知（4.5s 自动收起） */
     notices: [] as ShellNotice[],
+    /** 全局 AI：要打开的对话（通知点击 / 系统通知点击）；对话 App 取走后清空。 */
+    taskFocus: null as string | null,
+    /** 全局 AI：对话 App 当前正在看的对话（用来判断任务跑完要不要再弹应用内通知）。 */
+    viewingTaskId: null as string | null,
     toasts: [] as ShellNotice[],
     /** 桌面小组件（日期 / 进行中的任务）显示开关，默认显示 */
     widgets: localStorage.getItem("oa-widgets") !== "false",
@@ -422,19 +428,25 @@ export const useShellStore = defineStore("shell", {
       this.notificationsOpen = false;
     },
     /** 入队一条通知：进通知中心；非专注模式下同时弹一条浮动通知。 */
-    notify(n: { appId: string; title: string; body?: string }) {
+    notify(n: { appId: string; title: string; body?: string; taskId?: string }) {
       const item: ShellNotice = {
         id: Math.random().toString(36).slice(2, 10),
         appId: n.appId,
         title: n.title,
         body: n.body || "",
         time: Date.now(),
+        ...(n.taskId ? { taskId: n.taskId } : {}),
       };
       this.notices.unshift(item);
       if (this.notices.length > 50) this.notices.length = 50;
       if (this.focusMode) return;
       this.toasts.push(item);
       window.setTimeout(() => this.dismissToast(item.id), 4500);
+    },
+    /** 打开对话 App 并切到指定对话。 */
+    openTask(taskId: string) {
+      this.taskFocus = taskId;
+      this.activateApp("chat");
     },
     dismissToast(id: string) {
       const i = this.toasts.findIndex((t) => t.id === id);
