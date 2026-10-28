@@ -1508,3 +1508,11 @@
 .cn-root #agent .send:disabled{background:var(--sunken);color:var(--fg3);cursor:default}
 /* 上下文环：轨道加深，低占用时不再像加载转圈 */
 .cn-root #aRing svg circle:first-child{stroke-opacity:.32}
+
+/* 执行计划卡（手动确认模式）：复用问答卡外框 */
+.cn-root .qa.plan .plan-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.cn-root .qa.plan .plan-steps li{display:flex;gap:8px;font-size:13px;line-height:1.5;color:var(--fg)}
+.cn-root .qa.plan .plan-steps li .tnum{flex:none;width:18px;height:18px;margin-top:1px;border-radius:50%;display:grid;place-items:center;font-size:11px;background:rgba(var(--ink),.08);color:var(--fg2)}
+.cn-root .qa.plan.done .plan-steps li{color:var(--fg2)}
+.cn-root .qa.plan .plan-note{font-size:11.5px;color:var(--fg3);padding-left:26px}
+.cn-root .qa.plan .qa-f .btn{white-space:nowrap;flex:none}

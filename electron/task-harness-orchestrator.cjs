@@ -58,6 +58,17 @@ const THINKING_GUIDE = Object.freeze({
   heavy: "Thinking level: heavy. Analyse the goal, constraints and risks thoroughly and present a complete plan before acting. " + QUESTIONS_PROTOCOL,
 });
 
+/**
+ * 画布 Agent 执行方式（task-bootstrap 已校验枚举）。
+ * confirm：本轮只读、只出计划（```openarc-plan），用户在面板点「按此计划执行」后再以 auto 方式发起执行；
+ * auto：规划后连续执行。两种方式下写工具都只产生需要可信用户批准的提案，执行方式不放宽任何批准。
+ */
+const PLAN_PROTOCOL = "a fenced ```openarc-plan block containing a JSON array of at most 8 items {\"step\": one concrete canvas change, short, in the user's language}";
+const PLAN_MODE_GUIDE = Object.freeze({
+  confirm: "Execution mode: confirm-first. Do NOT call any write tool in this run; read-only tools are allowed for inspecting the canvas. Reply with one short sentence and " + PLAN_PROTOCOL + ", then stop. The user will review the plan and start execution in a follow-up message. If the request needs no canvas changes, just answer normally.",
+  auto: "Execution mode: auto. Plan briefly and carry out all steps in this run without stopping for plan confirmation. Every write still goes through trusted user approval.",
+});
+
 /** §16/§17 安全 prompt：只放 goal + safe step input + 可选 prior artifact；绝不塞 DB dump / credentials / 全历史。*/
 function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEnabled = false } = {}) {
   const lines = [];
@@ -68,6 +79,8 @@ function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEn
   if (stepInput != null) lines.push("Step input: " + (typeof stepInput === "string" ? stepInput : JSON.stringify(stepInput)).slice(0, 4000));
   const level = stepInput && typeof stepInput === "object" && stepInput.type === "canvas.task.v1" ? THINKING_GUIDE[stepInput.thinking] : null;
   if (level) lines.push(level);
+  const mode = stepInput && typeof stepInput === "object" && stepInput.type === "canvas.task.v1" ? PLAN_MODE_GUIDE[stepInput.planMode] : null;
+  if (mode) lines.push(mode);
   if (priorArtifactText != null) lines.push("Prior artifact: " + String(priorArtifactText).slice(0, 2000));
   return lines.join("\n");
 }

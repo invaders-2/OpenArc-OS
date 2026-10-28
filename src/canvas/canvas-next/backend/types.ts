@@ -67,6 +67,8 @@ export type CanvasAgentContext = {
   completionConditions: string[];
   /** 思考强度（关闭 / 轻度 / 标准 / 深度）；运行时据此决定规划深度和是否先提问 */
   thinking?: "off" | "light" | "standard" | "heavy";
+  /** 执行方式：confirm 先出计划等确认（本轮不写画布），auto 规划后连续执行；写入都仍需批准 */
+  planMode?: "confirm" | "auto";
 };
 export type AgentTaskSnapshot = {
   taskId: string;

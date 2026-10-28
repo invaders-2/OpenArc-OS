@@ -17,6 +17,8 @@ import { QueryLocator } from "../canvas-next/agent/QueryLocator";
 import { AgentState, THINKING, useAgent, type AgentMsg, type Skill } from "../canvas-next/agent/state";
 import { answerText, clarifyQuestions, newCard, parseQuestions, type QaCard } from "../canvas-next/agent/qa";
 import { QaCardView } from "../canvas-next/agent/QaCard";
+import { parsePlan, planGoal } from "../canvas-next/agent/plan";
+import { PlanCardView } from "../canvas-next/agent/PlanCard";
 import { subscribeAgentTask, TASK_UI_SETTLED, taskAnswer, taskStatusText, taskToolSteps, type RefreshOutcome } from "../canvas-next/agent/task";
 import { skillInstallIntent } from "../canvas-next/agent/skillInstallIntent";
 import { inspectSkillRepository, installSkillPreview } from "../canvas-next/agent/skillInstallClient";
@@ -89,7 +91,10 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
   const brainstorm = () => { a.skill = "头脑风暴"; setDraft(a.skills.find((k) => k.name === "头脑风暴")?.desc || ""); };
 
   /** 回复里带 ```openarc-questions 时变成问答卡，代码块不显示 */
-  function withQuestions(m: AgentMsg, text: string) {
+  function withQuestions(m: AgentMsg, raw: string) {
+    // 手动确认模式：回复里的 ```openarc-plan 变成计划卡，代码块不显示
+    const plan = parsePlan(raw); let text = raw;
+    if (plan) { if (!m.plan) m.plan = { steps: plan.steps, status: "open" }; text = plan.rest || "我打算这样做，确认后开始："; }
     const parsed = parseQuestions(text); if (!parsed) return text;
     if (!m.qa) m.qa = newCard(goalOf(m), parsed.questions);
     return parsed.rest || "开始之前想先确认几件事：";
@@ -99,6 +104,19 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
     if (a.busy) return;
     patch(m, { qa: { ...card, status: skip ? "skipped" : "answered" } });
     a.draft = skip ? `不用再问了，按你的理解直接做：${card.goal}` : answerText(card); void send(true);
+  };
+
+  /** 计划卡：确认后以「自动规划」方式执行这份计划；修改则把计划放回输入框让用户改 */
+  const runPlan = (m: AgentMsg) => {
+    if (a.busy || !m.plan) return;
+    patch(m, { plan: { ...m.plan, status: "approved" } });
+    a.draft = planGoal(goalOf(m), m.plan.steps); void send(false, "auto");
+  };
+  const revisePlan = (m: AgentMsg) => {
+    if (!m.plan) return;
+    patch(m, { plan: { ...m.plan, status: "revising" } });
+    setDraft("计划需要调整：\n" + m.plan.steps.map((x, i) => `${i + 1}. ${x}`).join("\n") + "\n修改意见：");
+    requestAnimationFrame(() => { const t = taRef.current; if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } });
   };
 
   function watchTask(m: AgentMsg, taskId: string, t0: number) {
@@ -148,7 +166,7 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
     patch(m, { skillInstall: { ...m.skillInstall, status: "cancelled", error: undefined } });
   }
 
-  async function send(fromQa = false) {
+  async function send(fromQa = false, modeOverride?: "confirm" | "auto") {
     stick.current = true; // 自己发出的消息总是滚到底
     let text = a.draft.trim(); const skill = a.skill ? a.skills.find((s) => s.name === a.skill) || null : null;
     if ((!text && !skill) || a.busy) return; if (!text) text = skill!.desc;
@@ -169,7 +187,7 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
       if (store.backend.runAgentTask) {
         const goal = (text + (skill ? "\n\n本次技能要求（不得扩大现有工具权限）：" + (skill.md || skill.desc) : "")).slice(0, 2000);
         const resourceRefs = [...ctx.map((n) => isGenKind(n.kind) ? srcOf(n) : ""), ...refs.filter((r) => r.kind === "asset").map((r) => r.ref)].filter((ref) => /^(openarc-asset:|resource:\/\/)/.test(ref)).slice(0, 16);
-        const submitted = await store.backend.runAgentTask({ goal, context: { schemaVersion: 1, canvasId: store.state.canvasId, selectedNodeIds: ctx.map((n) => n.id).slice(0, 16), resourceRefs, completionConditions: ["完成用户目标；画布写入必须经受控工具批准并读回验证"], thinking: fromQa && a.thinking !== "off" ? "light" : a.thinking } });
+        const submitted = await store.backend.runAgentTask({ goal, context: { schemaVersion: 1, canvasId: store.state.canvasId, selectedNodeIds: ctx.map((n) => n.id).slice(0, 16), resourceRefs, completionConditions: ["完成用户目标；画布写入必须经受控工具批准并读回验证"], thinking: fromQa && a.thinking !== "off" ? "light" : a.thinking, planMode: modeOverride || (a.mode === "auto" ? "auto" : "confirm") } });
         if (!submitted.ok || !submitted.taskId) throw new Error(submitted.error || "任务提交失败");
         patch(m, { task: { taskId: submitted.taskId, status: submitted.status || "PENDING" }, think: { live: false, open: false, secs: "0", lines: ["目标、画布引用与完成条件已提交 OpenArc 任务运行时"] }, text: "任务已提交；等待 OpenArc 分配工具与执行。" });
         watchTask(m, submitted.taskId, t0); return;
@@ -222,7 +240,7 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
         {!a.msgs.length ? <div className="hello"><h2><span>Hi{ctl.host.user?.name ? " " + ctl.host.user.name : ""}！</span><br />今天一起创作点什么？</h2>
           {SUGS.slice((sugPage % 3) * 2, (sugPage % 3) * 2 + 2).map(([ic, t, d, q], k) => <button key={t} className="sug" data-q={q} style={{ ["--r" as string]: (k ? 1.2 : -1.2) + "deg" }} onClick={() => (q === "@@头脑风暴" ? brainstorm() : setDraft(q))}><span className="si"><Icon name={ic} size="s" /></span><span><b>{t}</b><small>{d}</small></span><Icon name="right" size="s" /></button>)}
           <button className="ib tipT" id="aRefresh" data-tip="换一批" style={{ alignSelf: "flex-end", width: 28, height: 28 }} onClick={() => setSugPage(sugPage + 1)}><Icon name="history" size="xs" /></button></div>
-          : a.msgs.map((m, i) => <Msg key={m.id} m={m} i={i} isNew={i >= seen.current} a={a} ctl={ctl} onRetry={() => { const u = a.msgs.slice(0, i).reverse().find((x) => x.role === "u"); if (u) { a.draft = u.text; void send(); } }} onBranch={() => branch(i)} onQ={setDraft} onSkillInstallConfirm={() => void confirmRepositoryInstall(m)} onSkillInstallCancel={() => cancelRepositoryInstall(m)} onQa={(card, skip) => answerQa(m, card, skip)} />)}
+          : a.msgs.map((m, i) => <Msg key={m.id} m={m} i={i} isNew={i >= seen.current} a={a} ctl={ctl} onRetry={() => { const u = a.msgs.slice(0, i).reverse().find((x) => x.role === "u"); if (u) { a.draft = u.text; void send(); } }} onBranch={() => branch(i)} onQ={setDraft} onSkillInstallConfirm={() => void confirmRepositoryInstall(m)} onSkillInstallCancel={() => cancelRepositoryInstall(m)} onPlanRun={() => runPlan(m)} onPlanRevise={() => revisePlan(m)} onQa={(card, skip) => answerQa(m, card, skip)} />)}
         <SeenMark onSeen={() => (seen.current = a.msgs.length)} />
       </div><QueryLocator msgs={a.msgs} onJump={(id) => { scrollRef.current?.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }} /></div>
       {!a.msgs.length && a.draft && !a.skill && !a.hintOff ? <div className="ahint"><Icon name="brain" size="xs" /><span>用头脑风暴，开启你的项目创作。</span><button className="linkbtn" onClick={brainstorm}>试一下</button><button className="ib" aria-label="不再提示" onClick={() => a.dismissHint()}><Icon name="x" size="xs" /></button></div> : null}
@@ -240,7 +258,7 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
           <button className="ib" style={{ width: 30, height: 30 }} id="aPlus" aria-label="添加" onClick={(e) => plusMenu(ctl, a, e.currentTarget, () => slashPalette())}><Icon name="plus" size="s" /></button>
           <FolderButton ctl={ctl} a={a} />
           <CaptureButton ctl={ctl} a={a} />
-          <button className="pill ghost" id="aMode" onClick={(e) => openPop(e.currentTarget, (close) => <>{([["manual", "cursor", "手动确认", "Agent 自动规划与只读执行，写入由你逐次批准"], ["auto", "bolt", "自动规划", "Agent 自动规划与只读执行，写入仍需你的可信批准"]] as const).map(([k, ic, t, d]) => <button key={k} className={"mi" + (a.mode === k ? " on" : "")} data-m={k} onClick={() => { close(); a.setMode(k); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.mode === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name={a.mode === "auto" ? "bolt" : "cursor"} size="s" />{a.mode === "auto" ? (full ? "自动规划" : "自动") : (full ? "手动确认" : "手动")}<Icon name="down" size="xs" /></button>
+          <button className="pill ghost" id="aMode" onClick={(e) => openPop(e.currentTarget, (close) => <>{([["manual", "cursor", "手动确认", "先列出执行计划，你确认后再动手"], ["auto", "bolt", "自动规划", "规划后直接连续执行，不再停下等计划确认"]] as const).map(([k, ic, t, d]) => <button key={k} className={"mi" + (a.mode === k ? " on" : "")} data-m={k} onClick={() => { close(); a.setMode(k); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.mode === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}<div className="msep" /><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>两种方式下，每次写入画布都需要你批准</span></div></>, "up")}><Icon name={a.mode === "auto" ? "bolt" : "cursor"} size="s" />{a.mode === "auto" ? (full ? "自动规划" : "自动") : (full ? "手动确认" : "手动")}<Icon name="down" size="xs" /></button>
           <button className={"pill ghost tipT" + (full ? "" : " icon")} id="aThink" data-thinking={a.thinking} aria-label={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} data-tip={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">思考强度</div>{THINKING.map(([k, t, d]) => <button key={k} className={"mi" + (a.thinking === k ? " on" : "")} data-t={k} onClick={() => { close(); a.setThinking(k); }}><span className="ic"><Icon name="brain" size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.thinking === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name="brain" size="s" />{full ? THINKING.find(([k]) => k === a.thinking)?.[1] : null}<span className={"thk l" + THINKING.findIndex(([k]) => k === a.thinking)} aria-hidden="true"><b /><b /><b /></span></button>
           <span className="sp" />
           <button className="ib tipT" style={{ width: 30, height: 30 }} id="aRing" aria-label="上下文占用" data-tip={"上下文已用 " + Math.max(1, Math.round(Math.min(1, used / CTX_MAX) * 100)) + "%"} onClick={(e) => ctxPopover(ctl, a, e.currentTarget, ctxBreak())}><Ring p={Math.min(1, used / CTX_MAX)} /></button>
@@ -268,7 +286,7 @@ function MentionRow({ n, onClick }: { n: CanvasNode; onClick: () => void }) {
 }
 
 const toolIcon = (label: string): Parameters<typeof Icon>[0]["name"] => /读取|检查|计算/.test(label) ? "eye" : /连线|连入|连到/.test(label) ? "link" : /新建|创建/.test(label) ? "plus" : /生成|运行/.test(label) ? "sparkle" : /排布|整理/.test(label) ? "grid" : /记忆/.test(label) ? "brain" : "bolt";
-function Msg({ m, i, isNew, a, ctl, onRetry, onBranch, onQ, onSkillInstallConfirm, onSkillInstallCancel, onQa }: { m: AgentMsg; i: number; isNew: boolean; a: AgentState; ctl: Ctl; onRetry: () => void; onBranch: () => void; onQ: (q: string) => void; onSkillInstallConfirm: () => void; onSkillInstallCancel: () => void; onQa: (card: QaCard, skip: boolean) => void }) {
+function Msg({ m, i, isNew, a, ctl, onRetry, onBranch, onQ, onSkillInstallConfirm, onSkillInstallCancel, onQa, onPlanRun, onPlanRevise }: { m: AgentMsg; i: number; isNew: boolean; a: AgentState; ctl: Ctl; onRetry: () => void; onBranch: () => void; onQ: (q: string) => void; onSkillInstallConfirm: () => void; onSkillInstallCancel: () => void; onQa: (card: QaCard, skip: boolean) => void; onPlanRun: () => void; onPlanRevise: () => void }) {
   const nw = isNew ? " new" : "";
   const copy = async () => { try { await navigator.clipboard.writeText(m.text || ""); ctl.store.toast("已复制"); } catch { ctl.store.toast("剪贴板不可用"); } };
   if (m.role === "u") return <div className={"msg u" + nw} data-i={i} data-msg-id={m.id}>
@@ -280,7 +298,9 @@ function Msg({ m, i, isNew, a, ctl, onRetry, onBranch, onQ, onSkillInstallConfir
     {m.memSaved ? <div className="memrow"><Icon name="check" size="xs" />已写入{m.memSaved.scope}记忆：{m.memSaved.text}<button className="linkbtn" onClick={() => memoryModal(a)}>管理</button></div> : null}
     {m.text ? <div className="bub md-chat"><Markdown text={m.text} />{m.streaming ? <span className="caret" /> : null}</div> : null}
     {m.error ? <div className="gp-warn" style={{ margin: "4px 0" }}><Icon name="alert" size="s" /><span>{m.error}</span></div> : null}
-    {m.task ? <div className="confirm" data-task-id={m.task.taskId} data-task-status={m.task.status}><div className="ch"><Icon name="layers" size="s" /><b>OpenArc 任务</b><span className="sp" /><span className="tag">{taskStatusText(m.task.status)}</span></div></div> : null}
+    {/* 只出计划的那一轮任务已经结束：状态写「已规划」，不写「已完成」以免误以为画布已改 */}
+    {m.task ? <div className="confirm" data-task-id={m.task.taskId} data-task-status={m.task.status}><div className="ch"><Icon name="layers" size="s" /><b>OpenArc 任务</b><span className="sp" /><span className="tag">{m.plan && /SUCCEEDED|COMPLETED/.test(m.task.status) ? "已规划，未改动画布" : taskStatusText(m.task.status)}</span></div></div> : null}
+    {m.plan ? <PlanCardView card={m.plan} busy={a.busy} onRun={onPlanRun} onRevise={onPlanRevise} /> : null}
     {m.qa ? <QaCardView card={m.qa} busy={a.busy} onChange={(qa) => patch({ qa })} onSubmit={() => onQa(m.qa!, false)} onSkip={() => onQa(m.qa!, true)} /> : null}
     {m.skillInstall ? <SkillInstallCard value={m.skillInstall} onConfirm={onSkillInstallConfirm} onCancel={onSkillInstallCancel} onManage={() => skillsModal(a)} /> : null}
     {m.results?.length ? <div className="mentions">{m.results.map((id) => <NodeMention key={id} id={id} ctl={ctl} />)}</div> : null}

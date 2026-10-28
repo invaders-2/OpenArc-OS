@@ -24,6 +24,8 @@ export type AgentMsg = {
   procOpen?: boolean;
   /** 问答卡（TapNow：Agent 先问清楚，最多 4 个问题） */
   qa?: import("./qa").QaCard;
+  /** 手动确认模式下 Agent 给出的执行计划（确认后才执行） */
+  plan?: import("./plan").PlanCard;
   skillInstall?: import("./skillInstallIntent").SkillInstallMessage;
 };
 export type ThinkingLevel = "off" | "light" | "standard" | "heavy";
