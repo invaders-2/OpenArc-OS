@@ -509,6 +509,16 @@ class ModelService {
   }
 
 
+  /** 所选对话模型自己能否联网搜索（服务商原生 web_search）；不能时由调用方先用 web-access 搜一遍。 */
+  supportsNativeWebSearch({ context, configId = null, capability = "chat" } = {}) {
+    try {
+      const resolved = this.resolveModel({ context, capability, configId });
+      if (!resolved.ok) return false;
+      const impl = adapter.adapterFor(resolved.snapshot.adapterType, resolved.snapshot.baseUrl);
+      return typeof impl.supportsWebSearch === "function" && impl.supportsWebSearch(resolved.snapshot.modelId) === true;
+    } catch { return false; }
+  }
+
   /** Provider-neutral streaming（统一事件模型）；usage/错误归一化与 chat 一致。 */
   async chatStream({ context, configId = null, messages = [], tools = null, params = {}, signal = null, requestId = null, capability = "chat", onEvent = () => {}, webSearch = false } = {}) {
     const resolved = this.resolveModel({ context, capability, configId });

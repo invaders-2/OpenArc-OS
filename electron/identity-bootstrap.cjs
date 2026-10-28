@@ -32,6 +32,7 @@ const { CanvasAssetLibraryService } = require("./canvas-dxos-asset-library.cjs")
 const { CanvasAgentAttachmentService } = require("./canvas-dxos-agent-attachments.cjs");
 const { createCanvasDxosExtension } = require("./canvas-dxos-commands.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
+const { createWebAccess } = require("./web-access.cjs");
 const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
 
 // ---------------------------------------------------------------------------
@@ -274,6 +275,13 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   attachMcpAppGrantRevocation({ authorization, mcpService });
   // D4-02A：Task Runtime 持久权威（复用同一连接与 AuthorizationService；启动即 recovery）。
   // D4-03C4：唯一 side-effect production assembly（Registry → Proxy → Authority → Supervisor → Runtime）。
+  // 全局 AI 联网（只读搜索 / 抓取）：出网 fetch 晚绑定到模型出网代理（runtime-composition 装配后才有），
+  // 用户配了代理就走代理；同一实例同时给对话工具链和画布联网开关用。
+  const webAccess = createWebAccess({
+    getFetch: () => (modelService && typeof modelService.fetchImpl === "function" ? modelService.fetchImpl : null),
+    isProxied: () => { try { return !!(modelService && modelService.readEgressProxy().enabled); } catch { return false; } },
+    logger: log,
+  });
   const { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator } = createTaskBundle({
     identityStore: store,
     authorization,
@@ -288,6 +296,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     browserControl,
     // D5-02：AI 编辑画布的执行端（与手工路径同一命令层 + 版本检查 + 权限规则）。
     canvasService: canvasDocService,
+    webAccess,
     dbPath: path.join(userDataDir, "identity.db"),
     storeRoot: path.join(userDataDir, "library"),
     runtimeDir: path.join(userDataDir, "runtime", "side-effects"),
@@ -311,13 +320,13 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   } catch { /* ignore */ }
 
   // D5-02 Closure：画布生成运行需要任务层（预算/停止/账本）与模型层 —— 装配完成后晚绑定同一实例。
-  canvasDocService.attachRuntime({ taskService, modelService, tempDir: path.join(userDataDir, "tmp", "canvas-imports") });
+  canvasDocService.attachRuntime({ taskService, modelService, webAccess, tempDir: path.join(userDataDir, "tmp", "canvas-imports") });
   try { require("node:fs").mkdirSync(path.join(userDataDir, "tmp", "canvas-imports"), { recursive: true }); } catch { /* ignore */ }
   try { require("node:fs").mkdirSync(canvasDxosTempDir, { recursive: true }); } catch { /* ignore */ }
 
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService, canvasDxosStore, canvasAssetLibrary, canvasAgentAttachments, canvasDxosExtension, taskMergeV29: taskMergeV29Result };
+  return { service, store, secrets, logger: log, webAccess, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService, canvasDxosStore, canvasAssetLibrary, canvasAgentAttachments, canvasDxosExtension, taskMergeV29: taskMergeV29Result };
 }
 
 /**

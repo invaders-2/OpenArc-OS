@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, CircleAlert, Copy, FileText, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Paperclip, RotateCcw, ShieldQuestion, Sparkles, Square, SquarePen, Wrench } from "lucide-vue-next";
+import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, CircleAlert, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Paperclip, RotateCcw, ShieldQuestion, Sparkles, Square, SquarePen, Wrench } from "lucide-vue-next";
 import ResourcePicker from "./ResourcePicker.vue";
 import { useShellStore } from "../stores/shell";
 
@@ -233,7 +233,7 @@ const fixtureMode = !!fixture;
 type NodeRef = { id: string; title: string };
 type MediaRef = { url: string; name: string; kind: "image" | "video"; nodeId?: string };
 type WorkRow = { key: string; kind: "tool" | "thinking"; icon: string; text: string; suffix: string; failed: boolean; raw: string };
-const ROW_ICON: Record<string, any> = { doc: FileText, image: ImageIcon, canvas: Layers, gen: Sparkles, tool: Wrench, thinking: Brain };
+const ROW_ICON: Record<string, any> = { doc: FileText, image: ImageIcon, canvas: Layers, gen: Sparkles, tool: Wrench, thinking: Brain, globe: Globe };
 const SUGGESTIONS = [
   { icon: Sparkles, title: "写一段产品介绍", sub: "给一个产品名和目标用户，写 200 字卖点文案", prompt: "帮我写一段产品介绍：产品名「轻叠」(可折叠收纳盒)，目标用户是租房的小户型年轻人。要求 200 字以内，先说清解决什么问题，再讲三个具体卖点，语气克制、不要夸张形容词，最后给一句标题。" },
   { icon: ListChecks, title: "把文字整理成要点", sub: "贴一段文字，整理成可直接用的要点清单", prompt: "把下面这段文字整理成要点清单，保留数字和专有名词，合并重复项，每条不超过 30 字：\n\n（把要整理的原文粘贴在这里）" },
@@ -268,6 +268,7 @@ const TOOL_LABEL: Array<[RegExp, string]> = [
   [/^(read_file|read_files|read_selected_node|read_text_node)$/i, "读取文件"],
   [/^(write_file|write_text_node)$/i, "写入文件"],
   [/^(web_fetch|browser_read_page|fetch_url)$/i, "读取网页"],
+  [/^web_search$/i, "联网搜索"],
   [/^(image_search|search_images)$/i, "搜索参考图"],
   [/^(canvas_update_nodes|update_nodes|edit_canvas|connect_nodes)$/i, "修改画布"],
   [/^(canvas_get_state|canvas_read|read_canvas|get_canvas)$/i, "查看画布"],
@@ -292,6 +293,7 @@ const TOOL_CATEGORY: Array<[RegExp, string]> = [
   [/^(canvas_update_nodes|update_nodes|edit_canvas|connect_nodes|create_text_node|create_image_node)$/i, "canvasEdit"],
   [/^(canvas_generate_image|generate_image|generate_video|submit_generation|prepare_generation|prepareGenerations)$/i, "gen"],
   [/^(image_search|search_images)$/i, "search"],
+  [/^web_search$/i, "webSearch"],
   [/^(read_file|read_files|write_file|web_fetch|browser_read_page|read_skill_file|readSkillFile|find_files|search_files)$/i, "read"],
 ];
 function toolCategory(title: string) {
@@ -299,16 +301,17 @@ function toolCategory(title: string) {
   for (const [re, kind] of TOOL_CATEGORY) if (re.test(head)) return kind;
   return "other";
 }
-const ICON_BY_CATEGORY: Record<string, string> = { canvasView: "canvas", canvasEdit: "canvas", gen: "gen", search: "image", read: "doc", other: "tool" };
+const ICON_BY_CATEGORY: Record<string, string> = { canvasView: "canvas", canvasEdit: "canvas", gen: "gen", search: "image", webSearch: "globe", read: "doc", other: "tool" };
 function rowIcon(title: string) { return ICON_BY_CATEGORY[toolCategory(title)] || "tool"; }
 function summarize(tools: any[]) {
-  const c: Record<string, number> = { canvasView: 0, canvasEdit: 0, gen: 0, search: 0, read: 0, other: 0 };
+  const c: Record<string, number> = { canvasView: 0, canvasEdit: 0, gen: 0, search: 0, webSearch: 0, read: 0, other: 0 };
   for (const t of tools) c[toolCategory(String(t.title || ""))] += 1;
   const parts: string[] = [];
   if (c.canvasView) parts.push("查看了画布 " + c.canvasView + " 次");
   if (c.canvasEdit) parts.push("修改画布 " + c.canvasEdit + " 次");
   if (c.gen) parts.push("准备了 " + c.gen + " 个生成节点");
   if (c.search) parts.push("搜索了 " + c.search + " 次参考图");
+  if (c.webSearch) parts.push("联网搜索了 " + c.webSearch + " 次");
   if (c.read) parts.push("读取了 " + c.read + " 个文件/网页");
   if (!parts.length) return tools.length ? "完成了 " + tools.length + " 个操作" : "";
   return parts.join("，") + (tools.length ? " · 共 " + tools.length + " 个操作" : "");

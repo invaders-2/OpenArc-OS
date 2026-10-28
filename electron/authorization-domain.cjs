@@ -189,6 +189,9 @@ const TOOL_ACTION = Object.freeze({
   // 10-16：素材库 AI —— 读正文（只读）与把生成的文本存回素材库（可逆写入，需审批）分开授予。
   RESOURCE_READ_CONTENT: "tool.resource.readContent",
   RESOURCE_SAVE_TEXT: "tool.resource.saveText",
+  // 全局 AI 联网：只读搜索与只读抓取分开授予。
+  WEB_SEARCH: "tool.web.search",
+  WEB_FETCH: "tool.web.fetch",
 });
 const TOOL_ACTIONS = Object.freeze(Object.values(TOOL_ACTION));
 function isToolAction(action) { return TOOL_ACTIONS.includes(String(action)); }

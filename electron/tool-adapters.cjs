@@ -35,7 +35,7 @@ function projectFields(source, fields, { maxString = MAX_STRING } = {}) {
 }
 
 /** 静态 allowlist：provider → adapter（绝不从 arguments 解析 module/path）。*/
-function createToolAdapters({ resourceService = null, searchService = null, browserControl = null, canvasService = null, extra = {} } = {}) {
+function createToolAdapters({ resourceService = null, searchService = null, browserControl = null, canvasService = null, webAccess = null, extra = {} } = {}) {
   const providers = {};
 
   providers.test = {
@@ -282,6 +282,27 @@ function createToolAdapters({ resourceService = null, searchService = null, brow
       async verify({ args, result }) {
         if (!result || !Array.isArray(result.items)) return { ok: false, detail: { reason: "NO_ITEMS" } };
         return { ok: result.items.every((it) => it && typeof it.resourceRef === "string") && result.maxLimit === MAX_SEARCH_LIMIT && result.count >= result.items.length, detail: { count: result.count, items: result.items.length } };
+      },
+    };
+  }
+
+  if (webAccess) {
+    // 联网（只读）：web.search / web.fetch。正文 / 摘要原样交给调用方并标注 untrusted。
+    providers.WebAccess = {
+      toolIds: ["web.search", "web.fetch"],
+      async prepare({ args }) { return { plan: { dryRun: false, provider: "WebAccess", hasUrl: !!(args && args.url) } }; },
+      async execute({ args, contract, signal }) {
+        const toolId = contract && contract.toolId;
+        const res = toolId === "web.fetch" || (!toolId && args && args.url)
+          ? await webAccess.fetch({ url: args && args.url, maxChars: args && args.maxChars, signal })
+          : await webAccess.search({ query: args && args.query, limit: args && args.limit, signal });
+        if (!res || !res.ok) return { ok: false, error: (res && res.error) || "WEB_UNAVAILABLE" };
+        return { ok: true, result: res.result };
+      },
+      async verify({ result }) {
+        if (!result) return { ok: false, detail: { reason: "NO_RESULT" } };
+        if (Array.isArray(result.results)) return { ok: result.results.every((r) => r && typeof r.url === "string"), detail: { results: result.results.length } };
+        return { ok: typeof result.text === "string", detail: { chars: typeof result.text === "string" ? result.text.length : 0, truncated: !!result.truncated } };
       },
     };
   }
