@@ -100,10 +100,42 @@ function mediaMeta(src: string, kind: "video" | "audio"): Promise<{ dur: number;
 const INLINE_FALLBACK_MAX = 2 * 1024 * 1024;
 
 /** 上传图片：新建节点，或填进指定节点，或作为某节点的输入 */
+/** 文档上传（TapNow：文档作为文本输入）：纯文本类直接读，docx / xlsx 交给桌面端抽文本 */
+const DOC_EXT = /\.(txt|md|markdown|csv|tsv|json|ya?ml|xml|html?|srt|vtt|log|docx|xlsx|xlsm|pdf)$/i;
+const PLAIN_EXT = /\.(txt|md|markdown|csv|tsv|json|ya?ml|xml|html?|srt|vtt|log)$/i;
+export const DOC_ACCEPT = ".txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.srt,.vtt,.docx,.xlsx,.pdf";
+export const isDocument = (f: { name: string; type: string }) => DOC_EXT.test(f.name) || /^text\//.test(f.type) || f.type === "application/json";
+export const DOC_MAX_CHARS = 60000;
+export async function documentText(store: CanvasStore, f: File): Promise<{ text: string; truncated: boolean } | { error: string }> {
+  if (f.size > 20 * 1024 * 1024) return { error: `${f.name} 超过 20MB，未添加` };
+  if (PLAIN_EXT.test(f.name) || /^text\//.test(f.type) || f.type === "application/json") {
+    const raw = await f.text().catch(() => null); if (raw == null) return { error: "读取失败：" + f.name };
+    const text = raw.replace(/\0/g, "").trim(); return { text: text.slice(0, DOC_MAX_CHARS), truncated: text.length > DOC_MAX_CHARS };
+  }
+  if (!store.backend.extractDocument) return { error: `${f.name}：浏览器里只能读纯文本文档，docx / xlsx 请在桌面版上传` };
+  const buf = await f.arrayBuffer().catch(() => null);
+  if (!buf) return { error: "读取失败：" + f.name };
+  const bytes = new Uint8Array(buf); let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const r = await store.backend.extractDocument(`data:${f.type || "application/octet-stream"};base64,${btoa(bin)}`, f.name);
+  if (!r.ok) return { error: `${f.name}：${r.detail || "无法读取正文"}` };
+  return { text: r.text.slice(0, DOC_MAX_CHARS), truncated: r.truncated || r.text.length > DOC_MAX_CHARS };
+}
+async function addDocument(store: CanvasStore, f: File, at: { x: number; y: number }): Promise<string | null> {
+  const r = await documentText(store, f);
+  if ("error" in r) { store.toast(r.error, 6000); return null; }
+  if (!r.text.trim()) { store.toast(`${f.name} 里没有可读的文字`); return null; }
+  const name = f.name.replace(/\.[^.]+$/, "").slice(0, 24);
+  const n = store.newNode("text", at.x - 160, at.y - 120, { title: name, manual: true, hist: [{ text: r.text, meta: { at: Date.now(), doc: f.name } }], w: 320, h: 240 });
+  store.addNodes([n]);
+  if (r.truncated) store.toast(`${f.name} 太长，只保留了前 ${DOC_MAX_CHARS} 字`, 5000);
+  return n.id;
+}
+
 export async function addFiles(store: CanvasStore, files: File[], at: { x: number; y: number }, opts: { target?: string; linkTo?: string; replace?: string } = {}) {
   let dx = 0; const made: string[] = [];
   for (const f of files) {
     const kind: GenKind | null = f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : null;
+    if (!kind && isDocument(f)) { const id = await addDocument(store, f, { x: at.x + dx, y: at.y }); if (id) { made.push(id); dx += 360; if (opts.linkTo && store.node(opts.linkTo)) connect(store, id, opts.linkTo, { quiet: true, select: false }); } continue; }
     if (!kind) { store.toast(`不支持的文件：${f.name}`); continue; }
     if (f.size > (kind === "image" ? 20 : 200) * 1024 * 1024) { store.toast(`${f.name} 超过 ${kind === "image" ? 20 : 200}MB，未添加`); continue; }
     const dataUrl = await new Promise<string>((r, j) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result)); fr.onerror = () => j(fr.error); fr.readAsDataURL(f); }).catch(() => "");

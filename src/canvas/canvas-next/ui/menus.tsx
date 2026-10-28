@@ -53,7 +53,7 @@ export function addMenu(ctl: Ctl, anchor: At, at: { x: number; y: number }, from
     {from ? null : <><div className="mh">辅助工具</div>
       {([["model3d", "3D", "文生 / 图生 3D 模型", "cube"], ["timeline", "剪辑时间线", "把视频 / 音频排成一条片子并导出", "video"], ["scene3d", "3D 片场", "摆放几何体和模型，调机位", "cube"], ["note", "便签", "随手记一段说明", "pencil"]] as const).map(([k, l, d, ic]) => <button key={k} className="mi" data-t={k} onClick={() => { close(); createLegacy(ctl, k, at); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{l}<span className="d">{d}</span></span></button>)}
       <button className="mi" data-t="image-editor" onClick={() => { close(); createImageEditor(ctl, at); }}><span className="ic"><Icon name="brush" size="s" /></span><span>图片编辑器<span className="d">选择图片后直接裁剪和编辑</span></span></button></>}
-    {from ? null : <><div className="mh">添加资源</div><button className="mi" data-t="upload" onClick={() => { close(); window.dispatchEvent(new CustomEvent("cn:upload", { detail: { at } })); }}><span className="ic"><Icon name="upload" size="s" /></span><span>上传<span className="d">图片、视频、音频，也可以直接拖进画布</span></span></button></>}
+    {from ? null : <><div className="mh">添加资源</div><button className="mi" data-t="upload" onClick={() => { close(); window.dispatchEvent(new CustomEvent("cn:upload", { detail: { at } })); }}><span className="ic"><Icon name="upload" size="s" /></span><span>上传<span className="d">图片、视频、音频、文档，也可以直接拖进画布</span></span></button></>}
   </>);
 }
 
@@ -77,7 +77,7 @@ export function portMenu(ctl: Ctl, n: CanvasNode, side: "in" | "out", at: { x: n
     <div className="msep" /><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>也可以按住 ⊕ 拖到其他节点上直接连线</span></div>
   </> : <>
     <div className="mh">给「{title(n)}」添加输入</div>
-    <button className="mi" data-k="up" onClick={() => { close(); window.dispatchEvent(new CustomEvent("cn:upload", { detail: { at: { x: n.x - 360, y: n.y + 120 }, linkTo: n.id } })); }}><span className="ic"><Icon name="upload" size="s" /></span><span>上传图片</span></button>
+    <button className="mi" data-k="up" onClick={() => { close(); window.dispatchEvent(new CustomEvent("cn:upload", { detail: { at: { x: n.x - 360, y: n.y + 120 }, linkTo: n.id } })); }}><span className="ic"><Icon name="upload" size="s" /></span><span>上传文件</span></button>
     <button className="mi" data-k="lib" onClick={() => { close(); store.setUI({ drawer: "assets" }); window.dispatchEvent(new CustomEvent("cn:lib-link", { detail: n.id })); }}><span className="ic"><Icon name="folder" size="s" /></span><span>从素材库选择</span></button>
     <button className="mi" data-k="pick" onClick={() => { close(); store.setUI({ sel: new Set([n.id]), pick: n.id }); store.toast("点画布上的节点，把它连成输入；Esc 结束"); }}><span className="ic"><Icon name="cursor" size="s" /></span><span>从画布选择</span></button>
     <div className="msep" />

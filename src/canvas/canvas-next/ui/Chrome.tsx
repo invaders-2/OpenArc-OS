@@ -14,7 +14,8 @@ import { alignSelection, deleteSelection, title } from "../actions";
 import { runNode } from "../engine";
 import { minimapVisible } from "./minimap";
 import { download, downloadMany } from "./menus";
-import { stackSelection } from "../stack";
+import { stackOf, stackSelection } from "../stack";
+import { groupName, groupsOf, membersOf, searchNodes, type SearchKind, type SearchScope } from "../search";
 import { confirmRunGroup, runnableIds } from "./StackNode";
 import { bounds, defaultParams, genOf, inputsOf, isGenKind, outOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, type AnyParams, type GenKind, type TextParams, type VideoMode, type VideoParams } from "../model";
 import { emptyTable, withTable } from "../table";
@@ -40,7 +41,8 @@ export function Chrome() {
       {renaming ? <input className="ttl" id="ttlIn" autoFocus defaultValue={name} onBlur={(e) => { store.set({ name: e.target.value.trim() || name }); setRenaming(false); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setRenaming(false); }} />
         : <span className="ttl" id="ttl" title="点击重命名" onClick={() => setRenaming(true)}>{name}</span>}
       <button className="ib tipB" style={{ width: 28, height: 28 }} id="canvasMenu" data-tip="切换画布 · 设置" onClick={(e) => canvasMenu(ctl, e.currentTarget, () => setRenaming(true))}><Icon name="down" size="s" /></button>
-      {ctl.host.badge ? <span className="badge-preview">{ctl.host.badge}</span> : saving === "conflict" ? <span className="badge-preview">版本冲突</span> : saving === "error" ? <span className="badge-preview">未保存</span> : null}
+      <SaveStatus saving={saving} />
+      {ctl.host.badge ? <span className="badge-preview">{ctl.host.badge}</span> : null}
     </div>
     <div id="tr" className="float">
       <div className="cap"><button id="extBtn" className="sq tipB" data-tip="扩展" aria-label="扩展" onClick={(e) => openPop(e.currentTarget, (close) => <>
@@ -98,6 +100,18 @@ export function Chrome() {
 }
 
 /* ---------- 画布菜单 / 设置 ---------- */
+/** 画布保存状态（TapNow 标题旁的保存提示）：保存中 / 已保存 / 保存失败（可重试）/ 版本冲突 */
+function SaveStatus({ saving }: { saving: "idle" | "saving" | "saved" | "error" | "conflict" }) {
+  const store = useCtl().store; const [at, setAt] = useState(0);
+  useEffect(() => { if (saving === "saved") setAt(Date.now()); }, [saving]);
+  if (saving === "idle") return null;
+  const tip = saving === "saved" ? `已自动保存${at ? " · " + new Date(at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : ""}` : saving === "saving" ? "正在保存到本机画布库" : saving === "error" ? "保存失败，点击重试" : "画布在别处被修改过，已停止自动保存；刷新后载入最新版本";
+  const label = saving === "saved" ? "已保存" : saving === "saving" ? "保存中…" : saving === "error" ? "保存失败 · 重试" : "版本冲突";
+  return <button className={"savest tipB " + saving} id="saveStatus" data-save={saving} data-tip={tip} aria-label={tip} disabled={saving !== "error"} onClick={() => { void store.saveNow(); }}>
+    <i className="dot" />{label}
+  </button>;
+}
+
 function canvasMenu(ctl: Ctl, anchor: Element, rename: () => void) {
   const store = ctl.store;
   openPop(anchor, (close) => <>
@@ -176,15 +190,26 @@ function DownloadCanvas({ ctl, close }: { ctl: Ctl; close: () => void }) {
   </div></>;
 }
 function Settings({ ctl }: { ctl: Ctl }) {
-  const batch = useS((s) => s.ui.batchMode); const leftDrag = useS((s) => s.ui.leftDrag); const models = useS((s) => s.models); const store = ctl.store;
-  return <><ModalHead title="画布设置" /><div className="mbd">
+  const ui = useS((s) => s.ui); const models = useS((s) => s.models); const doc = useS((s) => s.doc); const saving = useS((s) => s.saving); const version = useS((s) => s.version); const store = ctl.store;
+  const seg = <K extends string>(key: string, opts: ReadonlyArray<readonly [K, string]>, cur: K, pick: (k: K) => void) => <div className="seg" data-setting={key}>{opts.map(([k, l]) => <button key={k} data-v={k} className={cur === k ? "on" : ""} onClick={() => pick(k)}>{l}</button>)}</div>;
+  const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* 忽略 */ } };
+  return <><ModalHead title="画布设置" icon="settings" /><div className="mbd settings">
+    <div className="sec"><span>外观</span></div>
+    {seg("theme", [["dark", "深色"], ["light", "浅色"], ["system", "跟随系统"]] as const, ui.themePref, (k) => { store.setUI({ themePref: k }); save("openarc-canvas-theme", k); applyTheme(store); })}
     <div className="sec"><span>左键拖动空白处</span></div>
-    <div className="seg" data-setting="leftdrag">{([["select", "框选（右键 / 中键 / 空格拖动平移）"], ["pan", "平移（Shift 拖动框选）"]] as const).map(([k, l]) => <button key={k} data-v={k} className={leftDrag === k ? "on" : ""} onClick={() => { store.setUI({ leftDrag: k }); try { localStorage.setItem("openarc-canvas-leftdrag", k); } catch { /* 忽略 */ } }}>{l}</button>)}</div>
+    {seg("leftdrag", [["select", "框选（右键 / 中键 / 空格拖动平移）"], ["pan", "平移（Shift 拖动框选）"]] as const, ui.leftDrag, (k) => { store.setUI({ leftDrag: k }); save("openarc-canvas-leftdrag", k); })}
+    <div className="sec"><span>画布显示</span></div>
+    {seg("snap", [["on", "网格吸附"], ["off", "自由拖动"]] as const, ui.snap ? "on" : "off", (k) => store.setUI({ snap: k === "on" }))}
+    {seg("mini", [["auto", "小地图：缩小时出现"], ["on", "一直显示"], ["off", "隐藏"]] as const, ui.mini == null ? "auto" : ui.mini ? "on" : "off", (k) => store.setUI({ mini: k === "auto" ? null : k === "on" }))}
+    {seg("edges", [["show", "显示连线"], ["hide", "隐藏连线"]] as const, ui.hideEdges ? "hide" : "show", (k) => store.setUI({ hideEdges: k === "hide" }))}
     <div className="sec"><span>批量生成结果（2× / 4×）的保存方式</span></div>
-    <div className="seg">{([["stack", "堆叠在一个节点"], ["spread", "铺开成多个节点"]] as const).map(([k, l]) => <button key={k} className={batch === k ? "on" : ""} onClick={() => { store.setUI({ batchMode: k }); store.toast(k === "stack" ? "批量结果会堆叠，用 ‹ › 切换" : "批量结果会铺开成新节点"); }}>{l}</button>)}</div>
+    {seg("batch", [["stack", "堆叠在一个节点"], ["spread", "铺开成多个节点"]] as const, ui.batchMode, (k) => { store.setUI({ batchMode: k }); store.toast(k === "stack" ? "批量结果会堆叠，用 ‹ › 切换" : "批量结果会铺开成多个节点"); })}
     <div className="sec"><span>新节点默认模型</span></div>
     {(["image", "video", "text", "audio"] as GenKind[]).map((t) => <div key={t} className="row"><span>{TYPE_LABEL[t]}</span><span style={{ color: "var(--fg2)" }}>{store.defaultModel(t)?.name || "未配置"}</span></div>)}
-    <p style={{ color: "var(--fg3)", fontSize: 12, margin: "12px 0 0" }}>模型列表来自 设置 › 模型（共 {models.length} 个可用于画布）；比例、画质、参考图上限由模型能力表决定。</p>
+    <div className="sec"><span>这张画布</span></div>
+    <div className="row"><span>节点 / 连线</span><span className="tnum" style={{ color: "var(--fg2)" }}>{doc.nodes.length} / {doc.edges.length}</span></div>
+    <div className="row"><span>保存</span><span style={{ color: "var(--fg2)" }}>{saving === "saving" ? "保存中…" : saving === "error" ? "保存失败" : saving === "conflict" ? "版本冲突" : "自动保存"}{version != null ? ` · 版本 ${version}` : ""}</span></div>
+    <p style={{ color: "var(--fg3)", fontSize: 12, margin: "12px 0 0" }}>模型列表来自 设置 › 模型（共 {models.length} 个可用于画布）；比例、画质、参考图上限由模型能力表决定。外观和操作习惯保存在本机。</p>
   </div></>;
 }
 function connectAgentPop(ctl: Ctl, anchor: Element) {
@@ -208,13 +233,17 @@ export function toggleCmt(ctl: Ctl) { const on = !ctl.store.state.ui.cmtMode; ct
 /* ---------- 搜索 / 模板 / 预置工作流 ---------- */
 export function openSearch(ctl: Ctl) { openModal((close) => <SearchModal ctl={ctl} close={close} />, "search"); }
 function SearchModal({ ctl, close }: { ctl: Ctl; close: () => void }) {
-  const [q, setQ] = useState(""); const [f, setF] = useState<"all" | GenKind | "table">("all"); const doc = useS((s) => s.doc);
-  const list = doc.nodes.filter((n) => (f === "all" || n.kind === f) && (!q || (title(n) + (isGenKind(n.kind) ? genOf(n).prompt + textOf(n) : "")).toLowerCase().includes(q.toLowerCase())));
+  const [q, setQ] = useState(""); const [f, setF] = useState<SearchKind>("all"); const [scope, setScope] = useState<SearchScope>("world"); const doc = useS((s) => s.doc);
+  const groups = groupsOf(doc); const sc = scope !== "world" && !groups.some((g) => g.id === scope) ? "world" : scope;
+  const list = searchNodes(doc, { q, kind: f, scope: sc });
+  // 堆叠里收起的节点：定位到所在堆叠
+  const go = (n: CanvasNode) => { close(); const s = n.kind === "group" ? null : stackOf(doc, n.id); ctl.focusNode(s ? s.id : n.id); if (s) ctl.store.toast(`「${title(n)}」在堆叠里，双击堆叠展开`); };
   return <>
-    <div className="sinput"><Icon name="search" /><input id="sq" autoFocus placeholder="搜索节点..." value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /><button className="ib" onClick={close}><Icon name="x" /></button></div>
-    <div className="tabs">{([["all", "全部"], ["image", "图片"], ["video", "视频"], ["text", "文本"], ["audio", "音频"], ["table", "表格"]] as const).map(([k, l]) => <button key={k} className={f === k ? "on" : ""} onClick={() => setF(k)}>{l}</button>)}</div>
+    <div className="sinput"><Icon name="search" /><input id="sq" autoFocus placeholder={sc === "world" ? "搜索整张画布..." : "在分组里搜索..."} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" && list[0]) go(list[0]); }} /><button className="ib" onClick={close}><Icon name="x" /></button></div>
+    {groups.length ? <div className="tabs sscope" data-search-scope={sc}><button data-scope="world" className={sc === "world" ? "on" : ""} onClick={() => setScope("world")}><Icon name="map" size="xs" />整张画布</button>{groups.map((g) => <button key={g.id} data-scope={g.id} className={sc === g.id ? "on" : ""} onClick={() => setScope(g.id)}><Icon name="layers" size="xs" />{groupName(g)}<span className="tnum">{membersOf(doc, g.id).size}</span></button>)}</div> : null}
+    <div className="tabs">{([["all", "全部"], ["image", "图片"], ["video", "视频"], ["text", "文本"], ["audio", "音频"], ["table", "表格"], ["group", "分组"]] as const).map(([k, l]) => <button key={k} data-kind={k} className={f === k ? "on" : ""} onClick={() => setF(k)}>{l}</button>)}</div>
     <div className="dbody" style={{ maxHeight: 360, padding: "0 12px 12px" }}>
-      {list.length ? list.map((n) => <NodeRow key={n.id} n={n} onClick={() => { close(); ctl.focusNode(n.id); }} sub={isGenKind(n.kind) ? (textOf(n) || genOf(n).prompt || TYPE_LABEL[n.kind]).slice(0, 60) : "多维表格"} extra={inputsOf(doc, n.id).length ? inputsOf(doc, n.id).length + " 个输入" : ""} />) : <div style={{ minHeight: 240, display: "grid", placeItems: "center", color: "var(--fg3)" }}>暂无可搜索节点</div>}
+      {list.length ? list.map((n) => <NodeRow key={n.id} n={n} onClick={() => go(n)} sub={n.kind === "group" ? `${membersOf(doc, n.id).size} 个节点` : isGenKind(n.kind) ? (textOf(n) || genOf(n).prompt || TYPE_LABEL[n.kind]).slice(0, 60) : "多维表格"} extra={stackOf(doc, n.id) ? "在堆叠里" : inputsOf(doc, n.id).length ? inputsOf(doc, n.id).length + " 个输入" : ""} />) : <div style={{ minHeight: 240, display: "grid", placeItems: "center", color: "var(--fg3)" }}>{q ? "没有匹配的节点" : sc === "world" ? "画布上还没有这类节点" : "这个分组里没有这类节点"}</div>}
     </div>
   </>;
 }

@@ -18,7 +18,8 @@ const { extendRendererCommands } = require("./canvas-dxos-commands.cjs");
 // 画布导出的 PNG / JPEG 由主进程真正落盘（file:// 页面里 <a download> 不落盘，见 canvas-export-save.cjs）
 const { createExportSaver } = require("./canvas-export-save.cjs");
 // task-72：视频「使用区间」按 ffmpeg 真裁剪（media/clipVideo）；没有 ffmpeg 时由调用方降级
-const { clipVideo } = require("./media-clip.cjs");
+const { clipVideo, parseDataUrl: parseDocumentDataUrl } = require("./media-clip.cjs");
+const { extractAttachment } = require("./canvas-dxos-agent-attachments.cjs");
 // 10-28：视频工具（智能切镜 / 修剪进画布）：镜头检测 + 按段裁剪后直接存进资源库
 const { detectScenes, clipToCanvas } = require("./media-scenes.cjs");
 const { executeCanvasDesktopInput } = require("./canvas-desktop-input.cjs");
@@ -80,6 +81,7 @@ const RENDERER_COMMANDS = extendRendererCommands([
   // 10-28：智能切镜 { dataUrl, threshold?, minGap? } → 切点；修剪 / 切镜结果 { canvasId, dataUrl, segments } → 资源引用
   "media/detectScenes",
   "media/clipToCanvas",
+  "media/extractDocument",
   "canvas/folder/grants",
   "canvas/folder/choose",
   "canvas/folder/remove",
@@ -499,6 +501,13 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
             segments: Array.isArray(payload.segments) ? payload.segments.map((x) => ({ inSec: Number(x && x.inSec), outSec: Number(x && x.outSec) })) : [],
             fileName: payload.fileName ? asStr(payload.fileName, 160) : null,
           }, { canvasService: service, context, clipImpl, ...(clipDir ? { tmpDir: clipDir } : {}) });
+        case "media/extractDocument": {
+          // 文档上传（TapNow 支持文档）：txt / md / csv / json / docx / xlsx 抽成文本，放进文本节点
+          const parsed = parseDocumentDataUrl(typeof payload.dataUrl === "string" ? payload.dataUrl.slice(0, 40 * 1024 * 1024) : "");
+          if (!parsed) return { ok: false, error: "INVALID_INPUT" };
+          const r = extractAttachment({ buffer: parsed.buf, name: asStr(payload.name, 300) || "document", mime: parsed.mime, size: parsed.buf.length });
+          return r.error ? { ok: false, error: "UNSUPPORTED_DOCUMENT", detail: r.error } : { ok: true, text: r.content, truncated: !!r.truncated };
+        }
         default: {
           // B5d：白名单里的扩展命令先交给同一个扩展分发；未命中/未装配一律回落既有错误码，不放行任意命令。
           if (extension && typeof extension.dispatch === "function") {

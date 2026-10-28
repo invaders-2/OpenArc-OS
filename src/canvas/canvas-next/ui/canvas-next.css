@@ -1448,3 +1448,31 @@
 .cn-root #aThink .thk.l2{opacity:.6;box-shadow:4px 0 0 0 currentColor}
 .cn-root #aThink .thk.l3{opacity:.6;box-shadow:4px 0 0 0 currentColor,8px 0 0 0 currentColor;margin-right:8px}
 .cn-root #aThink .thk.l2{margin-right:4px}
+
+/* 画布保存状态 */
+.cn-root .savest{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--fg3);padding:2px 8px;border-radius:999px;white-space:nowrap;cursor:default}
+.cn-root .savest .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.6}
+.cn-root .savest.saving .dot{animation:savepulse 1s ease-in-out infinite}
+.cn-root .savest.error{color:var(--bad);cursor:pointer;background:rgba(var(--ink),.05)}
+.cn-root .savest.error:hover{background:rgba(var(--ink),.1)}
+.cn-root .savest.conflict{color:var(--bad)}
+@keyframes savepulse{50%{opacity:.15}}
+@media (prefers-reduced-motion: reduce){.cn-root .savest.saving .dot{animation:none}}
+
+/* 搜索范围：整张画布 / 分组 */
+.cn-root .sscope{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.cn-root .sscope button{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;flex:none}
+.cn-root .sscope .tnum{color:var(--fg3);font-size:10.5px}
+/* 画布设置 */
+.cn-root .settings .seg{padding-left:0;padding-right:0}
+
+/* 资产库文件夹 */
+.cn-root .lib-folders{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;align-items:center}
+.cn-root .lib-folders button{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;flex:none}
+.cn-root .lib-folders .tnum{color:var(--fg3);font-size:10.5px}
+.cn-root .lib-folders .ib{width:24px;height:24px}
+.cn-root .agrid .a .amove{position:absolute;right:4px;bottom:4px;width:20px;height:20px;border-radius:6px;display:grid;place-items:center;background:rgba(0,0,0,.55);color:#fff;opacity:0;transition:opacity var(--d-fast,120ms)}
+.cn-root .agrid .a:hover .amove,.cn-root .agrid .a .amove:focus-visible{opacity:1}
+.cn-root .fname{display:flex;flex-direction:column;gap:6px;padding:4px 6px 6px;min-width:200px}
+.cn-root .fname input{font-size:12.5px;padding:6px 8px;border-radius:8px;background:var(--sunken);border:0;outline:0;color:var(--fg)}
+.cn-root .fname small{color:var(--bad);font-size:11.5px}

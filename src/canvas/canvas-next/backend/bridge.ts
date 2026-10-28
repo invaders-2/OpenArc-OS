@@ -695,6 +695,11 @@ export function createBridgeBackend(): CanvasBackend {
       const res = await cmd({ type: "canvas/readAsset", ref }).catch(() => null);
       return res && res.ok && res.dataUrl ? String(res.dataUrl) : null;
     },
+    async extractDocument(dataUrl, name) {
+      const cmd = canvasCmd(); if (!cmd) return { ok: false as const, error: "NO_BRIDGE" };
+      const res: Record<string, any> = await cmd({ type: "media/extractDocument", dataUrl, name }).catch(() => ({ ok: false, error: "EXTRACT_FAILED" }));
+      return res && res.ok && typeof res.text === "string" ? { ok: true as const, text: res.text, truncated: !!res.truncated } : { ok: false as const, error: String(res?.error || "EXTRACT_FAILED"), ...(res?.detail ? { detail: String(res.detail) } : {}) };
+    },
     async detectScenes(dataUrl) {
       const cmd = canvasCmd(); if (!cmd) return { ok: false as const, error: "NO_BRIDGE" };
       const res: Record<string, any> = await cmd({ type: "media/detectScenes", dataUrl }).catch((e: unknown) => ({ ok: false, error: "DETECT_FAILED", detail: String((e as Error)?.message || e) }));

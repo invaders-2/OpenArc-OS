@@ -7,7 +7,7 @@
  */
 import { TextDocLayer } from "./ui/TextDoc";
 import { useEffect, useMemo, useRef } from "react";
-import { addFiles, copySelection, deleteSelection, duplicate, pasteFromSystem } from "./actions";
+import { addFiles, DOC_ACCEPT, copySelection, deleteSelection, duplicate, pasteFromSystem } from "./actions";
 import { AgentPanel } from "../tapnow/AgentPanel";
 import type { CanvasBackend } from "./backend/types";
 import { CanvasStore } from "./store";
@@ -118,7 +118,7 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
         </div>
         <AgentPanel draft={agentDraft} />
       </div>
-      <input type="file" ref={fileRef} accept="image/*,video/*,audio/*" multiple hidden onChange={(e) => { const files = [...(e.target.files || [])]; e.target.value = ""; const o = uploadOpts.current; void addFiles(store, files, o.at || ctl.center(), { target: o.target, linkTo: o.linkTo, replace: o.replace }); }} />
+      <input type="file" ref={fileRef} accept={"image/*,video/*,audio/*," + DOC_ACCEPT} multiple hidden onChange={(e) => { const files = [...(e.target.files || [])]; e.target.value = ""; const o = uploadOpts.current; void addFiles(store, files, o.at || ctl.center(), { target: o.target, linkTo: o.linkTo, replace: o.replace }); }} />
       <Toasts />
       <Lightbox />
       <StackGalleryHost />
