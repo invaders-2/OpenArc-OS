@@ -7,7 +7,7 @@ import { Icon } from "./Icon";
 import { placePopover, type PopRect } from "./placement";
 
 type PopAnchor = Element | { x: number; y: number; width?: number; height?: number };
-type PopOpts = { /** 底部再让出多少像素（避开底部工具栏） */ bottomInset?: number; /** anchor 是区域时，真正被点的按钮（隐藏它的提示、再点它是切换） */ trigger?: Element | null };
+type PopOpts = { /** 底部再让出多少像素（避开底部工具栏） */ bottomInset?: number; /** 横向不超出这块区域（例如助手面板） */ xBounds?: [number, number]; /** anchor 是区域时，真正被点的按钮（隐藏它的提示、再点它是切换） */ trigger?: Element | null };
 type PopState = { key: number; anchor: PopAnchor; opts?: PopOpts; render: (close: () => void) => ReactNode; dir: "down" | "up" | "right"; align: "left" | "right"; cls?: string; closing?: boolean } | null;
 type ModalState = { key: number; render: (close: () => void) => ReactNode; cls?: string; closing?: boolean } | null;
 
@@ -60,6 +60,8 @@ function Popover({ st }: { st: NonNullable<PopState> }) {
         ? (() => { const r = st.anchor.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()
         : { x: st.anchor.x, y: st.anchor.y, width: st.anchor.width || 0, height: st.anchor.height || 0 };
       const placed = placePopover({ anchor, popup: pr, viewport: { width: innerWidth, height: innerHeight - (st.opts?.bottomInset || 0) }, dir: st.dir, align: st.align, margin: 8, gap: 8 });
+      // 横向限制在区域内（例如助手输入框里的弹层不伸出助手面板）
+      const xb = st.opts?.xBounds; if (xb && pr.width <= xb[1] - xb[0]) placed.x = Math.max(xb[0], Math.min(placed.x, xb[1] - pr.width));
       setPos((prev) => prev && prev.x === placed.x && prev.y === placed.y && prev.maxHeight === placed.maxHeight && prev.maxWidth === placed.maxWidth && prev.scroll === (placed.scrollX || placed.scrollY) ? prev : { x: placed.x, y: placed.y, origin: placed.origin, menu: placed.menu, maxWidth: placed.maxWidth, maxHeight: placed.maxHeight, scroll: placed.scrollX || placed.scrollY });
     };
     measure();
@@ -107,22 +109,20 @@ export function ModalHead({ title, icon, extra }: { title: ReactNode; icon?: Par
 
 /**
  * 统一的弹出位置（按触发按钮所在的区域自动决定，调用方不用各自处理）：
- *  · 生成面板 #gp、助手输入框 #aiBox 里的按钮：弹层出现在整块区域的上方（不盖住正在写的提示词），
- *    生成面板里按钮在左半边就和按钮左对齐、右半边就右对齐；助手输入框里对齐输入框的左 / 右边缘；
- *    这一侧放不下时换另一侧对齐，上方放不下时翻到区域下方或限高滚动。
+ *  · 生成面板 #gp、助手输入框 #aiBox 里的按钮：弹层紧贴被点的按钮（上方优先，放不下翻到下方），
+ *    按钮在区域左半边左对齐、右半边右对齐；这一侧对齐放不下时换另一侧。
  *  · 左侧竖排工具栏 #lb：贴着工具栏右边缘弹出，并让开底部缩放栏。
  * 弹层里再点出的子菜单不受影响。
  */
 function autoPlace(anchor: PopAnchor, dir: "down" | "up" | "right", align: "left" | "right", opts?: PopOpts) {
   if (!(anchor instanceof Element) || anchor.closest("#pop")) return { anchor, dir, align, opts };
   const region = anchor.closest("#gp") || anchor.closest("#aiBox");
-  if (region) {
+  // 弹层紧贴被点的按钮出现（就在点击位置附近）：按钮上方优先，放不下翻到按钮下方；
+  // 按钮在区域左半边左对齐、右半边右对齐。整块输入框作为锚点的（/ 技能、@ 引用）仍对齐输入框。
+  if (region && anchor !== region) {
     const t = anchor.getBoundingClientRect(); const r = region.getBoundingClientRect();
-    const whole = anchor === region;
-    const right = !whole && t.left + t.width / 2 > r.left + r.width / 2;
-    // 助手输入框：弹层对齐输入框的左 / 右边缘（始终留在助手面板里）；生成面板：对齐被点的按钮
-    const box = whole || region.id === "aiBox";
-    return { anchor: box ? { x: r.left, y: r.top, width: r.width, height: r.height } : { x: t.left, y: r.top, width: t.width, height: r.height }, dir: "up" as const, align: right ? "right" as const : "left" as const, opts: { ...opts, trigger: anchor } };
+    const right = t.left + t.width / 2 > r.left + r.width / 2;
+    return { anchor, dir: "up" as const, align: right ? "right" as const : "left" as const, opts: region.id === "aiBox" ? { ...opts, xBounds: [r.left, r.right] as [number, number] } : opts };
   }
   const bar = anchor.closest("#lb");
   if (bar) {
