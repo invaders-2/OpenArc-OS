@@ -130,7 +130,7 @@ export function runnableIds(store: Ctl["store"], nodes: CanvasNode[]): string[] 
   }
   return [...new Set(out)];
 }
-export const groupLabel = (n: CanvasNode) => (isStack(n) ? "堆叠" : n.text && n.text !== "分组" ? n.text : "分组");
+export { groupLabel } from "../stack";
 
 /* ---------- 分组 / 选中节点「存为我的模板」（TapNow Create Template） ---------- */
 /** 分组 / 堆叠展开成员，取出子画布（只保留两端都在里面的连线） */

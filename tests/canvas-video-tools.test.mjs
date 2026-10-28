@@ -80,3 +80,16 @@ test("智能切镜：按检测结果拆成多个节点；只有一个镜头时�
   shots = [{ inSec: 0, outSec: 9 }];
   assert.equal((await M.smartClip(store, store.node("v"))).length, 0);
 });
+
+test("重拍一段：裁不出真文件时不退回整段（避免重拍并计费整段）；裁出来后连到新节点；新片段不沿用源封面", async () => {
+  const trimmed = () => video("v", { trim: { in: 2, out: 4 }, frame: "data:image/png;base64,F" });
+  const noClip = makeStore([trimmed()]);
+  assert.equal(await M.aiVideoEdit(noClip, noClip.node("v"), "retake", "俯拍"), null);
+  assert.equal(noClip.state.doc.nodes.length, 1, "没有留下半成品节点");
+  const clipped = makeStore([trimmed()], { clipVideo: async (_c, _d, segs) => ({ ok: true, clips: segs.map((s, i) => ({ ref: "openarc-asset:clip" + i, duration: s.outSec - s.inSec })) }) });
+  const out = await M.aiVideoEdit(clipped, clipped.node("v"), "retake", "俯拍");
+  assert.ok(out);
+  const clip = clipped.state.doc.nodes.find((n) => M.genOf(n).hist[0]?.url === "openarc-asset:clip0");
+  assert.ok(clip, "裁出的片段节点"); assert.equal(M.genOf(clip).hist[0].frame, undefined);
+  assert.ok(clipped.state.doc.edges.some((e) => e.from === clip.id && e.to === out.id), "新节点以片段为源视频");
+});

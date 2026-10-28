@@ -2,12 +2,13 @@
  * 视频智能切镜（TapNow Smart Clip）与「裁好直接进画布」。
  *
  * 契约（main process IPC）：
- *   media/detectScenes { dataUrl, threshold = 0.32, minGap = 0.8, maxCuts = 60 }
- *     成功 { ok: true, duration, cuts: number[], shots: [{ inSec, outSec }] }
+ *   media/detectScenes { dataUrl, threshold = 0.32, minGap = 0.8, maxCuts = MAX_SEGMENTS - 1 }
+ *     成功 { ok: true, duration, cuts: number[], shots: [{ inSec, outSec }], capped }
+ *     切点最多 MAX_SEGMENTS - 1 个，保证镜头数不超过 clipToCanvas 一次能裁的段数；超出时最后一段包含剩余部分（capped=true）
  *     失败 { ok: false, error, detail? }   INVALID_INPUT / PROBE_FAILED / FFMPEG_MISSING / FFMPEG_TIMEOUT / FFMPEG_FAILED
  *   media/clipToCanvas { canvasId, dataUrl, segments: [{ inSec, outSec }], fileName? }
- *     每段用 clipVideo 裁出来，再经 canvasService.importAsset 存进资源库，临时文件随即删除。
- *     成功 { ok: true, clips: [{ ref, duration, inSec, outSec } | { error, detail? }] }
+ *     源视频只解码写盘一次，每段用 clipVideo(srcPath) 裁出来，再经 canvasService.importAsset 存进资源库，临时文件随即删除。
+ *     成功 { ok: true, clips: [{ ref, duration, inSec, outSec } | { error, detail? }], dropped }（超过 MAX_SEGMENTS 的段数）
  *
  * 镜头检测用 ffmpeg 的 scene 分数（select='gt(scene,T)',showinfo），只读不写；
  * 切点之间距离小于 minGap 的合并，避免闪烁画面切出一堆零点几秒的碎片。
@@ -25,7 +26,7 @@ const fail = (error, detail) => ({ ok: false, error, ...(detail === undefined ? 
 const MIME_EXT = Object.freeze({ "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm", "video/x-matroska": "mkv" });
 
 /** showinfo 输出里的 pts_time → 切点（秒），排序去重、按 minGap 合并、去掉贴着首尾的切点 */
-function parseCuts(stderr, duration, minGap = 0.8, maxCuts = 60) {
+function parseCuts(stderr, duration, minGap = 0.8, maxCuts = MAX_SEGMENTS - 1) {
   const raw = [];
   const re = /pts_time:\s*([0-9.]+)/g; let m;
   while ((m = re.exec(String(stderr || "")))) { const t = Number(m[1]); if (Number.isFinite(t)) raw.push(t); }
@@ -55,7 +56,7 @@ async function detectScenes(input = {}, deps = {}) {
   const ffprobe = findFfprobe(input.ffprobePath, ffmpeg);
   const threshold = Math.min(0.9, Math.max(0.05, Number(input.threshold) || 0.32));
   const minGap = Math.min(10, Math.max(0.2, Number(input.minGap) || 0.8));
-  const maxCuts = Math.min(200, Math.max(1, Math.trunc(Number(input.maxCuts) || 60)));
+  const maxCuts = Math.min(MAX_SEGMENTS - 1, Math.max(1, Math.trunc(Number(input.maxCuts) || MAX_SEGMENTS - 1)));
   const dir = fs.mkdtempSync(path.join(path.resolve(input.tmpDir || os.tmpdir()), "openarc-scenes-"));
   const file = path.join(dir, "input." + (MIME_EXT[decoded.mime] || "mp4"));
   try {
@@ -65,8 +66,10 @@ async function detectScenes(input = {}, deps = {}) {
     const out = await run(ffmpeg, ["-hide_banner", "-nostats", "-i", file, "-an", "-filter:v", `select='gt(scene,${threshold})',showinfo`, "-f", "null", "-"], { timeoutMs: SCENE_TIMEOUT_MS });
     if (out.timedOut) return fail("FFMPEG_TIMEOUT", "镜头检测超时");
     if (out.code !== 0) return fail("FFMPEG_FAILED", String(out.stderr || "").slice(-400));
-    const cuts = parseCuts(out.stderr, duration, minGap, maxCuts);
-    return { ok: true, duration, cuts, shots: shotsOf(cuts, duration) };
+    const cuts = parseCuts(out.stderr, duration, minGap, maxCuts + 1);
+    const capped = cuts.length > maxCuts;
+    const kept = cuts.slice(0, maxCuts);
+    return { ok: true, duration, cuts: kept, shots: shotsOf(kept, duration), capped };
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
@@ -77,14 +80,22 @@ async function clipToCanvas(input = {}, { canvasService, context, clipImpl = cli
   if (!canvasService || typeof canvasService.importAsset !== "function") return fail("RESOURCE_UNAVAILABLE");
   const dataUrl = String(input.dataUrl || "");
   if (!/^data:video\//i.test(dataUrl)) return fail("INVALID_INPUT", "需要视频 data URL");
-  const segments = Array.isArray(input.segments) ? input.segments.slice(0, MAX_SEGMENTS) : [];
+  const all = Array.isArray(input.segments) ? input.segments : [];
+  const segments = all.slice(0, MAX_SEGMENTS);
   if (!segments.length) return fail("INVALID_INPUT", "segments 为空");
   const name = String(input.fileName || "clip").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 80) || "clip";
+  // 源视频只解码、写盘一次，各段都从这个文件裁（避免每段重复解码几百 MB 的 data URL）
+  const decoded = parseDataUrl(dataUrl);
+  if (!decoded) return fail("INVALID_INPUT", "dataUrl 不是合法的 data URL");
+  const srcDir = fs.mkdtempSync(path.join(path.resolve(tmpDir || os.tmpdir()), "openarc-clipsrc-"));
+  const srcPath = path.join(srcDir, "input." + (MIME_EXT[decoded.mime] || "mp4"));
+  fs.writeFileSync(srcPath, decoded.buf, { mode: 0o600 });
   const clips = [];
+  try {
   for (const seg of segments) {
     const inSec = Number(seg && seg.inSec); const outSec = Number(seg && seg.outSec);
     if (!Number.isFinite(inSec) || !Number.isFinite(outSec)) { clips.push({ error: "INVALID_RANGE" }); continue; }
-    const r = await clipImpl({ dataUrl, inSec, outSec, format: "mp4", fileName: name, ...(tmpDir ? { tmpDir } : {}) });
+    const r = await clipImpl({ srcPath, inSec, outSec, format: "mp4", fileName: name, ...(tmpDir ? { tmpDir } : {}) });
     if (!r || !r.ok) { clips.push({ error: (r && r.error) || "CLIP_FAILED", ...(r && r.detail ? { detail: String(r.detail).slice(0, 300) } : {}) }); continue; }
     try {
       const bytes = fs.readFileSync(r.path);
@@ -95,7 +106,11 @@ async function clipToCanvas(input = {}, { canvasService, context, clipImpl = cli
       try { fs.rmSync(r.path, { force: true }); } catch { /* ignore */ }
     }
   }
-  return { ok: clips.some((c) => c.ref), clips, ...(clips.some((c) => c.ref) ? {} : { error: clips[0] && clips[0].error || "CLIP_FAILED" }) };
+  } finally {
+    try { fs.rmSync(srcDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+  const dropped = all.length - segments.length;
+  return { ok: clips.some((c) => c.ref), clips, ...(dropped > 0 ? { dropped } : {}), ...(clips.some((c) => c.ref) ? {} : { error: clips[0] && clips[0].error || "CLIP_FAILED" }) };
 }
 
 module.exports = { detectScenes, clipToCanvas, parseCuts, shotsOf, MAX_SEGMENTS };

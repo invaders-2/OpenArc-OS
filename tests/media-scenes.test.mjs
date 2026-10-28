@@ -61,3 +61,16 @@ test("真实视频：按段裁剪后存进资源库，临时文件删除", { ski
   const left = fs.existsSync(path.join(ROOT, "openarc-clips")) ? fs.readdirSync(path.join(ROOT, "openarc-clips")) : [];
   assert.deepEqual(left, []);
 });
+
+test("切镜上限：切点最多 MAX_SEGMENTS-1 个；clipToCanvas 源视频只写一次，超出的段数如实返回", async () => {
+  const { MAX_SEGMENTS } = require("../electron/media-scenes.cjs"); const clip = clipToCanvas;
+  const stderr = Array.from({ length: 80 }, (_, i) => `pts_time:${(i + 1) * 2}`).join("\n");
+  assert.equal(parseCuts(stderr, 400).length, MAX_SEGMENTS - 1);
+  const seen = new Set();
+  const clipImpl = async ({ srcPath, inSec, outSec }) => { assert.ok(srcPath && fs.existsSync(srcPath)); seen.add(srcPath); const p = path.join(ROOT, "oa-clip-" + inSec + ".mp4"); fs.writeFileSync(p, "x"); return { ok: true, path: p, duration: outSec - inSec, inSec, outSec }; };
+  const canvasService = { importAsset: async () => ({ ok: true, ref: "openarc-asset:r" }) };
+  const segs = Array.from({ length: MAX_SEGMENTS + 2 }, (_, i) => ({ inSec: i, outSec: i + 1 }));
+  const r = await clip({ canvasId: "c", dataUrl: "data:video/mp4;base64,AAAA", segments: segs }, { canvasService, context: {}, clipImpl, tmpDir: ROOT });
+  assert.equal(r.clips.length, MAX_SEGMENTS); assert.equal(r.dropped, 2); assert.equal(seen.size, 1, "所有段共用一个源文件");
+  assert.ok(![...seen].some((p) => fs.existsSync(p)), "源文件用完删除");
+});

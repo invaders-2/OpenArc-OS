@@ -52,7 +52,7 @@ function VideoAiForm({ store, node, op, close }: { store: CanvasStore; node: Can
       <label>新机位</label>
       <div className="seg wrap">{RETAKE_CAMERAS.map((c) => <button key={c} className={a === c ? "on" : ""} onClick={() => setA(c)}>{c}</button>)}</div>
       <label>补充说明（可不填）</label><input value={b} placeholder="例如：节奏放慢一些" onChange={(e) => setB(e.target.value)} onKeyDown={stop} />
-      <p className="vai-note">{part && t ? `只重拍使用区间 ${Math.round(t.in * 10) / 10}s–${Math.round(t.out * 10) / 10}s：先把这一段裁成单独的节点再生成。` : "没有设使用区间，会重拍整段。拖动视频下方的入点 / 出点可以只重拍一段。"}</p>
+      <p className="vai-note">{part && t ? `只重拍使用区间 ${Math.round(t.in * 10) / 10}s–${Math.round(t.out * 10) / 10}s：先把这一段裁成单独的视频再生成（需要桌面版的 ffmpeg）。` : "没有设使用区间，会重拍整段。拖动视频下方的入点 / 出点可以只重拍一段。"}</p>
     </>}
     <div className="vai-foot"><span className="vai-note">会在右侧新建视频节点并开始生成，按服务商用量计费</span><button className="btn solid" data-vai-go disabled={!m} onClick={go}><Icon name="sparkle" size="s" />生成</button></div>
   </div>;
