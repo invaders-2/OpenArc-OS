@@ -56,9 +56,27 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
   }), [a]);
   useEffect(() => { const on = (e: Event) => store.toast("技能同步失败：" + String((e as CustomEvent).detail || "未知错误")); addEventListener("cn:skill-sync-error", on); return () => removeEventListener("cn:skill-sync-error", on); }, [store]);
   useEffect(() => { let live = true; void store.backend.defaultChatModel?.().then((id) => { if (live) setDefaultModelId(id || null); }); return () => { live = false; }; }, [store.backend, models]);
-  const frozenModelId = [...a.msgs].reverse().find((m) => m.task?.modelConfigId)?.task?.modelConfigId || null;
-  const modelLabel = frozenModelId ? models.find((m) => m.id === frozenModelId)?.name || "任务冻结模型" : models.find((m) => m.id === defaultModelId)?.name || (models.some((m) => m.kind === "text") ? "默认对话模型" : "未配置对话模型");
-  const modelHint = (frozenModelId ? "任务冻结模型：" : "默认对话模型：") + modelLabel + "，在系统设置里更改";
+  // 只有任务还在跑时才显示「本轮任务的模型」（任务开始时已冻结）；任务结束后显示下一条消息会用的默认对话模型
+  const runningTask = [...a.msgs].reverse().find((m) => m.task && !TASK_UI_SETTLED.has(m.task.status))?.task;
+  const frozenModelId = runningTask?.modelConfigId || null;
+  const chatModels = models.filter((m) => m.kind === "text");
+  const modelLabel = frozenModelId ? models.find((m) => m.id === frozenModelId)?.name || "本轮任务模型" : models.find((m) => m.id === defaultModelId)?.name || (chatModels.length ? "默认对话模型" : "未配置对话模型");
+  const modelHint = (frozenModelId ? "本轮任务模型：" : "对话模型：") + modelLabel;
+  /** 切换对话模型 = 改「我的默认对话模型」：全局生效，从下一条消息开始用；进行中的任务不受影响 */
+  const modelMenu = (anchor: HTMLElement) => openPop(anchor, (close) => <>
+    <div className="mh">对话模型 · 从下一条消息开始使用</div>
+    {chatModels.map((m) => <button key={m.id} className={"mi" + (m.id === defaultModelId ? " on" : "")} data-chat-model={m.id} onClick={async () => {
+      close(); if (m.id === defaultModelId) return;
+      const set = store.backend.setDefaultChatModel; if (!set) { store.toast("当前环境不能切换对话模型"); return; }
+      const res = await set(m.id);
+      if (!res.ok) { store.toast("切换失败：" + (res.error || "未知错误")); return; }
+      setDefaultModelId(m.id); store.toast(`已切换到 ${m.name}` + (runningTask ? "，进行中的任务仍用原模型" : ""));
+    }}><span style={{ flex: 1, minWidth: 0 }}>{m.name}<span className="d">{m.vendor}{m.vision ? " · 能读图" : ""}</span></span>{m.id === defaultModelId ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}
+    {!chatModels.length ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>还没有可用的对话模型</span></div> : null}
+    <div className="msep" />
+    <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>全局默认模型，其他对话也会一起切换</span></div>
+    {ctl.host.openModelSettings ? <button className="mi" onClick={() => { close(); ctl.host.openModelSettings!(); }}><Icon name="settings" size="s" />模型设置</button> : null}
+  </>, "up", "right", "pop-model");
 
   // 上下文：固定的 + 当前选中的（可移除）
   const ctxNodes = (): Array<{ n: CanvasNode; pinned: boolean }> => {
@@ -262,7 +280,7 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
           <button className={"pill ghost tipT" + (full ? "" : " icon")} id="aThink" data-thinking={a.thinking} aria-label={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} data-tip={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">思考强度</div>{THINKING.map(([k, t, d]) => <button key={k} className={"mi" + (a.thinking === k ? " on" : "")} data-t={k} onClick={() => { close(); a.setThinking(k); }}><span className="ic"><Icon name="brain" size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.thinking === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name="brain" size="s" />{full ? THINKING.find(([k]) => k === a.thinking)?.[1] : null}<span className={"thk l" + THINKING.findIndex(([k]) => k === a.thinking)} aria-hidden="true"><b /><b /><b /></span></button>
           <span className="sp" />
           <button className="ib tipT" style={{ width: 30, height: 30 }} id="aRing" aria-label="上下文占用" data-tip={"上下文已用 " + Math.max(1, Math.round(Math.min(1, used / CTX_MAX) * 100)) + "%"} onClick={(e) => ctxPopover(ctl, a, e.currentTarget, ctxBreak())}><Ring p={Math.min(1, used / CTX_MAX)} /></button>
-          <button className={"pill ghost locked tipT" + (full ? "" : " icon")} id="aModel" aria-label={modelHint} data-tip={modelHint} onClick={() => store.toast(modelHint)}><Icon name="sparkle" size="s" />{full ? modelLabel : null}</button>
+          <button className={"pill ghost tipT" + (full ? "" : " icon")} id="aModel" aria-label={modelHint} data-tip={modelHint} onClick={(e) => modelMenu(e.currentTarget)}><Icon name="sparkle" size="s" />{full ? modelLabel : null}</button>
           <button className="ib" style={{ width: 30, height: 30 }} id="aMic" aria-label="语音输入" onClick={(e) => micInput(ctl, e.currentTarget, (t) => setDraft((a.draft ? a.draft + " " : "") + t))}><Icon name="mic" size="s" /></button>
           {a.busy ? <button className="send busy" id="aSend" title="停止" onClick={() => { void stopTask(); }}><i className="ring"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="sqr" /></button>
             : <button className="send" id="aSend" title={kbd("发送 ↵")} disabled={!a.draft.trim() && !a.skill} onClick={() => void send()}><Icon name="send" size="s" /></button>}

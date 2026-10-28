@@ -645,6 +645,12 @@ export function createBridgeBackend(): CanvasBackend {
       const res = await cmd({ type: "task/run", payload: { goal: req.goal, canvasContext: req.context } }).catch(() => null);
       return res ? { ok: res.ok === true, taskId: typeof res.taskId === "string" ? res.taskId : undefined, status: typeof res.status === "string" ? res.status : undefined, error: typeof res.error === "string" ? res.error : undefined } : { ok: false, error: "TASK_UNAVAILABLE" };
     },
+    async setDefaultChatModel(configId) {
+      // 只走模型服务自己的命令（defaults/set）：画布命令通道不放行改默认模型
+      const cmd = oa()?.model?.command; if (typeof cmd !== "function") return { ok: false, error: "MODEL_SERVICE_UNAVAILABLE" };
+      const res = await cmd({ command: "defaults/set", payload: { capability: "chat", configId, scope: "PERSONAL" } }).catch(() => null);
+      return res && res.ok !== false ? { ok: true } : { ok: false, error: typeof res?.error === "string" ? res.error : "设置失败" };
+    },
     async defaultChatModel() {
       const cmd = modelCmd(); if (!cmd) return null;
       const res = await cmd({ command: "defaults/get" }).catch(() => null);

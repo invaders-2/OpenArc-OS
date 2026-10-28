@@ -42,3 +42,12 @@ test("计划块解析", async () => {
   assert.equal(parsePlan("```openarc-plan\nnot json\n```"), null);
   assert.match(planGoal("做海报", ["a", "b"]), /1\. a\n2\. b/);
 });
+
+test("画布助手可以切换对话模型：走模型服务的 defaults/set，不由画布自报任务模型", () => {
+  const bridge = read("src/canvas/canvas-next/backend/bridge.ts");
+  assert.match(bridge, /command: "defaults\/set", payload: \{ capability: "chat", configId, scope: "PERSONAL" \}/);
+  const panel = read("src/canvas/tapnow/AgentPanel.tsx");
+  assert.match(panel, /onClick=\{\(e\) => modelMenu\(e\.currentTarget\)\}/);
+  // 任务提交里仍然不带模型：模型由后台按默认解析
+  assert.doesNotMatch(panel, /runAgentTask\(\{[^}]*modelConfigId/);
+});

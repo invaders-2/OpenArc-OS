@@ -102,6 +102,8 @@ export interface CanvasBackend {
   chat(req: { canvasId: string; configId?: string; effort?: "auto" | "low" | "high"; messages: ChatMessage[] }, onDelta: (full: string) => void, signal: AbortSignal): Promise<string>;
   runAgentTask?(req: { goal: string; context: CanvasAgentContext }): Promise<{ ok: boolean; taskId?: string; status?: string; error?: string }>;
   defaultChatModel?(): Promise<string | null>;
+  /** 把某个对话模型设为「我的默认对话模型」（全局生效，画布助手下一条消息起使用） */
+  setDefaultChatModel?(configId: string): Promise<{ ok: boolean; error?: string }>;
   watchAgentTask?(taskId: string, onSnapshot: (snapshot: AgentTaskSnapshot) => void): () => void;
   cancelAgentTask?(taskId: string): Promise<{ ok: boolean; error?: string }>;
   /** 本地文件 / data URL 存进资源库，返回画布里可保存的地址（openarc-asset:… 或原地址） */
