@@ -14,7 +14,9 @@ import { Markdown } from "../canvas-next/ui/markdown";
 import { ruleAnswer } from "../canvas-next/agent/planner";
 import { MentionPalette } from "../canvas-next/agent/MentionPalette";
 import { QueryLocator } from "../canvas-next/agent/QueryLocator";
-import { AgentState, useAgent, type AgentMsg, type Skill } from "../canvas-next/agent/state";
+import { AgentState, THINKING, useAgent, type AgentMsg, type Skill } from "../canvas-next/agent/state";
+import { answerText, clarifyQuestions, newCard, parseQuestions, type QaCard } from "../canvas-next/agent/qa";
+import { QaCardView } from "../canvas-next/agent/QaCard";
 import { subscribeAgentTask, TASK_UI_SETTLED, taskAnswer, taskStatusText, taskToolSteps, type RefreshOutcome } from "../canvas-next/agent/task";
 import { skillInstallIntent } from "../canvas-next/agent/skillInstallIntent";
 import { inspectSkillRepository, installSkillPreview } from "../canvas-next/agent/skillInstallClient";
@@ -81,17 +83,31 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
 
   const brainstorm = () => { a.skill = "头脑风暴"; setDraft(a.skills.find((k) => k.name === "头脑风暴")?.desc || ""); };
 
+  /** 回复里带 ```openarc-questions 时变成问答卡，代码块不显示 */
+  function withQuestions(m: AgentMsg, text: string) {
+    const parsed = parseQuestions(text); if (!parsed) return text;
+    if (!m.qa) m.qa = newCard(goalOf(m), parsed.questions);
+    return parsed.rest || "开始之前想先确认几件事：";
+  }
+  const goalOf = (m: AgentMsg) => { const i = a.msgs.indexOf(m); return [...a.msgs.slice(0, i < 0 ? a.msgs.length : i)].reverse().find((x) => x.role === "u")?.text || ""; };
+  const answerQa = (m: AgentMsg, card: QaCard, skip: boolean) => {
+    if (a.busy) return;
+    patch(m, { qa: { ...card, status: skip ? "skipped" : "answered" } });
+    a.draft = skip ? `不用再问了，按你的理解直接做：${card.goal}` : answerText(card); void send(true);
+  };
+
   function watchTask(m: AgentMsg, taskId: string, t0: number) {
     let refreshed = ""; let refreshOutcome: RefreshOutcome = "not_required";
     const watcher = subscribeAgentTask(store.backend, taskId, (snapshot) => {
       const settled = TASK_UI_SETTLED.has(snapshot.status);
       const effect = settled ? "terminal" : snapshot.events.filter((e) => /side_effect\.succeeded|execution\.succeeded/.test(String(e.eventType))).map((e) => String(e.eventId)).join(",");
       if (effect && effect !== refreshed && (snapshot.status === "SUCCEEDED" || snapshot.status === "COMPLETED")) refreshOutcome = "pending";
-      patch(m, { task: { taskId, status: snapshot.status, modelConfigId: snapshot.modelConfigId, stopRequested: m.task?.stopRequested }, tools: taskToolSteps(snapshot), text: taskAnswer(snapshot, refreshOutcome) || m.text, streaming: false, think: m.think ? { ...m.think, live: false, secs: ((performance.now() - t0) / 1000).toFixed(1) } : undefined, took: settled ? (performance.now() - t0) / 1000 : m.took });
+      const answer = withQuestions(m, taskAnswer(snapshot, refreshOutcome));
+      patch(m, { task: { taskId, status: snapshot.status, modelConfigId: snapshot.modelConfigId, stopRequested: m.task?.stopRequested }, tools: taskToolSteps(snapshot), text: answer || m.text, streaming: false, think: m.think ? { ...m.think, live: false, secs: ((performance.now() - t0) / 1000).toFixed(1) } : undefined, took: settled ? (performance.now() - t0) / 1000 : m.took });
       a.busy = !settled; a.stop = false; a.emit();
       if (effect && effect !== refreshed) {
         refreshed = effect;
-        void store.refreshAuthoritative().then((outcome) => { if (refreshed !== effect) return; refreshOutcome = outcome; patch(m, { text: taskAnswer(snapshot, refreshOutcome) || m.text }); });
+        void store.refreshAuthoritative().then((outcome) => { if (refreshed !== effect) return; refreshOutcome = outcome; patch(m, { text: withQuestions(m, taskAnswer(snapshot, refreshOutcome)) || m.text }); });
       }
     }, () => taskWatchers.current.delete(taskId));
     if (!watcher.settled()) taskWatchers.current.set(taskId, watcher.stop);
@@ -127,7 +143,7 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
     patch(m, { skillInstall: { ...m.skillInstall, status: "cancelled", error: undefined } });
   }
 
-  async function send() {
+  async function send(fromQa = false) {
     let text = a.draft.trim(); const skill = a.skill ? a.skills.find((s) => s.name === a.skill) || null : null;
     if ((!text && !skill) || a.busy) return; if (!text) text = skill!.desc;
     const installSource = skillInstallIntent(text);
@@ -147,11 +163,14 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
       if (store.backend.runAgentTask) {
         const goal = (text + (skill ? "\n\n本次技能要求（不得扩大现有工具权限）：" + (skill.md || skill.desc) : "")).slice(0, 2000);
         const resourceRefs = [...ctx.map((n) => isGenKind(n.kind) ? srcOf(n) : ""), ...refs.filter((r) => r.kind === "asset").map((r) => r.ref)].filter((ref) => /^(openarc-asset:|resource:\/\/)/.test(ref)).slice(0, 16);
-        const submitted = await store.backend.runAgentTask({ goal, context: { schemaVersion: 1, canvasId: store.state.canvasId, selectedNodeIds: ctx.map((n) => n.id).slice(0, 16), resourceRefs, completionConditions: ["完成用户目标；画布写入必须经受控工具批准并读回验证"] } });
+        const submitted = await store.backend.runAgentTask({ goal, context: { schemaVersion: 1, canvasId: store.state.canvasId, selectedNodeIds: ctx.map((n) => n.id).slice(0, 16), resourceRefs, completionConditions: ["完成用户目标；画布写入必须经受控工具批准并读回验证"], thinking: fromQa && a.thinking !== "off" ? "light" : a.thinking } });
         if (!submitted.ok || !submitted.taskId) throw new Error(submitted.error || "任务提交失败");
         patch(m, { task: { taskId: submitted.taskId, status: submitted.status || "PENDING" }, think: { live: false, open: false, secs: "0", lines: ["目标、画布引用与完成条件已提交 OpenArc 任务运行时"] }, text: "任务已提交；等待 OpenArc 分配工具与执行。" });
         watchTask(m, submitted.taskId, t0); return;
       }
+      // 没有任务运行时：模糊的出图 / 出视频需求先用问答卡问清楚（思考强度关闭 / 轻度时不问）
+      const qs = fromQa ? null : clarifyQuestions(text, ctx.length + refs.length, a.thinking);
+      if (qs) { patch(m, { think: { live: false, open: false, secs: ((performance.now() - t0) / 1000).toFixed(1), lines: ["需求里缺少用途、风格等关键信息，先确认"] }, qa: newCard(text, qs) }); await stream(m, "开始之前想先确认几件事，选好后我再动手："); return; }
       const ans = ruleAnswer(store, text, ctx);
       patch(m, { think: { live: false, open: false, secs: ((performance.now() - t0) / 1000).toFixed(1), lines: [] }, acts: ans.acts });
       await stream(m, ans.text);
@@ -197,7 +216,7 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
         {!a.msgs.length ? <div className="hello"><h2><span>Hi{ctl.host.user?.name ? " " + ctl.host.user.name : ""}！</span><br />今天一起创作点什么？</h2>
           {SUGS.slice((sugPage % 3) * 2, (sugPage % 3) * 2 + 2).map(([ic, t, d, q], k) => <button key={t} className="sug" data-q={q} style={{ ["--r" as string]: (k ? 1.2 : -1.2) + "deg" }} onClick={() => (q === "@@头脑风暴" ? brainstorm() : setDraft(q))}><span className="si"><Icon name={ic} size="s" /></span><span><b>{t}</b><small>{d}</small></span><Icon name="right" size="s" /></button>)}
           <button className="ib tipT" id="aRefresh" data-tip="换一批" style={{ alignSelf: "flex-end", width: 28, height: 28 }} onClick={() => setSugPage(sugPage + 1)}><Icon name="history" size="xs" /></button></div>
-          : a.msgs.map((m, i) => <Msg key={m.id} m={m} i={i} isNew={i >= seen.current} a={a} ctl={ctl} onRetry={() => { const u = a.msgs.slice(0, i).reverse().find((x) => x.role === "u"); if (u) { a.draft = u.text; void send(); } }} onBranch={() => branch(i)} onQ={setDraft} onSkillInstallConfirm={() => void confirmRepositoryInstall(m)} onSkillInstallCancel={() => cancelRepositoryInstall(m)} />)}
+          : a.msgs.map((m, i) => <Msg key={m.id} m={m} i={i} isNew={i >= seen.current} a={a} ctl={ctl} onRetry={() => { const u = a.msgs.slice(0, i).reverse().find((x) => x.role === "u"); if (u) { a.draft = u.text; void send(); } }} onBranch={() => branch(i)} onQ={setDraft} onSkillInstallConfirm={() => void confirmRepositoryInstall(m)} onSkillInstallCancel={() => cancelRepositoryInstall(m)} onQa={(card, skip) => answerQa(m, card, skip)} />)}
         <SeenMark onSeen={() => (seen.current = a.msgs.length)} />
       </div><QueryLocator msgs={a.msgs} onJump={(id) => { scrollRef.current?.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }} /></div>
       {!a.msgs.length && a.draft && !a.skill && !a.hintOff ? <div className="ahint"><Icon name="brain" size="xs" /><span>用头脑风暴，开启你的项目创作。</span><button className="linkbtn" onClick={brainstorm}>试一下</button><button className="ib" aria-label="不再提示" onClick={() => a.dismissHint()}><Icon name="x" size="xs" /></button></div> : null}
@@ -215,10 +234,11 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
           <button className="ib" style={{ width: 30, height: 30 }} id="aPlus" aria-label="添加" onClick={(e) => plusMenu(ctl, a, e.currentTarget, () => slashPalette())}><Icon name="plus" size="s" /></button>
           <FolderButton ctl={ctl} a={a} />
           <CaptureButton ctl={ctl} a={a} />
-          <button className="pill ghost" id="aMode" onClick={(e) => openPop(e.currentTarget, (close) => <>{([["manual", "cursor", "手动确认", "Agent 自动规划与只读执行，写入由你逐次批准"], ["auto", "bolt", "自动规划", "Agent 自动规划与只读执行，写入仍需你的可信批准"]] as const).map(([k, ic, t, d]) => <button key={k} className={"mi" + (a.mode === k ? " on" : "")} data-m={k} onClick={() => { close(); a.setMode(k); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.mode === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name={a.mode === "auto" ? "bolt" : "cursor"} size="s" />{a.mode === "auto" ? "自动规划" : "手动确认"}<Icon name="down" size="xs" /></button>
+          <button className="pill ghost" id="aMode" onClick={(e) => openPop(e.currentTarget, (close) => <>{([["manual", "cursor", "手动确认", "Agent 自动规划与只读执行，写入由你逐次批准"], ["auto", "bolt", "自动规划", "Agent 自动规划与只读执行，写入仍需你的可信批准"]] as const).map(([k, ic, t, d]) => <button key={k} className={"mi" + (a.mode === k ? " on" : "")} data-m={k} onClick={() => { close(); a.setMode(k); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.mode === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name={a.mode === "auto" ? "bolt" : "cursor"} size="s" />{a.mode === "auto" ? (full ? "自动规划" : "自动") : (full ? "手动确认" : "手动")}<Icon name="down" size="xs" /></button>
+          <button className={"pill ghost tipT" + (full ? "" : " icon")} id="aThink" data-thinking={a.thinking} aria-label={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} data-tip={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">思考强度</div>{THINKING.map(([k, t, d]) => <button key={k} className={"mi" + (a.thinking === k ? " on" : "")} data-t={k} onClick={() => { close(); a.setThinking(k); }}><span className="ic"><Icon name="brain" size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.thinking === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name="brain" size="s" />{full ? THINKING.find(([k]) => k === a.thinking)?.[1] : null}{a.thinking === "off" ? null : <i className={"thk l" + THINKING.findIndex(([k]) => k === a.thinking)} />}</button>
           <span className="sp" />
           <button className="ib" style={{ width: 30, height: 30 }} id="aRing" aria-label="上下文占用" onClick={(e) => ctxPopover(ctl, a, e.currentTarget, ctxBreak())}><Ring p={Math.min(1, used / CTX_MAX)} /></button>
-          <button className="pill ghost locked tipT" id="aModel" aria-label={modelHint} data-tip={modelHint} onClick={() => store.toast(modelHint)}><Icon name="sparkle" size="s" />{modelLabel}</button>
+          <button className={"pill ghost locked tipT" + (full ? "" : " icon")} id="aModel" aria-label={modelHint} data-tip={modelHint} onClick={() => store.toast(modelHint)}><Icon name="sparkle" size="s" />{full ? modelLabel : null}</button>
           <button className="ib" style={{ width: 30, height: 30 }} id="aMic" aria-label="语音输入" onClick={(e) => micInput(ctl, e.currentTarget, (t) => setDraft((a.draft ? a.draft + " " : "") + t))}><Icon name="mic" size="s" /></button>
           {a.busy ? <button className="send busy" id="aSend" title="停止" onClick={() => { void stopTask(); }}><i className="ring"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="sqr" /></button>
             : <button className="send" id="aSend" title="发送 ↵" onClick={() => void send()}><Icon name="send" size="s" /></button>}
@@ -242,7 +262,7 @@ function MentionRow({ n, onClick }: { n: CanvasNode; onClick: () => void }) {
 }
 
 const toolIcon = (label: string): Parameters<typeof Icon>[0]["name"] => /读取|检查|计算/.test(label) ? "eye" : /连线|连入|连到/.test(label) ? "link" : /新建|创建/.test(label) ? "plus" : /生成|运行/.test(label) ? "sparkle" : /排布|整理/.test(label) ? "grid" : /记忆/.test(label) ? "brain" : "bolt";
-function Msg({ m, i, isNew, a, ctl, onRetry, onBranch, onQ, onSkillInstallConfirm, onSkillInstallCancel }: { m: AgentMsg; i: number; isNew: boolean; a: AgentState; ctl: Ctl; onRetry: () => void; onBranch: () => void; onQ: (q: string) => void; onSkillInstallConfirm: () => void; onSkillInstallCancel: () => void }) {
+function Msg({ m, i, isNew, a, ctl, onRetry, onBranch, onQ, onSkillInstallConfirm, onSkillInstallCancel, onQa }: { m: AgentMsg; i: number; isNew: boolean; a: AgentState; ctl: Ctl; onRetry: () => void; onBranch: () => void; onQ: (q: string) => void; onSkillInstallConfirm: () => void; onSkillInstallCancel: () => void; onQa: (card: QaCard, skip: boolean) => void }) {
   const nw = isNew ? " new" : "";
   const copy = async () => { try { await navigator.clipboard.writeText(m.text || ""); ctl.store.toast("已复制"); } catch { ctl.store.toast("剪贴板不可用"); } };
   if (m.role === "u") return <div className={"msg u" + nw} data-i={i} data-msg-id={m.id}>
@@ -255,6 +275,7 @@ function Msg({ m, i, isNew, a, ctl, onRetry, onBranch, onQ, onSkillInstallConfir
     {m.text ? <div className="bub md-chat"><Markdown text={m.text} />{m.streaming ? <span className="caret" /> : null}</div> : null}
     {m.error ? <div className="gp-warn" style={{ margin: "4px 0" }}><Icon name="alert" size="s" /><span>{m.error}</span></div> : null}
     {m.task ? <div className="confirm" data-task-id={m.task.taskId} data-task-status={m.task.status}><div className="ch"><Icon name="layers" size="s" /><b>OpenArc 任务</b><span className="sp" /><span className="tag">{taskStatusText(m.task.status)}</span></div></div> : null}
+    {m.qa ? <QaCardView card={m.qa} busy={a.busy} onChange={(qa) => patch({ qa })} onSubmit={() => onQa(m.qa!, false)} onSkip={() => onQa(m.qa!, true)} /> : null}
     {m.skillInstall ? <SkillInstallCard value={m.skillInstall} onConfirm={onSkillInstallConfirm} onCancel={onSkillInstallCancel} onManage={() => skillsModal(a)} /> : null}
     {m.results?.length ? <div className="mentions">{m.results.map((id) => <NodeMention key={id} id={id} ctl={ctl} />)}</div> : null}
     {m.acts ? <div className="qacts">{m.acts.map((q) => <button key={q} className="btn" onClick={() => onQ(q)}>{q}</button>)}</div> : null}

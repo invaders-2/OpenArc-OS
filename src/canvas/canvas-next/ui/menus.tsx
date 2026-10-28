@@ -1,4 +1,5 @@
 /** 添加节点 / 右键 / ⊕ 端口菜单，以及节点内按钮动作 */
+import { createElementFrom, elementRefsOf } from "./Elements";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { addFiles, alignSelection, connect, copySelection, deleteSelection, duplicate, extractCurrentVersion, hasClip, paste, spreadHistory, title } from "../actions";
 import { runChain, runNode } from "../engine";
@@ -92,6 +93,7 @@ export function nodeMenu(ctl: Ctl, at: { x: number; y: number }) {
     return <>
       {/* 分组：资产 ┃ 版本 ┃ 运行 ┃ 编辑 ┃ 删除 ┃ 剪贴板（TapNow 的节点菜单也是按用途分组） */}
       <button className="mi" data-k="lib" disabled={!(n.kind === "image" && out)} onClick={act(() => { store.patchGen(n.id, { fav: true }); store.toast(`「${title(n)}」已收藏`); })}><Icon name="star" size="s" />收藏</button>
+      <button className="mi" data-k="element" disabled={!elementRefsOf(ctl, sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x)).length} onClick={act(() => createElementFrom(ctl, sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x)))}><Icon name="user" size="s" />存为元素<span className="k">@ 引用</span></button>
       <button className="mi" data-k="assetlib" disabled={!gen || !(out?.url || out?.text)} onClick={act(() => void saveNodeToLibrary(ctl, n, at))}><Icon name="libadd" size="s" />存入资产库<span className="k">个人 / 团队</span></button>
       {multi || isStack(n) ? <button className="mi" data-k="dl" onClick={act(() => void downloadMany(sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x), store))}><Icon name="download" size="s" />全部下载<span className="k">zip</span></button>
         : <button className="mi" data-k="dl" disabled={!out} onClick={act(() => void download(n, store))}><Icon name="download" size="s" />下载</button>}

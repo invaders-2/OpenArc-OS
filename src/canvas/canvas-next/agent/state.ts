@@ -22,8 +22,18 @@ export type AgentMsg = {
   fb?: "up" | "down";
   took?: number;
   procOpen?: boolean;
+  /** 问答卡（TapNow：Agent 先问清楚，最多 4 个问题） */
+  qa?: import("./qa").QaCard;
   skillInstall?: import("./skillInstallIntent").SkillInstallMessage;
 };
+export type ThinkingLevel = "off" | "light" | "standard" | "heavy";
+export const THINKING: Array<[ThinkingLevel, string, string]> = [
+  ["off", "关闭", "直接回答和执行，最快"],
+  ["light", "轻度", "简单想一下再动手"],
+  ["standard", "标准", "先规划步骤，信息不够时先问你"],
+  ["heavy", "深度", "充分推敲方案和风险，适合复杂任务，耗时更长"],
+];
+export const normThinking = (v: unknown): ThinkingLevel => (v === "off" || v === "light" || v === "heavy" ? v : "standard");
 export type Skill = { id?: string; name: string; desc: string; kw: string; src: "官方" | "我的"; on: boolean; md: string };
 export type MemoryRecord = { resourceRef: string; text: string; scope: "user" | "canvas"; canvasId: string | null };
 export type Conv = { id: string; title: string; msgs: AgentMsg[]; at: number };
@@ -57,6 +67,8 @@ export class AgentState {
   mode: "manual" | "auto" = "manual";
   model = "Auto";
   effort: "auto" | "low" | "high" = read("canvas-next:agent:effort", "high");
+  /** 思考强度（TapNow：关闭 / 轻度 / 标准 / 深度），随任务一起提交给运行时 */
+  thinking: ThinkingLevel = normThinking(read("canvas-next:agent:thinking", "standard"));
   refs: Array<{ id: string; kind: "app" | "asset"; title: string; ref: string }> = [];
   pinned: string[] = [];
   muted = new Set<string>();
@@ -213,6 +225,7 @@ export class AgentState {
 
   setMode(m: "manual" | "auto") { this.mode = m; write("canvas-next:agent:mode", m); this.emit(); }
   setEffort(e: "auto" | "low" | "high") { this.effort = e; write("canvas-next:agent:effort", e); this.emit(); }
+  setThinking(t: ThinkingLevel) { this.thinking = normThinking(t); write("canvas-next:agent:thinking", this.thinking); this.emit(); }
   skillsOn() { return this.skills.filter((s) => s.on); }
   dismissHint() { this.hintOff = true; write("canvas-next:agent:hint-off", true); this.emit(); }
   archive() { /* 对话已经由 task/run 持久化；这里不另存副本。 */ }

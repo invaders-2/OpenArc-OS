@@ -13,7 +13,14 @@ import { genOf, isGenKind, newNode, uid, withGen, type GenData, type GenKind, ty
 
 export type View = { x: number; y: number; k: number };
 export type RunState = { status: "running"; progress: number; runId?: string; stream?: string; abort: AbortController; startedAt: number; batch?: { done: number; total: number } };
-export type RunLog = { id: string; node: string; title: string; type: GenKind | "table"; model: string; status: "done" | "error" | "stopped"; secs: number; time: string; thumb?: string; error?: string };
+export type RunLog = {
+  id: string; node: string; title: string; type: GenKind | "table"; model: string; status: "done" | "error" | "stopped"; secs: number; time: string; thumb?: string; error?: string;
+  /** 跨项目历史用：记录时间、所在画布、结果（资源库引用 / 远程地址；大的 data URL 不存）、提示词 */
+  at?: number; canvasId?: string; canvasName?: string; out?: { url?: string; frame?: string; text?: string; w?: number; h?: number; dur?: number }; prompt?: string;
+};
+/** 存本机前去掉大的 data URL（结果本身在资源库里，历史只留引用） */
+const small = (u?: string) => (u && (!u.startsWith("data:") || u.length < 4000) ? u : undefined);
+export const compactRun = (x: RunLog): RunLog => ({ ...x, thumb: small(x.thumb), out: x.out ? { ...x.out, url: small(x.out.url), frame: small(x.out.frame), text: x.out.text?.slice(0, 2000) } : undefined, prompt: x.prompt?.slice(0, 500) });
 export type Toast = { id: number; html: string; out?: boolean };
 export type Conn = { id: string; rev: boolean; a: { x: number; y: number }; p: { x: number; y: number }; sx: number; sy: number; over: string | null };
 
@@ -253,8 +260,8 @@ export class CanvasStore {
   patchRun(id: string, patch: Partial<RunState>) { const cur = this.state.runtime[id]; if (this.disposed || !cur) return; this.state = { ...this.state, runtime: { ...this.state.runtime, [id]: { ...cur, ...patch } } }; this.emit(); }
   logRun(r: Omit<RunLog, "id" | "time">) {
     const d = new Date(); const time = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-    const runs = [{ ...r, id: uid("r"), time }, ...this.state.runs].slice(0, 200); this.set({ runs });
-    try { localStorage.setItem("canvas-next:runs:" + this.state.canvasId, JSON.stringify(runs.map((x) => ({ ...x, thumb: x.thumb && x.thumb.length < 4000 ? x.thumb : undefined })))); } catch { /* 忽略 */ }
+    const runs = [{ ...r, id: uid("r"), time, at: d.getTime(), canvasId: this.state.canvasId, canvasName: this.state.name }, ...this.state.runs].slice(0, 200); this.set({ runs });
+    try { localStorage.setItem("canvas-next:runs:" + this.state.canvasId, JSON.stringify(runs.map(compactRun))); } catch { /* 忽略 */ }
   }
 
   /* ---------- 提示 ---------- */

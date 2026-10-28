@@ -10,6 +10,7 @@
  */
 import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { GenError, type GenInput, type GenRequest } from "./backend/types";
+import { applyElements, elementInputs } from "./elements";
 import { nodeError } from "./errorText";
 import { autoVideoMode, clamp, draftRes, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
@@ -44,6 +45,7 @@ export function resolvePrompt(doc: CanvasDoc, node: CanvasNode, extra = ""): str
   const refs = refsIn(g.prompt, ins);
   let p = g.prompt;
   for (const r of refs.found) p = p.replace(new RegExp("@" + escapeRe(genOf(r.node).title) + "·" + r.key), `「${r.text}」`);
+  p = applyElements(p);
   if (node.kind === "text") return [p, extra].filter((s) => s.trim()).join("\n\n");
   const refNodes = new Set(refs.found.map((r) => r.node.id));
   const ctx = ins.filter((x) => x.node.kind === "text" && !refNodes.has(x.node.id) && textOf(x.node).trim()).map((x) => textOf(x.node).trim());
@@ -58,11 +60,16 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: { text:
   const { roles, ignored } = rolesFor(node.kind, g.params, m, ins);
   const inputs: GenInput[] = ins.filter((x) => !ignored.has(x.edge.id)).map((x) => ({ nodeId: x.node.id, title: genOf(x.node).title, kind: x.node.kind as GenKind, order: x.order + 1, role: roles.get(x.edge.id) || "context", url: outOf(x.node)?.url || (x.node.kind === "video" ? outOf(x.node)?.frame : undefined), text: x.node.kind === "text" ? textOf(x.node) : undefined }));
   if (row) row.media.forEach((md) => { if (!inputs.some((i) => i.nodeId === md.nodeId)) inputs.push({ nodeId: md.nodeId, title: md.title, kind: md.kind, order: inputs.length + 1, role: md.kind === "image" ? (node.kind === "video" ? "first_frame" : "reference") : md.kind === "video" ? "source_video" : md.kind === "audio" ? "driving_audio" : "context", url: md.url || md.src }); });
+  // 元素（@名字）：参考图按模型剩余的参考名额加进来
+  inputs.push(...elementInputs(g.prompt, node.kind, m, g.params, inputs));
   const vm = node.kind === "video" ? (g.params as VideoParams).mode : undefined;
   // 草稿模式：按模型最低清晰度出片（请求预览里看到的就是实际发出的清晰度）
   const params = node.kind === "video" && (g.params as VideoParams).draft ? { ...(g.params as VideoParams), res: draftRes(g.params as VideoParams, m) } : g.params;
   return { canvasId: store.state.canvasId, nodeId: node.id, kind: node.kind, model: m, prompt: g.prompt, resolvedPrompt: resolvePrompt(doc, node, row?.text || ""), params, inputs, ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
 }
+
+/** 历史记录里留的结果（不带版本元数据） */
+const runOut = (o?: GenOutput | null) => (o ? { url: o.url, frame: o.frame, text: o.text, w: o.w, h: o.h, dur: o.dur } : undefined);
 
 /* ---------- 放置 ---------- */
 /** 在 n 正下方找一块不和别的节点重叠的位置 */
@@ -125,7 +132,7 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
     applyOutputs(store, id, outs);
     store.setRun(id, null);
     const cur = store.node(id)!;
-    store.logRun({ node: id, title: label || genOf(cur).title, type: cur.kind as GenKind, model: req.model.name, status: "done", secs: Math.round((performance.now() - t0) / 1000), thumb: outOf(cur)?.url && cur.kind === "image" ? outOf(cur)!.url : outOf(cur)?.frame });
+    store.logRun({ node: id, title: label || genOf(cur).title, type: cur.kind as GenKind, model: req.model.name, status: "done", secs: Math.round((performance.now() - t0) / 1000), thumb: outOf(cur)?.url && cur.kind === "image" ? outOf(cur)!.url : outOf(cur)?.frame, out: runOut(outOf(cur)), prompt: req.prompt });
     return true;
   } catch (err) {
     store.setRun(id, null);

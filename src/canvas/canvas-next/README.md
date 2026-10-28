@@ -15,6 +15,10 @@
 | `actions.ts` | 连线、删除、复制粘贴、上传等编辑动作 |
 | `stack.ts` | 多节点堆叠（TapNow Stack）：分组节点 + `data.stack` 标记，成员收起不显示 |
 | `zip.ts` | 批量下载用的最小 zip 打包（只存储不压缩） |
+| `videoTools.ts` | 视频修剪、智能切镜、AI 视频编辑（替换 / 移除 / 续写 / 重拍）、草稿转成片 |
+| `elements.ts` | 元素（TapNow Elements）：角色 / 产品 / 场景参考集，提示词里 `@名字` 引用；界面在 `ui/Elements.tsx` |
+| `history.ts` | 跨项目生成历史：合并各画布的生成记录，筛选、搜索、放回画布 |
+| `agent/qa.ts` | Agent 问答卡（最多 4 问）与思考强度相关的本地规则；界面在 `agent/QaCard.tsx` |
 | `backend/bridge.ts` | 桌面真后端：ReactIsland 直接使用 `window.openarc.canvas / model` |
 | `backend/mock.ts` | 模拟后端（独立页 / 测试） |
 | `agent/` | Agent：对话、技能、记忆、上下文；真后端时走对话模型 + `plan` 协议 |

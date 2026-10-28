@@ -1394,3 +1394,57 @@
 .cn-root .vai-note{font-size:11.5px;color:var(--fg3);line-height:1.5;margin:2px;}
 .cn-root .vai-foot{display:flex;align-items:center;gap:10px;margin-top:6px;}
 .cn-root .vai-foot .vai-note{flex:1;}
+
+/* Agent 问答卡（最多 4 个问题） */
+.cn-root .qa{border-radius:14px;background:var(--raised);padding:12px 14px;display:flex;flex-direction:column;gap:12px;margin:4px 0}
+.cn-root .qa-h{display:flex;align-items:center;gap:8px;font-size:13px}
+.cn-root .qa-h .sp,.cn-root .qa-f .sp{flex:1}
+.cn-root .qa-q{display:flex;flex-direction:column;gap:6px}
+.cn-root .qa-t{font-size:12.5px;display:flex;gap:6px;align-items:baseline}
+.cn-root .qa-t .tnum{color:var(--fg3);font-size:11px;min-width:12px}
+.cn-root .qa-t em{font-style:normal;color:var(--fg3);font-size:11px}
+.cn-root .qa-opts{display:flex;flex-wrap:wrap;gap:6px;padding-left:18px}
+.cn-root .qa-opts button{font-size:12px;padding:4px 10px;border-radius:999px;background:rgba(var(--ink),.06);color:var(--fg2);transition:background var(--d-fast,120ms),color var(--d-fast,120ms)}
+.cn-root .qa-opts button:hover{background:rgba(var(--ink),.12);color:var(--fg)}
+.cn-root .qa-opts button.on{background:var(--fg);color:var(--bg)}
+.cn-root .qa-other{margin-left:18px;font-size:12px;padding:5px 8px;border-radius:8px;background:rgba(var(--ink),.05);border:0;outline:0;color:var(--fg)}
+.cn-root .qa-other:focus{box-shadow:0 0 0 1px rgba(var(--ink),.3)}
+.cn-root .qa-a{padding-left:18px;font-size:12px;color:var(--fg2)}
+.cn-root .qa.done{opacity:.8}
+.cn-root .qa-f{display:flex;align-items:center;gap:8px}
+
+/* 生成历史：范围切换、多选、底部操作条 */
+.cn-root .drawer .hscope{margin-right:4px;padding:0;flex-wrap:nowrap}
+.cn-root .drawer .hscope button{font-size:11.5px;padding:3px 8px}
+.cn-root .hrow.on{background:var(--hover)}
+.cn-root .hpick{width:18px;height:18px;border-radius:6px;flex:none;display:grid;place-items:center;box-shadow:inset 0 0 0 1.5px rgba(var(--ink),.3);color:var(--bg);opacity:.55;transition:opacity var(--d-fast,120ms)}
+.cn-root .hrow:hover .hpick,.cn-root .hpick.on{opacity:1}
+.cn-root .hpick.on{background:var(--fg);box-shadow:none}
+.cn-root .hpick.off{box-shadow:none}
+.cn-root .hbar{display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid var(--line);font-size:12px}
+.cn-root .hbar .sp{flex:1}
+
+/* 元素（TapNow Elements） */
+.cn-root .elgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.cn-root .elc{display:flex;flex-direction:column;gap:4px;text-align:left;min-width:0}
+.cn-root .elc .cv{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--s2);display:grid;place-items:center;color:var(--fg3)}
+.cn-root .elc .cv img{width:100%;height:100%;object-fit:cover}
+.cn-root .elc .cv i{position:absolute;right:4px;bottom:4px;font-style:normal;font-size:10px;padding:0 5px;border-radius:5px;background:rgba(0,0,0,.55);color:#fff}
+.cn-root .elc:hover .cv{outline:1px solid rgba(var(--ink),.4)}
+.cn-root .elc .nm{display:flex;align-items:center;gap:3px;font-size:11.5px;color:var(--fg2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cn-root .el-empty{grid-column:1/-1;color:var(--fg3);font-size:12px;line-height:1.5}
+.cn-root .el-refs{display:flex;gap:8px;flex-wrap:wrap}
+.cn-root .el-ref{position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;background:var(--s2)}
+.cn-root .el-ref img{width:100%;height:100%;object-fit:cover}
+.cn-root .el-ref .x{position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;background:rgba(0,0,0,.55);color:#fff}
+.cn-root .el-ph{display:grid;place-items:center;width:100%;height:100%;color:var(--fg3)}
+
+/* Agent 思考强度按钮：窄面板只显示图标 + 强度刻度 */
+.cn-root #aThink,.cn-root #aMode{flex:none}
+.cn-root #aModel.icon{padding-left:7px;padding-right:7px;flex:none}
+.cn-root #aThink.icon{padding-left:7px;padding-right:7px;gap:3px}
+.cn-root #aThink .thk{flex:none;display:inline-block;width:3px;height:10px;border-radius:2px;background:currentColor;opacity:.35;box-shadow:4px 0 0 0 transparent,8px 0 0 0 transparent}
+.cn-root #aThink .thk.l1{opacity:.6}
+.cn-root #aThink .thk.l2{opacity:.6;box-shadow:4px 0 0 0 currentColor}
+.cn-root #aThink .thk.l3{opacity:.6;box-shadow:4px 0 0 0 currentColor,8px 0 0 0 currentColor;margin-right:8px}
+.cn-root #aThink .thk.l2{margin-right:4px}

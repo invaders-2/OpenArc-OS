@@ -65,6 +65,8 @@ export type CanvasAgentContext = {
   selectedNodeIds: string[];
   resourceRefs: string[];
   completionConditions: string[];
+  /** 思考强度（关闭 / 轻度 / 标准 / 深度）；运行时据此决定规划深度和是否先提问 */
+  thinking?: "off" | "light" | "standard" | "heavy";
 };
 export type AgentTaskSnapshot = {
   taskId: string;

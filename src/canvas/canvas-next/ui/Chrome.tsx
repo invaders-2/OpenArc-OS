@@ -4,7 +4,9 @@
  */
 import { shareMenu, SharePanels } from "./SharePanels";
 import { LibrarySection } from "./Library";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ElementsSection } from "./Elements";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { clearOf, filterHistory, histNode, historyItems, histTime, usable, type HistFilter, type HistItem } from "../history";
 import { createPortal } from "react-dom";
 import type { CanvasComment, CanvasDoc, CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { renderCanvasThumb } from "../../react-canvas/exportCanvas";
@@ -986,21 +988,7 @@ function Drawer({ kind }: { kind: "assets" | "history" }) {
   const [type, setType] = useState("all"); const [q, setQ] = useState(""); const [target, setTarget] = useState<string | null>(null);
   useEffect(() => { const on = (e: Event) => setTarget((e as CustomEvent).detail); addEventListener("cn:lib-link", on); return () => removeEventListener("cn:lib-link", on); }, []);
   const close = () => store.setUI({ drawer: null });
-  if (kind === "history") {
-    const list = runs.filter((r) => type === "all" || r.type === type);
-    return <div className="drawer float" id="drawer" onPointerDown={(e) => e.stopPropagation()}>
-      <div className="dh"><Icon name="history" size="s" />生成历史<span className="sp" /><button className="ib" style={{ width: 28, height: 28 }} onClick={close}><Icon name="x" size="s" /></button></div>
-      <div className="tabs">{[["all", "全部"], ["image", "图片"], ["video", "视频"], ["text", "文本"], ["audio", "音频"]].map(([k, l]) => <button key={k} className={type === k ? "on" : ""} onClick={() => setType(k)}>{l}</button>)}</div>
-      <div className="dbody">
-        {list.map((r) => <div key={r.id} className="hrow" onClick={() => (store.node(r.node) ? ctl.focusNode(r.node) : store.toast("这个节点已经被删除"))}>
-          <span className="th">{r.thumb ? <Thumb src={r.thumb} /> : <Icon name={r.type === "table" ? "grid" : TYPE_ICON[r.type]} size="s" />}</span>
-          <span className="m"><b>{r.title}</b><small>{r.model} · {r.status === "done" ? r.secs + "s" : r.status === "stopped" ? "已停止" : "失败"} · {r.time}</small></span>
-          <span style={{ color: "var(--fg3)" }}><Icon name={r.status === "done" ? "check" : "x"} size="s" /></span>
-        </div>)}
-        {list.length ? null : <p style={{ color: "var(--fg3)", fontSize: 12, padding: 12 }}>还没有生成记录</p>}
-      </div>
-    </div>;
-  }
+  if (kind === "history") return <HistoryDrawer close={close} />;
   const assets = doc.nodes.filter((n) => (n.kind === "image" || n.kind === "video") && outOf(n) && (!q || title(n).includes(q)));
   const favs = assets.filter((n) => genOf(n).fav);
   const link = target ? store.node(target) : null;
@@ -1016,11 +1004,47 @@ function Drawer({ kind }: { kind: "assets" | "history" }) {
     <div className="dbody">
       {link ? <div className="gp-warn" style={{ margin: "0 0 8px" }}><Icon name="link" size="s" /><span>点一张素材，作为「{title(link)}」的输入</span></div> : null}
       <LibrarySection q={q} />
+      <ElementsSection q={q} />
       <div className="sec"><span>收藏</span><span className="tnum">{favs.length}</span></div>
       <div className="agrid">{favs.map((n) => <Asset key={n.id} n={n} onUse={use} />)}{favs.length ? null : <span style={{ gridColumn: "1/-1", color: "var(--fg3)", fontSize: 12 }}>点图片节点左上角的星标收藏</span>}</div>
       <div className="sec"><span>本画布素材</span><span className="tnum">{assets.length}</span></div>
       <div className="agrid">{assets.map((n) => <Asset key={n.id} n={n} onUse={use} />)}</div>
     </div>
+  </div>;
+}
+
+/** 生成历史（TapNow History）：本画布 / 全部项目，类型筛选、搜索，多选放到画布或打包下载 */
+function HistoryDrawer({ close }: { close: () => void }) {
+  const ctl = useCtl(); const store = ctl.store; const runs = useS((s) => s.runs);
+  const [scope, setScope] = useState<"canvas" | "all">("canvas"); const [type, setType] = useState<HistFilter["type"]>("all"); const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const all = useMemo(() => historyItems(store, scope), [store, scope, runs]);
+  const list = filterHistory(all, { type, q, status: "all" });
+  const chosen = all.filter((r) => picked.has(r.id) && usable(r));
+  const toggle = (id: string) => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toNodes = () => { const c = ctl.center(); const cols = Math.ceil(Math.sqrt(chosen.length)); return chosen.map((r, i) => histNode(store, r, c.x - 150 + (i % cols) * 320, c.y - 150 + Math.floor(i / cols) * 320)).filter((n): n is CanvasNode => !!n); };
+  const apply = () => { const ns = clearOf(store.state.doc.nodes, toNodes()); if (!ns.length) return; store.addNodes(ns, [], { select: true }); setPicked(new Set()); store.toast(`已放到画布：${ns.length} 个结果`); };
+  const dl = () => { const ns = toNodes(); if (ns.length) void downloadMany(ns, store, "生成历史"); };
+  const open = (r: HistItem) => {
+    if (r.current) return store.node(r.node) ? ctl.focusNode(r.node) : usable(r) ? toggle(r.id) : store.toast("这个节点已经被删除");
+    if (usable(r)) toggle(r.id); else store.toast(`来自「${r.canvasName}」，没有可用的结果`);
+  };
+  return <div className="drawer float" id="drawer" data-history-scope={scope} onPointerDown={(e) => e.stopPropagation()}>
+    <div className="dh"><Icon name="history" size="s" />生成历史<span className="sp" />
+      <div className="seg hscope">{([["canvas", "本画布"], ["all", "全部项目"]] as const).map(([k, l]) => <button key={k} data-scope={k} className={scope === k ? "on" : ""} onClick={() => { setScope(k); setPicked(new Set()); }}>{l}</button>)}</div>
+      <button className="ib" style={{ width: 28, height: 28 }} onClick={close}><Icon name="x" size="s" /></button></div>
+    <div className="dsearch"><Icon name="search" size="s" /><input placeholder="搜索标题、提示词、模型或画布" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></div>
+    <div className="tabs">{([["all", "全部"], ["image", "图片"], ["video", "视频"], ["audio", "音频"], ["text", "文本"]] as const).map(([k, l]) => <button key={k} className={type === k ? "on" : ""} onClick={() => setType(k)}>{l}</button>)}</div>
+    <div className="dbody">
+      {list.map((r) => { const ok = usable(r); const on = picked.has(r.id); return <div key={r.canvasId + r.id} className={"hrow" + (on ? " on" : "")} data-run={r.id} onClick={() => open(r)}>
+        {ok ? <button className={"hpick" + (on ? " on" : "")} aria-label={on ? "取消选择" : "选择"} aria-pressed={on} onClick={(e) => { e.stopPropagation(); toggle(r.id); }}>{on ? <Icon name="check" size="xs" /> : null}</button> : <span className="hpick off" />}
+        <span className="th">{r.thumb || r.out?.frame || (r.type === "image" ? r.out?.url : "") ? <Thumb src={r.thumb || r.out?.frame || r.out?.url || ""} /> : <Icon name={r.type === "table" ? "grid" : TYPE_ICON[r.type]} size="s" />}</span>
+        <span className="m"><b>{r.title}</b><small>{scope === "all" ? (r.current ? "本画布" : r.canvasName) + " · " : ""}{r.model} · {r.status === "done" ? r.secs + "s" : r.status === "stopped" ? "已停止" : "失败"} · {histTime(r)}</small></span>
+        <span style={{ color: "var(--fg3)" }}><Icon name={r.status === "done" ? "check" : "x"} size="s" /></span>
+      </div>; })}
+      {list.length ? null : <p style={{ color: "var(--fg3)", fontSize: 12, padding: 12 }}>{q || type !== "all" ? "没有符合条件的记录" : scope === "all" ? "所有项目都还没有生成记录" : "还没有生成记录"}</p>}
+    </div>
+    {chosen.length ? <div className="hbar"><span>已选 {chosen.length}</span><span className="sp" /><button className="btn ghost" onClick={() => setPicked(new Set())}>取消</button><button className="btn ghost" data-hdl onClick={dl}><Icon name="download" size="s" />下载</button><button className="btn solid" data-happly onClick={apply}><Icon name="plus" size="s" />放到画布</button></div> : null}
   </div>;
 }
 
