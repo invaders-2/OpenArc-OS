@@ -82,9 +82,13 @@ function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEn
 }
 
 /** 全局 AI 第 2 期：工作文件夹与技能说明（只在对应能力打开时出现）。 */
-function buildAgentNotes({ workspace = false, skillCatalog = "", memory = null } = {}) {
+function buildAgentNotes({ workspace = false, skillCatalog = "", memory = null, subagents = false } = {}) {
   const parts = [];
   if (typeof memory === "string" && memory.trim()) parts.push(memory.trim());
+  if (subagents) {
+    parts.push("Subagents: for a self-contained piece of work (researching one topic, reading many pages or files, drafting one section), call the subagent tool with a complete standalone prompt; it works with the same OpenArc tools in its own context and returns only its result. "
+      + "Several subagent calls in one step run in parallel. Subagents cannot delegate further, and their writes and commands still need the user's approval. Do simple things yourself.");
+  }
   if (workspace) {
     parts.push("You have an AI workspace folder; all workspace paths are relative to it. workspace_list, workspace_read and workspace_search read it freely. "
       + "workspace_write (create/overwrite a file) and workspace_exec (run a shell command with the workspace as working directory) each need the user's approval for that exact call. "
@@ -176,7 +180,7 @@ function classifyHarnessError(e) {
 }
 
 class TaskHarnessOrchestrator {
-  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null, maxToolRounds = MAX_TOOL_ROUNDS, sessionRoot = null, persona = null, modelTtlMs = null, planTool = false, workspaceTools = false, agentMemory = null } = {}) {
+  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null, maxToolRounds = MAX_TOOL_ROUNDS, sessionRoot = null, persona = null, modelTtlMs = null, planTool = false, workspaceTools = false, agentMemory = null, subagentTool = false } = {}) {
     if (!taskService) throw new Error("TaskHarnessOrchestrator 需要 TaskService");
     // 全局 AI 会话化：给了 sessionRoot 时，每个任务（= 一个对话）有自己的持久 dsh 会话目录，下一轮接着上一轮。
     this.sessionRoot = typeof sessionRoot === "string" && sessionRoot ? path.resolve(sessionRoot) : null;
@@ -187,6 +191,8 @@ class TaskHarnessOrchestrator {
     this.progressSink = null;
     // 第 2 期：工作文件夹工具已装配时，在首轮提示里说明它；技能目录晚绑定（技能中心在任务装配之后才起来）。
     this.workspaceTools = workspaceTools === true;
+    // 全局 AI 子 agent（第 4 期）：打开 dsh 的 subagent 工具（子 agent 用同一套受控工具和预算）。
+    this.subagentTool = subagentTool === true;
     // 全局 AI 长期记忆（第 3 期）：首轮提示附上已有记忆；本轮成功收尾时把 memory_save 排的队写进资源库。
     this.agentMemory = agentMemory && typeof agentMemory.flush === "function" ? agentMemory : null;
     this.skillCatalog = null;
@@ -241,7 +247,7 @@ class TaskHarnessOrchestrator {
   setSkillCatalog(fn) { this.skillCatalog = typeof fn === "function" ? fn : null; }
 
   async #agentNotes(task, context) {
-    if (!this.planTool && !this.workspaceTools && !this.skillCatalog && !this.agentMemory) return null;
+    if (!this.planTool && !this.workspaceTools && !this.skillCatalog && !this.agentMemory && !this.subagentTool) return null;
     let catalog = "";
     try { catalog = this.skillCatalog ? String(this.skillCatalog(task && task.userId) || "") : ""; } catch { catalog = ""; }
     let memory = null;
@@ -250,7 +256,7 @@ class TaskHarnessOrchestrator {
       try { items = await this.agentMemory.recall({ context }); } catch { items = []; }
       memory = memoryNotes(items);
     }
-    return buildAgentNotes({ workspace: this.workspaceTools, skillCatalog: catalog.slice(0, 6000), memory });
+    return buildAgentNotes({ workspace: this.workspaceTools, skillCatalog: catalog.slice(0, 6000), memory, subagents: this.subagentTool });
   }
 
   #watchProgress(adapter, taskId) {
@@ -395,7 +401,7 @@ class TaskHarnessOrchestrator {
       // D5-03 第十批：adapter.start() 返回**之前**就要能被 cancel / dispose 找到。
       this.registry.set(run.runId, { taskId, stepId, capabilityId: null, adapter, bridge: facade ? facade.bridge : null, starting: true });
       const session = this.#sessionFor(taskId);
-      info = await adapter.start({ context, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }), ...(session ? { session } : {}), ...(this.persona ? { persona: this.persona } : {}), ...(this.modelTtlMs ? { ttlMs: this.modelTtlMs } : {}), ...(this.planTool ? { planTool: true } : {}) });
+      info = await adapter.start({ context, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }), ...(session ? { session } : {}), ...(this.persona ? { persona: this.persona } : {}), ...(this.modelTtlMs ? { ttlMs: this.modelTtlMs } : {}), ...(this.planTool ? { planTool: true } : {}), ...(this.subagentTool ? { subagentTool: true } : {}) });
       this.#watchProgress(adapter, taskId);
       if (session && info && info.sessionId) this.#rememberSession(taskId, session, info.sessionId);
       if (info && info.resumed) { const follow = buildFollowupPrompt({ stepInput: effectiveInput }); if (follow) promptText = follow; }

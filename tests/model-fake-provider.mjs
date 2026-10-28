@@ -75,6 +75,13 @@ export async function startFakeProvider({ behavior = "success", secretEcho = nul
         state.toolLoopBodies.push(raw.slice(0, 20000));
         const call = (id, name, args) => { state.toolCalls.push(name); return json(200, { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }] } }], usage: { prompt_tokens: 11 * state.requests, completion_tokens: 5, total_tokens: 11 * state.requests + 5 } }); };
         const final = () => json(200, { choices: [{ message: { role: "assistant", content: "OPENARC_DSH_TOOL_OK" } }], usage: { prompt_tokens: 44, completion_tokens: 4, total_tokens: 48 } });
+        // 测试可选：按真实 messages 自己决定下一步（返回 {id,name,args} 调工具；返回字符串当最终回复；null 用默认最终回复）。
+        if (typeof state.toolLoopRouter === "function") {
+          const step = state.toolLoopRouter({ msgs, flat, names, toolNames });
+          if (step && typeof step === "object") return call(step.id || ("call_r" + state.requests), step.name, step.args || {});
+          if (typeof step === "string") return json(200, { choices: [{ message: { role: "assistant", content: step } }], usage: { prompt_tokens: 44, completion_tokens: 4, total_tokens: 48 } });
+          return final();
+        }
         const plan = Array.isArray(state.toolLoopPlan) ? state.toolLoopPlan : null;
         if (plan) {
           if (names.length < plan.length) { const s = plan[names.length]; return call(s.id || ("call_" + (names.length + 1)), s.name, s.args || {}); }
