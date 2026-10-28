@@ -159,19 +159,19 @@ function loadPreloadSurface() {
   return exposed;
 }
 
-test("preload：新增 integration / market 两个顶层键，各只暴露 command，platform 仍在第 22 键", () => {
+test("preload：新增 integration / market 两个顶层键，各只暴露 command，platform 在第 24 键", () => {
   const exposed = loadPreloadSurface();
   assert.ok(exposed && exposed.name === "openarc");
   const api = exposed.api;
   const topKeys = Object.keys(api);
-  assert.equal(topKeys.indexOf("platform"), 21, "platform 仍是第 22 个顶层键");
+  assert.equal(topKeys.indexOf("platform"), 23, "platform 位于 calendar / uploadConsent 之后的第 24 个顶层键");
   // B7f：固定 index、允许其后继续追加（不再断言"最后一个顶层键"）。
-  assert.equal(topKeys.indexOf("integration"), 23, "integration 固定在第 24 个顶层键（index 23）");
-  assert.equal(topKeys.indexOf("market"), 24, "market 固定在第 25 个顶层键（index 24）");
-  // B7i：ComfyUI 已从移植范围移除 —— comfy 顶层键不存在，market 之后不再有键。
+  assert.equal(topKeys.indexOf("integration"), 25, "integration 固定在第 26 个顶层键（index 25）");
+  assert.equal(topKeys.indexOf("market"), 26, "market 固定在第 27 个顶层键（index 26）");
+  // B7i：ComfyUI 已从移植范围移除 —— comfy 顶层键不存在。
   assert.equal(Object.prototype.hasOwnProperty.call(api, "comfy"), false, "comfy 顶层键必须不存在（B7i 移除）");
   // 合并 ui-core 后 market 之后追加了 10-15 的 4 个本地能力键，0.6.1 追加 5 个新域桥，0.6.2 再追加 3 个，CLI 域再追加 1 个，Stage 1 追加画布在线更新 1 个，Windows 标题栏再追加窗口控制 1 个。
-  assert.deepEqual(topKeys.slice(25), ["video", "image", "system", "weather", "systemFonts", "ocr", "fileTransfer", "codexCanvas", "desktop", "photos", "photocraft", "appExchange", "cli", "marketUpdate", "windowControl"], "market 之后只允许 10-15 的 4 个本地能力键、0.6.1 的 5 个新域桥、0.6.2 的 3 个新域、CLI 域、Stage 1 的画布在线更新键与 Windows 自绘标题栏的窗口控制键");
+  assert.deepEqual(topKeys.slice(27), ["video", "image", "system", "weather", "systemFonts", "ocr", "fileTransfer", "codexCanvas", "desktop", "photos", "photocraft", "appExchange", "cli", "marketUpdate", "windowControl"], "market 之后只允许 10-15 的 4 个本地能力键、0.6.1 的 5 个新域桥、0.6.2 的 3 个新域、CLI 域、Stage 1 的画布在线更新键与 Windows 自绘标题栏的窗口控制键");
   assert.deepEqual(Object.keys(api.cli), ["command"], "cli 只允许 command");
   for (const key of ["integration", "market"]) {
     assert.deepEqual(Object.keys(api[key]), ["command"], key + " 只允许 command");
@@ -183,18 +183,18 @@ test("preload：新增 integration / market 两个顶层键，各只暴露 comma
   assert.ok(api.market.command({ command: "market/health" }) instanceof Promise);
 });
 
-// ── ⑥ main 装配与类型契约 ─────────────────────────────────────────────────
-test("main.cjs：装配 createPluginBundle / createMarketBundle 与两条 register*，且均过 trusted", () => {
-  const main = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
-  assert.ok(main.includes('require("./plugin-service.cjs")'));
-  assert.ok(main.includes('require("./market-service.cjs")'));
-  assert.ok(main.includes("createPluginBundle({"));
-  assert.ok(main.includes("createMarketBundle({"));
-  assert.ok(main.includes("registerIntegrationIpc({"));
-  assert.ok(main.includes("registerMarketIpc({"));
-  assert.ok(main.includes("isTrusted: trusted"), "两条通道都必须挂宿主 trusted");
-  const code = main.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-  assert.equal(/api\.dx-os\.com/.test(code), false, "main.cjs 不得接入云市场地址（注释里的 OUT 说明不算）");
+// ── ⑥ 运行时组合根装配与类型契约 ──────────────────────────────────────────
+test("runtime-composition.cjs：装配 createPluginBundle / createMarketBundle 与两条 register*，且均过 trusted", () => {
+  const composition = fs.readFileSync(path.join(ROOT, "electron", "runtime-composition.cjs"), "utf8");
+  assert.ok(composition.includes('require("./plugin-service.cjs")'));
+  assert.ok(composition.includes('require("./market-service.cjs")'));
+  assert.ok(composition.includes("createPluginBundle({"));
+  assert.ok(composition.includes("createMarketBundle({"));
+  assert.ok(composition.includes("registerIntegrationIpc({"));
+  assert.ok(composition.includes("registerMarketIpc({"));
+  assert.ok(composition.includes("isTrusted: trusted"), "两条通道都必须挂宿主 trusted");
+  const code = composition.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.equal(/api\.dx-os\.com/.test(code), false, "runtime-composition.cjs 不得接入云市场地址（注释里的 OUT 说明不算）");
 });
 
 test("plugin-bootstrap.cjs：真实注册 integration:command 与 market:command", () => {

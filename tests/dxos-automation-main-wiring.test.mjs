@@ -28,7 +28,7 @@ const { createPluginBundle } = require("../electron/plugin-service.cjs");
 
 const BASE = Date.UTC(2023, 10, 13, 0, 0, 0);
 const USER = "u-auto-wiring";
-const MAIN_PATH = path.join(process.cwd(), "electron", "main.cjs");
+const MAIN_PATH = path.join(process.cwd(), "electron", "runtime-composition.cjs");
 const tmpDirs = [];
 const openStores = [];
 const openBundles = [];

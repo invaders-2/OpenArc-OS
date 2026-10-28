@@ -28,6 +28,9 @@ const ROOT = path.resolve(HERE, "..");
 const requireFromRoot = createRequire(path.join(ROOT, "package.json"));
 const PRELOAD_PATH = path.join(ROOT, "electron", "preload.cjs");
 const MAIN_PATH = path.join(ROOT, "electron", "main.cjs");
+const WINDOW_IPC_PATH = path.join(ROOT, "electron", "window-browser-ipc.cjs");
+const LIFECYCLE_PATH = path.join(ROOT, "electron", "app-lifecycle.cjs");
+const FILES_IPC_PATH = path.join(ROOT, "electron", "files-ipc.cjs");
 const TOPBAR_PATH = path.join(ROOT, "src-vue", "shell", "TopBar.vue");
 const STYLES_PATH = path.join(ROOT, "src", "styles.css");
 const TYPES_PATH = path.join(ROOT, "src", "types", "openarc-ipc.d.ts");
@@ -67,11 +70,11 @@ function loadExposedPreload() {
 
 const WINDOW_MEMBERS = ["state", "minimize", "toggleMaximize", "close", "onStateChange"];
 
-test("preload · windowControl 是第 40 个顶层键，且只有五个成员", () => {
+test("preload · windowControl 是最后一个顶层键，且只有五个成员", () => {
   const { api } = loadExposedPreload();
   const keys = Object.keys(api);
-  assert.equal(keys.length, 40, "顶层键必须恰为 40（当前 " + keys.length + "）");
-  assert.equal(keys.indexOf("windowControl"), 39, "windowControl 必须追加在末尾，前面键序不变");
+  assert.equal(keys.length, 42, "顶层键必须恰为 42（当前 " + keys.length + "）");
+  assert.equal(keys.indexOf("windowControl"), 41, "windowControl 必须追加在末尾，前面键序不变");
   assert.deepEqual(Object.keys(api.windowControl).sort(), WINDOW_MEMBERS.slice().sort(), "成员集合必须逐字一致");
   for (const member of WINDOW_MEMBERS) {
     assert.equal(typeof api.windowControl[member], "function", "windowControl." + member + " 必须是函数");
@@ -119,7 +122,7 @@ test("preload · 状态订阅走 window:state，且能原样退订", () => {
 
 /** 从 main.cjs 里截出 window:control 的 handler 源码（到该 handle 调用结束）。 */
 function windowControlHandlerSource() {
-  const source = fs.readFileSync(MAIN_PATH, "utf8");
+  const source = fs.readFileSync(WINDOW_IPC_PATH, "utf8");
   const at = source.indexOf('ipcMain.handle("window:control"');
   assert.ok(at > 0, "main.cjs 必须注册 window:control");
   const end = source.indexOf("\n  });", at);
@@ -127,13 +130,13 @@ function windowControlHandlerSource() {
   return source.slice(at, end + 6);
 }
 
-test("main · window:control 过 trusted(event) 且动作是冻结白名单", () => {
+test("window IPC · window:control 过 trusted 且动作是冻结白名单", () => {
   const handler = windowControlHandlerSource();
-  assert.match(handler, /if \(!trusted\(e\)\) throw Error\("Forbidden"\);/, "第一道必须是 trusted(e) → Forbidden");
+  assert.match(handler, /if \(!trusted\((?:event|e)\)\) throw Error\("Forbidden"\);/, "第一道必须用当前事件做 trusted 校验并返回 Forbidden");
   assert.match(handler, /WINDOW_CONTROL_ACTIONS\.includes\(action\)/, "动作必须走白名单校验");
   assert.match(handler, /WINDOW_CONTROL_UNKNOWN_ACTION/, "未知动作必须返回稳定错误码");
   assert.match(handler, /WINDOW_CONTROL_UNAVAILABLE/, "窗口不可用必须返回稳定错误码");
-  const source = fs.readFileSync(MAIN_PATH, "utf8");
+  const source = fs.readFileSync(WINDOW_IPC_PATH, "utf8");
   assert.ok(
     source.includes('const WINDOW_CONTROL_ACTIONS = Object.freeze(["state", "minimize", "toggleMaximize", "close"]);'),
     "动作白名单必须冻结且恰为四项",
@@ -144,16 +147,17 @@ test("main · 关闭与既有路径完全等价：win.close()，没有 close 拦
   const handler = windowControlHandlerSource();
   assert.match(handler, /win\.close\(\)/, "关闭必须调 win.close()");
   assert.doesNotMatch(handler, /preventDefault|dialog|confirm|showMessageBox/, "关闭路径不得引入拦截 / 确认框");
-  const source = fs.readFileSync(MAIN_PATH, "utf8");
+  const source = fs.readFileSync(WINDOW_IPC_PATH, "utf8");
   assert.doesNotMatch(source, /win\.on\(\s*["']close["']/, "main.cjs 不得监听 close 并拦截");
-  assert.match(source, /win\.on\("closed", \(\) => \{/, "既有的 closed 清理路径必须保留");
-  assert.match(source, /app\.on\("window-all-closed", \(\) => app\.quit\(\)\);/, "关闭后仍走既有退出路径");
+  const lifecycle = fs.readFileSync(LIFECYCLE_PATH, "utf8");
+  assert.match(lifecycle, /win\.on\("closed", \(\) => \{/, "既有的 closed 清理路径必须保留");
+  assert.match(lifecycle, /app\.on\("window-all-closed", \(\) => app\.quit\(\)\);/, "关闭后仍走既有退出路径");
 });
 
-test("main · 最大化 / 全屏 / 最小化 / 焦点变化都主动推 window:state", () => {
-  const source = fs.readFileSync(MAIN_PATH, "utf8");
+test("window IPC · 最大化 / 全屏 / 最小化 / 焦点变化都主动推 window:state", () => {
+  const source = fs.readFileSync(WINDOW_IPC_PATH, "utf8");
   assert.match(source, /win\.webContents\.send\("window:state", state\)/, "状态必须经 window:state 下行");
-  const events = source.match(/for \(const event of \[([^\]]+)\]\)\s*\n\s*win\.on\(event, pushWindowState\);/);
+  const events = source.match(/for \(const event of \[([^\]]+)\]\)\s*\{\s*win\.on\(event, pushWindowState\);/);
   assert.ok(events, "必须订阅窗口事件并推状态");
   const names = events[1].split(",").map((s) => s.trim().replace(/["']/g, "")).filter(Boolean);
   for (const required of ["maximize", "unmaximize", "enter-full-screen", "leave-full-screen", "minimize", "restore", "focus", "blur"]) {
@@ -207,13 +211,15 @@ test("main · OA_FORCE_PLATFORM 只影响 chrome 与上报平台，不设置时�
 
   const source = fs.readFileSync(MAIN_PATH, "utf8");
   assert.equal((source.match(/process\.env\.OA_FORCE_PLATFORM/g) || []).length, 3, "OA_FORCE_PLATFORM 只允许在两个字面值判定与三元的取值处读取");
-  assert.match(source, /platform: uiPlatform,/, "system:info 必须上报覆盖后的平台");
-  assert.doesNotMatch(source, /platform: process\.platform,/, "system:info 不得再直接上报真实平台（否则测试覆盖无效）");
-  assert.match(source, /\.\.\.\(isMacChrome/, "窗口 chrome 必须走 isMacChrome");
-  assert.match(source, /titleBarStyle: "hidden", trafficLightPosition: \{ x: 20, y: 12 \}/, "macOS 红绿灯位置必须逐字不变");
+  const filesIpc = fs.readFileSync(FILES_IPC_PATH, "utf8");
+  assert.match(filesIpc, /platform: uiPlatform,/, "system:info 必须上报覆盖后的平台");
+  assert.doesNotMatch(filesIpc, /platform: process\.platform,/, "system:info 不得再直接上报真实平台（否则测试覆盖无效）");
+  const lifecycle = fs.readFileSync(LIFECYCLE_PATH, "utf8");
+  assert.match(lifecycle, /\.\.\.\(isMacChrome/, "窗口 chrome 必须走 isMacChrome");
+  assert.match(lifecycle, /titleBarStyle: "hidden", trafficLightPosition: \{ x: 20, y: 12 \}/, "macOS 红绿灯位置必须逐字不变");
   assert.match(source, /const glass = isMac/, "玻璃材质必须仍按真实平台（mica 只有 Windows 有）");
-  const menuAt = source.indexOf("function installApplicationMenu()");
-  const menuBody = source.slice(menuAt, menuAt + 600);
+  const menuAt = lifecycle.indexOf("function installApplicationMenu(");
+  const menuBody = lifecycle.slice(menuAt, menuAt + 600);
   assert.match(menuBody, /isMac \? \{ role: "appMenu" \}/, "应用菜单角色必须仍按真实 isMac");
 });
 

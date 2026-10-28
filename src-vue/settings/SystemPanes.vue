@@ -185,6 +185,7 @@ onMounted(async () => {
   if (props.pane === "about") await loadUpdateSource();
   if (props.pane === "disk") await scanCache();
   if (props.pane === "runtime") ff.value = (await window.openarc?.video?.status().catch(() => null)) ?? null;
+  if (props.pane === "network") await loadUploadConsent();
   if (props.pane === "apps") {
     const g = (window as any).openarc?.governance;
     if (!g) appsError.value = "组织服务只在 OpenArc 桌面应用里可用。";
@@ -215,6 +216,27 @@ function setWeather(v: boolean) {
   }
 }
 const recentCleared = ref(false);
+type UploadConsentState = { allowed: boolean; destination: string; retention: string; maxBytes: number; last?: { status: number; at: number } | null };
+const uploadConsent = ref<UploadConsentState | null>(null);
+const uploadConsentError = ref("");
+const uploadConsentBusy = ref(false);
+async function loadUploadConsent() {
+  const bridge = window.openarc?.uploadConsent;
+  if (!bridge) { uploadConsentError.value = "上传授权服务只在 OpenArc 桌面应用里可用。"; return; }
+  const reply = await bridge.command({ command: "uploadConsent/get", payload: {} }).catch(() => null);
+  if (reply?.ok) { uploadConsent.value = reply.value as UploadConsentState; uploadConsentError.value = ""; }
+  else uploadConsentError.value = String(reply?.message || reply?.error || "暂时读不到上传授权状态");
+}
+async function setUploadConsent(allowed: boolean) {
+  const bridge = window.openarc?.uploadConsent;
+  if (!bridge || uploadConsentBusy.value) return;
+  uploadConsentBusy.value = true;
+  uploadConsentError.value = "";
+  const reply = await bridge.command({ command: "uploadConsent/set", payload: { allowed } }).catch(() => null);
+  uploadConsentBusy.value = false;
+  if (reply?.ok) uploadConsent.value = reply.value as UploadConsentState;
+  else uploadConsentError.value = String(reply?.message || reply?.error || "上传授权保存失败");
+}
 function clearRecent() {
   shell.recentLaunch = [];
   try {
@@ -258,8 +280,8 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
         <button type="button" role="switch" class="switch" :aria-checked="weatherOn" :aria-label="t('天气联网')" @click="setWeather(!weatherOn)" />
       </div>
       <div class="setting-row">
-        <span class="set-lab">{{ t("应用与工具权限") }}<small>{{ t("哪些应用可用、可以调用哪些工具，由「组织」统一授予") }}</small></span>
-        <button class="planned-today" @click="shell.activateApp('organization')">{{ t("打开组织") }}</button>
+        <span class="set-lab">{{ t("应用与工具权限") }}<small>{{ t("哪些应用可用、可以调用哪些工具，由「组织治理」统一授予") }}</small></span>
+        <button class="planned-today" @click="shell.activateApp('organization')">{{ t("打开组织治理") }}</button>
       </div>
     </div>
     <section class="set-sec">
@@ -281,6 +303,19 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
         <span class="badge ok">{{ t("已隔离") }}</span>
       </div>
     </div>
+    <section class="set-sec" data-upload-consent>
+      <h3>{{ t("第三方素材上传") }}</h3>
+      <div class="set-group">
+        <div class="setting-row">
+          <span class="set-lab">{{ t("允许上传到 Litterbox") }}<small>{{ t("仅在你明确开启后，画布或媒体素材才会发送到第三方；模型服务授权不等于图床授权") }}</small></span>
+          <button type="button" role="switch" class="switch" :aria-checked="uploadConsent?.allowed === true" :aria-label="t('允许上传到 Litterbox')" :disabled="uploadConsentBusy" data-upload-consent-toggle @click="setUploadConsent(!(uploadConsent?.allowed === true))" />
+        </div>
+        <div class="setting-row"><span class="set-lab">{{ t("目的地") }}</span><span class="set-val">{{ uploadConsent?.destination || "Litterbox（catbox.moe）" }}</span></div>
+        <div class="setting-row"><span class="set-lab">{{ t("保留期与大小限制") }}</span><span class="set-val">{{ uploadConsent?.retention || "24h" }} · {{ formatBytes(uploadConsent?.maxBytes ?? 200 * 1024 * 1024) }}</span></div>
+        <div v-if="uploadConsent?.last?.status === 4" class="setting-row" role="alert" data-upload-consent-failed><span class="set-lab">{{ t("最近上传失败") }}<small>{{ t("可检查网络后重试；失败记录不含素材正文、密钥或公开 URL") }}</small></span><span class="badge">{{ t("失败") }}</span></div>
+      </div>
+      <p v-if="uploadConsentError" class="gov-error" role="alert" data-upload-consent-error>{{ uploadConsentError }}</p>
+    </section>
     <!-- 0.6.1：本机代理探测（desktop/proxy/detect；默认零出网，显式 probe 才访问 Google） -->
     <LocalProxyPanel />
   </template>
@@ -407,7 +442,7 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
       </div>
       <p v-if="!apps.length" class="set-cap gov-empty">{{ t("没有可管理的应用。") }}</p>
     </div>
-    <div class="set-sec"><button class="planned-today" @click="shell.activateApp('organization')">{{ t("在「组织」中管理") }}</button></div>
+    <div class="set-sec"><button class="planned-today" @click="shell.activateApp('organization')">{{ t("在「组织治理」中管理") }}</button></div>
   </template>
 
   <!-- 磁盘空间 -->
@@ -522,7 +557,7 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
 
 <style scoped>
 .set-subtitle { margin: var(--space-4) 0 var(--space-2); font-size: var(--fs-caption); font-weight: var(--fw-medium); }
-.set-select { min-height: 26px; padding: 2px var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-caption); }
+.set-select { min-height: 26px; padding: 2px var(--space-2); border: 0; border-radius: var(--radius-md); background: var(--sunken); color: var(--text); font-size: var(--fs-caption); }
 .update-assets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; width: 100%; }
 .update-assets li { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; padding: 2px 0; }
 .update-link { overflow-wrap: anywhere; }

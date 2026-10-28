@@ -36,7 +36,9 @@ const CAPABILITY_CAPS = Object.freeze({
   "vision-input": "llm.chat.vision",
   "image-generation": "image",
   "video-generation": "video",
+  "audio-generation": "audio",
   "embedding": "embedding",
+  "3d-generation": "3d",
 });
 
 function mapCapabilities(list) {

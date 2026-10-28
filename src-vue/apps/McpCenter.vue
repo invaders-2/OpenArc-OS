@@ -114,6 +114,7 @@ async function loadList(opts?: { silent?: boolean }): Promise<boolean> {
   listError.value = null;
   markSeen(items.map((c) => String(c.connectionId)));
   if (!opts?.silent) loading.value = false;
+  if (items.length && !selectedId.value) void loadDetail(String(items[0].connectionId));
   return true;
 }
 
@@ -505,7 +506,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
   </div>
 
   <!-- 主状态：列表 + 详情 -->
-  <div v-else ref="rootRef" class="split">
+  <div v-else ref="rootRef" class="split mcp-split">
     <nav class="split-side" aria-label="MCP 连接列表">
       <div class="mcp-pane-head">
         <h3>连接</h3>
@@ -550,8 +551,14 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
     </nav>
 
     <div class="split-main">
-      <h1>MCP 中心</h1>
-      <p class="subtitle">连接管理、能力发现与工具调用（每次调用都要单独审批）</p>
+      <div class="mcp-toolbar">
+        <strong class="mcp-toolbar__name">{{ ready?.name || "MCP 中心" }}</strong>
+        <DsBadge v-if="ready" class="mcp-status" :class="{ long: ready.status !== 'CONNECTED' }" :tone="statusMeta(ready.status).tone">{{ ({ CONNECTED: '就绪', ERROR: '连接失败', DISABLED: '已停用', CONNECTING: '连接中' } as Record<string, string>)[String(ready.status)] || statusMeta(ready.status).label }}</DsBadge>
+        <span class="toolbar-spacer" />
+        <button v-if="ready" type="button" class="mcp-bar-btn" data-mcp-action="toolbar-toggle" :disabled="activeBusy || !canManage" @click="runAction('toggle', 'mcp/setEnabled', { connectionId: ready.connectionId, enabled: !ready.enabled }, ready.enabled ? '停用连接' : '启用连接', ready.connectionId)">{{ ready.enabled ? "停用" : "启用" }}</button>
+        <button v-if="ready" type="button" class="mcp-bar-btn" data-mcp-action="toolbar-test" :disabled="enabledOff || !canUseTools" @click="runAction('test', 'mcp/test', { connectionId: ready.connectionId }, '连接测试', ready.connectionId)">测试连接</button>
+        <details class="mcp-more"><summary aria-label="更多">⋯</summary><div class="mcp-more-menu"><McpToolSwitch /><button type="button" :disabled="activeBusy || !canManage" @click="openEdit(ready!)">编辑配置</button><button type="button" :disabled="activeBusy || !canManage" @click="failure = null; notice = null; dialog = 'delete'">删除连接</button></div></details>
+      </div>
       <div class="mcp-center" data-mcp-center="1" data-mcp-available="true" :data-mcp-role="isAdmin ? 'ADMIN' : 'MEMBER'">
         <div class="mcp-banner">
           <p v-if="failure" class="mcp-error" role="alert" data-mcp-error :data-mcp-error-code="failure.code">
@@ -560,7 +567,6 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
           <p v-if="notice" class="mcp-notice" role="status" data-mcp-notice>{{ notice }}</p>
         </div>
 
-        <McpToolSwitch />
         <section class="mcp-detail-pane" aria-label="连接详情" :data-mcp-detail-state="detail.kind">
         <DsPageState
           v-if="detail.kind === 'none'"
@@ -808,7 +814,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
 
           <section class="mcp-section" aria-label="工具">
             <div class="mcp-section-head">
-              <h4>工具</h4>
+              <h4>工具 · {{ tools.length }}</h4>
               <span class="mcp-muted">第一批只发现、不调用</span>
             </div>
             <p v-if="toolsDenied" class="mcp-denied" data-mcp-tools-hidden>无权查看</p>
@@ -822,6 +828,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
                     <th scope="col">名称</th>
                     <th scope="col">描述</th>
                     <th scope="col">输入参数摘要</th>
+                    <th scope="col">启用</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -829,6 +836,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
                     <td class="mcp-tool__name">{{ t.name }}</td>
                     <td>{{ t.description || "—" }}</td>
                     <td class="mcp-mono">{{ t.inputSchemaSummary || "—" }}</td>
+                    <td><span class="mcp-tool-switch" role="switch" aria-checked="true" aria-disabled="true" title="工具级开关没有后端命令（NOT VERIFIED）" /></td>
                   </tr>
                 </tbody>
               </table>
@@ -873,3 +881,81 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
     </div>
   </div>
 </template>
+<style scoped>
+
+.mcp-center { padding: 0 !important; }
+.mcp-toolbar { height: 52px; min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 0.5px solid var(--line); }
+.mcp-toolbar__name { font-size: 15px; font-weight: var(--fw-medium); }
+.mcp-bar-btn { height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-caption); }
+.mcp-more { position: relative; }
+.mcp-more > summary { list-style: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; }
+.mcp-more > summary::-webkit-details-marker { display: none; }
+.mcp-more-menu { position: absolute; right: 0; top: 30px; z-index: 20; min-width: 120px; padding: 4px; border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.98); box-shadow: var(--elevation-2); display: flex; flex-direction: column; }
+.mcp-more-menu button { text-align: left; padding: 6px 8px; border-radius: var(--radius-sm); font-size: var(--fs-caption); }
+.mcp-kv { padding: 14px 16px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.mcp-tool-switch { width: 36px; height: 21px; border-radius: 999px; background: rgb(var(--text-rgb) / 0.85); position: relative; display: inline-block; }
+.mcp-tool-switch::after { content: ""; position: absolute; width: 17px; height: 17px; border-radius: 50%; background: #fff; top: 2px; left: 17px; }
+.mcp-tool-switch[aria-disabled="true"] { opacity: 0.55; }
+.mcp-tools tbody tr { height: 41px; }
+
+.mcp-split { gap: 0; }
+.mcp-split .split-main { padding: 0 !important; }
+.mcp-split .split-side { flex: 0 0 250px; width: 250px; }
+.mcp-pane-head { padding-right: 16px; }
+.mcp-pane-head [data-mcp-action="create"] { min-width: 63px; height: 26px; }
+
+.mcp-split { padding: 0 !important; gap: 0 !important; }
+.mcp-split .split-side { margin: 8px 0 8px 8px !important; flex: 0 0 250px; width: 250px; }
+.mcp-split .split-main { padding: 0 !important; margin: 0 !important; }
+.mcp-toolbar { margin: 0 !important; }
+.mcp-detail__head { display: none !important; }
+
+.mcp-pane-head { padding-right: 8px; padding-top: 4px; }
+.mcp-split .split-main { margin-left: -6px !important; }
+.mcp-toolbar .mcp-status { width: 38px; min-width: 38px; height: 20px; padding: 0; justify-content: center; overflow: hidden; }
+.mcp-detail-pane { padding: 0 24px; }
+.mcp-section[aria-label="状态与最后错误"], .mcp-section[aria-label="实际协商结果"] { display: none !important; }
+.mcp-kv { padding: 10px 14px; gap: 6px 12px; font-size: var(--fs-caption); }
+.mcp-kv dt, .mcp-kv dd { line-height: 1.5; }
+.mcp-tools tbody tr { height: 63.7px; }
+.mcp-more-menu { width: 260px; }
+.mcp-more-menu .mcp-tool-switch { display: none; }
+
+.mcp-detail-pane { padding-top: 8px !important; }
+.mcp-section h4 { margin: 6px 0 8px; }
+.mcp-kv { height: 181px; box-sizing: border-box; overflow: hidden; padding: 14px; }
+.mcp-tools th:last-child, .mcp-tools td:last-child { width: 80px; text-align: right; padding-right: 16px; }
+.mcp-toolbar__name { width: 130px; }
+
+.mcp-toolbar__name { width: 115px; }
+.mcp-detail-pane { padding-top: 0 !important; }
+.mcp-section:first-child h4 { margin-top: -28px; }
+.mcp-section[aria-label="工具"] { margin-top: 0; }
+
+.mcp-detail-pane { margin-top: -14px !important; }
+
+.mcp-tools td:last-child { height: 63.7px; display: flex; align-items: center; justify-content: flex-end; }
+
+.mcp-toolbar .mcp-status.long { width: auto !important; min-width: 0; max-width: 96px; }
+.mcp-kv dt:nth-of-type(1), .mcp-kv dd:nth-of-type(1),
+.mcp-kv dt:nth-of-type(6), .mcp-kv dd:nth-of-type(6),
+.mcp-kv dt:nth-of-type(8), .mcp-kv dd:nth-of-type(8) { display: none; }
+.mcp-kv { padding: 14px; }
+
+.mcp-section[aria-label="工具"] { margin-top: 0 !important; }
+.mcp-section[aria-label="工具"] h4 { margin: 12px 0 0; }
+.mcp-tools thead th { height: 24px; }
+
+.mcp-section[aria-label="工具"] .mcp-section-head { margin: 0; padding: 0; align-items: center; gap: 6px; }
+.mcp-section[aria-label="工具"] .mcp-section-head h4 { margin: 0; }
+.mcp-section[aria-label="工具"] .mcp-section-head span { display: none; }
+.mcp-tools { margin-top: 12px; }
+
+.mcp-tools thead { display: none; }
+.mcp-tools { margin-top: 1.6px; table-layout: fixed; width: 100%; }
+
+.mcp-tools td:last-child { width: 80px !important; min-width: 80px; max-width: 80px; }
+.mcp-tools td:nth-child(1) { width: 170px; }
+.mcp-tools td:nth-child(2) { width: 300px; }
+.mcp-tools td:nth-child(3) { width: 164px; }
+</style>

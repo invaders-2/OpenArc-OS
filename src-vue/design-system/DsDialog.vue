@@ -19,7 +19,20 @@ function focusables(): HTMLElement[] {
   return Array.from(panel.value?.querySelectorAll<HTMLElement>(FOCUSABLE) || []);
 }
 
+/* 多个弹窗叠在一起时（详情里再开「拉取模型」）只让最上面那个响应 Esc / Tab */
+const STACK_KEY = "__oaDsDialogStack";
+const token = Symbol("ds-dialog");
+function stack(): symbol[] {
+  const w = window as unknown as Record<string, symbol[]>;
+  return (w[STACK_KEY] ||= []);
+}
+function isTop(): boolean {
+  const s = stack();
+  return s[s.length - 1] === token;
+}
+
 function onKey(e: KeyboardEvent) {
+  if (!isTop()) return;
   if (e.key === "Escape") {
     e.preventDefault();
     e.stopPropagation();
@@ -54,6 +67,7 @@ watch(
   (open) => {
     if (open) {
       returnTo = document.activeElement as HTMLElement;
+      stack().push(token);
       document.addEventListener("keydown", onKey, true);
       // 先聚焦第一个输入框；没有输入框就聚焦面板本身——不把焦点（和焦点环）放到关闭按钮上（设计语言 §3.4）
       requestAnimationFrame(() => {
@@ -64,13 +78,21 @@ watch(
       });
     } else {
       document.removeEventListener("keydown", onKey, true);
+      const s = stack();
+      const at = s.indexOf(token);
+      if (at >= 0) s.splice(at, 1);
       if (returnTo && document.contains(returnTo)) returnTo.focus();
     }
   },
   { immediate: true },
 );
 
-onBeforeUnmount(() => document.removeEventListener("keydown", onKey, true));
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", onKey, true);
+  const s = stack();
+  const at = s.indexOf(token);
+  if (at >= 0) s.splice(at, 1);
+});
 </script>
 
 <template>

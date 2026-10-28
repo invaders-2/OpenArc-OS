@@ -19,25 +19,30 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const TLS_DIR = path.join(ROOT, "artifacts", "d1-05", "tls");
 let cachedTls = null;
+let cachedTlsHostname = null;
 
 /** openssl 现生成一张自签 localhost 证书（不依赖仓库里未跟踪的 artifacts）。 */
 function generateSelfSigned() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-egress-tls-"));
   const config = path.join(dir, "openssl.cnf");
+  const hostname = process.env.OA_EGRESS_TEST_HOSTNAME || "localhost";
   fs.writeFileSync(config, [
     "[req]",
     "distinguished_name = dn",
     "x509_extensions = v3_req",
     "prompt = no",
     "[dn]",
-    "CN = localhost",
+    "CN = " + hostname,
     "[v3_req]",
-    "subjectAltName = DNS:localhost,IP:127.0.0.1",
+    "subjectAltName = DNS:" + hostname + ",IP:127.0.0.1",
     "",
   ].join("\n"));
-  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", path.join(dir, "server.key"), "-out", path.join(dir, "server.crt"), "-days", "2", "-config", config], { stdio: "ignore" });
+  fs.writeFileSync(path.join(dir, "server.ext"), "basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:" + hostname + ",IP:127.0.0.1\n");
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", path.join(dir, "ca.key"), "-out", path.join(dir, "ca.crt"), "-days", "2", "-subj", "/CN=OpenArc Test CA", "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign"], { stdio: "ignore" });
+  execFileSync("openssl", ["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", path.join(dir, "server.key"), "-out", path.join(dir, "server.csr"), "-config", config], { stdio: "ignore" });
+  execFileSync("openssl", ["x509", "-req", "-in", path.join(dir, "server.csr"), "-CA", path.join(dir, "ca.crt"), "-CAkey", path.join(dir, "ca.key"), "-set_serial", "1000", "-out", path.join(dir, "server.crt"), "-days", "2", "-extfile", path.join(dir, "server.ext")], { stdio: "ignore" });
   return {
-    ca: fs.readFileSync(path.join(dir, "server.crt")),
+    ca: fs.readFileSync(path.join(dir, "ca.crt")),
     key: fs.readFileSync(path.join(dir, "server.key")),
     cert: fs.readFileSync(path.join(dir, "server.crt")),
     dir,
@@ -45,6 +50,13 @@ function generateSelfSigned() {
 }
 
 export function tlsFixtures() {
+  const hostname = process.env.OA_EGRESS_TEST_HOSTNAME || null;
+  if (hostname && cachedTls && cachedTlsHostname === hostname) return cachedTls;
+  if (hostname) {
+    cachedTls = generateSelfSigned();
+    cachedTlsHostname = hostname;
+    return cachedTls;
+  }
   if (cachedTls) return cachedTls;
   const caFile = path.join(TLS_DIR, "ca.crt");
   const keyFile = path.join(TLS_DIR, "server.key");
@@ -59,6 +71,10 @@ export function tlsFixtures() {
 export async function startTlsTarget({ delayMs = 0 } = {}) {
   const { key, cert } = tlsFixtures();
   const server = https.createServer({ key, cert }, (req, res) => {
+    if (req.url === "/media.png") { res.writeHead(200, { "content-type": "image/png" }); res.end(Buffer.from("proxied-png")); return; }
+    if (req.url === "/redirect-private") { res.writeHead(302, { location: "http://127.0.0.1/media.png" }); res.end(); return; }
+    if (req.url === "/redirect-media") { res.writeHead(302, { location: "/media.png" }); res.end(); return; }
+    if (req.url === "/large.png") { res.writeHead(200, { "content-type": "image/png" }); for (let i = 0; i < 16; i += 1) res.write(Buffer.alloc(1024, i)); res.end(); return; }
     let body = Buffer.alloc(0);
     req.on("data", (chunk) => { body = Buffer.concat([body, chunk]); });
     req.on("end", () => {

@@ -235,7 +235,7 @@ function cancelRename() {
       <DsPageState
         kind="unavailable"
         :title="t('当前环境无法访问设备域')"
-        :description="t('只有在 OpenArc 桌面应用（Electron）里才会加载设备桥。这里不展示任何模拟设备。')"
+        :description="t('需要在 OpenArc 桌面应用里使用。')"
       />
     </template>
 
@@ -245,12 +245,12 @@ function cancelRename() {
     </p>
 
     <p v-if="!isSuperAdmin" class="device-note" data-device-role-note>
-      {{ t("当前账号不是 Super Admin：设备管理入口不可用，后端也会拒绝这些操作。") }}
+      {{ t("只有管理员可以配对和管理设备。") }}
     </p>
 
     <section class="device-section" :aria-label="t('设备配对')">
       <div class="device-section-head">
-        <h3>{{ t("配对") }}</h3>
+        <h3>{{ t("设备配对") }}</h3>
         <DsButton
           v-if="isSuperAdmin"
           variant="secondary"
@@ -396,7 +396,7 @@ function cancelRename() {
 
     <section v-if="isSuperAdmin" class="device-section" :aria-label="t('设备审计')">
       <div class="device-section-head">
-        <h3>{{ t("审计") }}</h3>
+        <h3>{{ t("最近操作") }}</h3>
       </div>
       <div class="device-audit" data-device-audit>
         <template v-if="audit.length">

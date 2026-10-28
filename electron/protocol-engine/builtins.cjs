@@ -40,7 +40,10 @@ const BUILTIN_PROVIDER_PROTOCOLS_V2 = [
   bearerProvider("fhl-http", "FHL"),
   bearerProvider("agtoken-http", "AGToken"),
   bearerProvider("zkki-http", "ZKKI"),
-  bearerProvider("apimart-http", "APIMart"),
+  {
+    ...bearerProvider("apimart-http", "APIMart"),
+    summary: "APIMart 官方 API（api.apimart.ai，镜像域名 apib.ai）Bearer 连接协议；模型清单默认 /v1/models，带 /v1/models?expand=category 时按类别返回能力。文档 https://docs.apimart.ai/cn",
+  },
   bearerProvider("modelscope-http", "ModelScope"),
   { ...bearerProvider("volcengine-http", "火山引擎方舟"), summary: "火山方舟 Bearer API Key 与 /api/v3 模型列表连接协议。", models: { method: "GET", path: "/api/v3/models", response: { data: "$.data" } } },
   {

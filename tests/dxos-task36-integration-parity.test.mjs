@@ -59,7 +59,7 @@ test("D09 · 在线 Skill 来源查询/设置/清理；不新增命令，非法�
   assert.throws(() => normalizeSource("x".repeat(13000)), /过长/);
   const service = fs.readFileSync(path.join(process.cwd(), "electron", "skill-service.cjs"), "utf8");
   assert.ok(service.includes("onlineSourceAction"));
-  assert.equal(Object.keys(require("../electron/skill-domain.cjs").SKILL_COMMANDS).length, 15, "不得扩冻结命令白名单");
+  assert.equal(Object.keys(require("../electron/skill-domain.cjs").SKILL_COMMANDS).length, 17, "D09 不新增命令；另外两条仅用于 GitHub 预览与暂存安装");
 });
 
 test("D09 · skill/pack/list|install 复用命令完成在线来源查询/设置（不新增白名单）", async () => {

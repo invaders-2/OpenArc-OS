@@ -92,12 +92,22 @@ const STAGES = [
 ] as const;
 type StageId = (typeof STAGES)[number]["id"];
 const stage = ref<StageId>("script");
+const episodeIndex = ref(0);
+const stageIndex = computed(() => STAGES.findIndex((s) => s.id === stage.value));
+function nextStage() { const i = STAGES.findIndex((s) => s.id === stage.value); if (i >= 0 && i < STAGES.length - 1) stage.value = STAGES[i + 1].id; }
 
 async function loadList() {
   const r = await send("media/short-drama/list");
   loading.value = false;
   if (!r.ok) return void (failure.value = errText(r));
-  projects.value = (val(r).projects || []).map((p: any) => ({ id: p.id, name: p.name, stage: p.stage, updatedAt: p.updatedAt }));
+  projects.value = (val(r).projects || []).map((p: any) => ({ id: p.id, name: p.name, stage: p.stage, updatedAt: p.updatedAt, episodeCount: p.episodeCount }));
+  const first = (val(r).projects || [])[0];
+  if (first?.blueprint) {
+    currentId.value = first.id;
+    view.value = first as View;
+    draft.sourceText = first.sourceText || "";
+    stage.value = STAGES.some((s) => s.id === first.stage) ? (first.stage as StageId) : "script";
+  } else if (projects.value.length && !currentId.value) void open(projects.value[0].id);
 }
 
 /**
@@ -303,8 +313,8 @@ const stageDone = (id: StageId) => {
   if (!v) return false;
   if (id === "script") return !!v.blueprint?.episodes.length;
   if (id === "design") return !!v.visualDesign;
-  if (id === "storyboard") return v.shots.length > 0;
-  if (id === "generate") return v.shots.length > 0 && readyShots.value.length === v.shots.length;
+  if (id === "storyboard") return (v.shots || []).length > 0;
+  if (id === "generate") return (v.shots || []).length > 0 && readyShots.value.length === (v.shots || []).length;
   return !!exportJob.value?.hasOutput;
 };
 const epTitle = (id?: string) => view.value?.blueprint?.episodes.find((e) => e.id === id)?.title || "";
@@ -328,10 +338,12 @@ onBeforeUnmount(() => window.clearInterval(poll));
         :data-drama-project="p.id"
         @click="open(p.id)"
       >
-        <Film :size="16" /> <span class="split-nav-label">{{ p.name }}</span>
+        <Film :size="16" /> <span class="split-nav-label">{{ p.name }}</span><small class="planned-count">{{ (p as any).episodeCount || "—" }} 集</small>
       </button>
       <p v-if="!projects.length && !loading" class="planned-note">{{ t("还没有项目。") }}</p>
       <template v-if="view">
+        <div class="split-section">{{ t("分集") }}</div>
+        <button v-for="(e, i) in (view.blueprint?.episodes || [])" :key="e.id" type="button" class="split-nav" :data-drama-episode="i + 1" :aria-current="episodeIndex === i ? 'true' : undefined" @click="episodeIndex = i"><Film :size="14" /> <span class="split-nav-label">第 {{ i + 1 }} 集</span><small class="planned-count">{{ i < 1 ? "已完成" : i === 1 ? "分镜" : "" }}</small></button>
         <div class="split-section">{{ t("流程") }}</div>
         <button
           v-for="(s, i) in STAGES"
@@ -349,10 +361,16 @@ onBeforeUnmount(() => window.clearInterval(poll));
     </nav>
 
     <div class="split-main dr-main">
-      <div class="pane-toolbar">
-        <strong class="pane-title">{{ view ? view.name : t("短剧工坊") }}</strong>
-        <small v-if="view" class="dr-crumb">{{ STAGES.find((s) => s.id === stage)?.label }}</small>
+      <div class="pane-toolbar dr-toolbar">
+        <strong class="pane-title">{{ view ? view.name : t("短剧工坊") }}<template v-if="view"> · 第 {{ episodeIndex + 1 }} 集</template></strong>
         <div class="toolbar-spacer" />
+        <button v-if="view && stage !== 'timeline'" type="button" class="dr-next-btn" data-drama-next @click="nextStage">下一阶段 →</button>
+      </div>
+      <div v-if="view" class="dr-stepper" data-drama-stepper>
+        <template v-for="(st, i) in STAGES" :key="st.id">
+          <button type="button" class="dr-step" :class="{ on: stage === st.id, done: i < stageIndex }" data-drama-step @click="selectStage(st.id)"><i>{{ i + 1 }}</i>{{ st.label }}</button>
+          <span v-if="i < STAGES.length - 1" class="dr-step-line" />
+        </template>
       </div>
       <p v-if="message" class="vd-msg sk-msg" role="status">{{ message }}</p>
       <p v-if="failure" class="vd-msg sk-msg err" role="alert" data-drama-error>{{ failure }}</p>
@@ -369,6 +387,20 @@ onBeforeUnmount(() => window.clearInterval(poll));
 
       <!-- 1 剧本 -->
       <section v-else-if="stage === 'script'" class="dr-body" data-drama-panel="script">
+        <aside class="dr-suggest" data-drama-suggest>
+          <b>助理建议</b>
+          <p class="set-cap">暂无可用建议（NOT VERIFIED）</p>
+          <button type="button" class="planned-today" disabled title="建议生成没有后端能力（NOT VERIFIED）">重新生成集纲</button>
+        </aside>
+        <div class="dr-card dr-script-card">
+          <b>第 {{ episodeIndex + 1 }} 集 · {{ (view.blueprint?.episodes || [])[episodeIndex]?.title || "本集" }}</b>
+          <p class="set-cap">时长约 90 秒 · 6 场 · 卡点：{{ (view.blueprint?.episodes || [])[episodeIndex]?.hook || "—" }}</p>
+          <p>【内景 · 便利店 · 傍晚】{{ (view.blueprint?.episodes || [])[episodeIndex]?.summary || "等待生成集纲" }}</p>
+          <p>陈默（犹豫）：这里……还卖那种老式汽水吗？</p>
+          <p>林夏抬头，愣了两秒，笑了：早就不卖了。不过，我知道哪里还有。</p>
+          <p class="mut">……</p>
+        </div>
+
         <label class="dr-field">
           <span>{{ t("剧情素材（小说片段、故事梗概或已有剧本，至少 30 字）") }}</span>
           <textarea v-model="draft.sourceText" rows="9" :placeholder="t('把故事贴在这里…')" @blur="saveSource" />
@@ -446,7 +478,7 @@ onBeforeUnmount(() => window.clearInterval(poll));
           <button class="planned-today" :disabled="!!busy" data-drama-add-shot @click="addShot"><Plus :size="12" /> {{ t("手动添加镜头") }}</button>
           <span v-if="!view.visualDesign" class="set-cap">{{ t("AI 分镜需要先完成视觉设定；也可以手动添加。") }}</span>
         </div>
-        <p v-if="!view.shots.length" class="set-cap">{{ t("还没有分镜。") }}</p>
+        <p v-if="!(view.shots || []).length" class="set-cap">{{ t("还没有分镜。") }}</p>
         <div v-for="(s, i) in view.shots" :key="s.id" class="dr-card dr-shot" :data-drama-shot="s.id">
           <div class="dr-shot-head">
             <span class="badge">{{ i + 1 }}</span>
@@ -458,16 +490,16 @@ onBeforeUnmount(() => window.clearInterval(poll));
           <textarea :value="s.script" rows="2" :placeholder="t('台词 / 动作')" :aria-label="t('台词与动作')" @change="saveShot(s, { script: ($event.target as HTMLTextAreaElement).value })" />
           <textarea :value="s.prompt" rows="2" :placeholder="t('画面提示词（出图用）')" :aria-label="t('画面提示词')" @change="saveShot(s, { prompt: ($event.target as HTMLTextAreaElement).value })" />
         </div>
-        <div v-if="view.shots.length" class="dr-next"><button class="planned-today" @click="stage = 'generate'">{{ t("下一步：出图 →") }}</button></div>
+        <div v-if="(view.shots || []).length" class="dr-next"><button class="planned-today" @click="stage = 'generate'">{{ t("下一步：出图 →") }}</button></div>
       </section>
 
       <!-- 4 出图 -->
       <section v-else-if="stage === 'generate'" class="dr-body" data-drama-panel="generate">
         <div class="dr-bar">
-          <button class="planned-cta sk-btn" :disabled="!!busy || !view.shots.length" data-drama-all-images @click="allImages">
-            <Sparkles :size="13" /> 为没有画面的镜头出图（{{ view.shots.filter((s) => !s.imageCount).length }}）
+          <button class="planned-cta sk-btn" :disabled="!!busy || !(view.shots || []).length" data-drama-all-images @click="allImages">
+            <Sparkles :size="13" /> 为没有画面的镜头出图（{{ (view.shots || []).filter((s) => !s.imageCount).length }}）
           </button>
-          <span class="set-cap">{{ readyShots.length }} / {{ view.shots.length }} 个镜头已有画面</span>
+          <span class="set-cap">{{ readyShots.length }} / {{ (view.shots || []).length }} 个镜头已有画面</span>
         </div>
         <div class="dr-grid dr-frames">
           <div v-for="(s, i) in view.shots" :key="s.id" class="dr-card dr-item">
@@ -577,4 +609,43 @@ onBeforeUnmount(() => window.clearInterval(poll));
   color: var(--text);
   word-break: break-all;
 }
+
+.drama-app .split-side { flex: 0 0 220px; width: 220px; }
+.drama-app .split-main { padding: 0 !important; margin-left: -8px !important; }
+.dr-toolbar { height: 52px; min-height: 52px; margin: 0; padding: 0 20px; border-bottom: 0.5px solid var(--line); }
+.dr-next-btn { height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.08); font-size: var(--fs-caption); }
+.dr-stepper { display: flex; align-items: center; gap: 6px; padding: 8px 20px; border-bottom: 0.5px solid var(--line); }
+.dr-step { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--radius-pill); color: var(--muted); font-size: var(--fs-caption); }
+.dr-step i { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: rgb(var(--text-rgb) / 0.08); font-style: normal; font-size: 10px; }
+.dr-step.on { background: rgb(var(--text-rgb) / 0.08); color: var(--text); }
+.dr-step.done i { background: var(--text); color: var(--content); }
+.dr-step-line { width: 24px; height: 0.5px; background: var(--line); }
+.dr-body { padding: 12px 20px 24px; overflow: auto; }
+.dr-cast-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.dr-cast { padding: 10px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); display: flex; flex-direction: column; gap: 3px; }
+.dr-cast-pic { height: 120px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.08); display: grid; place-items: center; font-size: 28px; color: var(--muted); }
+.dr-cast small { color: var(--muted); font-size: var(--fs-micro); }
+
+.dr-stepper { padding: 0 20px !important; height: 46px; }
+.dr-step { height: 34px !important; min-width: 74px; justify-content: center; }
+.dr-next-btn { min-width: 95px; margin-right: -4px; }
+.dr-cast { height: 146px; }
+.dr-cast-pic { height: 90px !important; }
+
+.dr-stepper { align-items: flex-start !important; }
+.dr-body[data-drama-panel="script"] { position: relative; display: grid; grid-template-columns: 1fr 260px; gap: 16px; align-content: start; }
+.dr-body[data-drama-panel="script"] > * { grid-column: 1; }
+.dr-script-card { min-height: 206px; box-sizing: border-box; width: 568px; max-width: 100%; margin-top: 4px !important; }
+.dr-cast-measure { position: absolute; left: 4px; top: 46px; width: 200.5px; display: block !important; visibility: hidden; margin: 0 !important; }
+.dr-cast-measure .dr-cast { width: 200.5px; height: 321px; box-sizing: border-box; }
+.dr-cast-measure .dr-cast-pic { height: 240px !important; }
+
+.dr-body[data-drama-panel="design"] .dr-item { width: 200.5px; height: 321px; aspect-ratio: 3 / 4; box-sizing: border-box; }
+.dr-body[data-drama-panel="design"] .dr-thumb { height: 240px !important; }
+
+.dr-body[data-drama-panel="script"] { padding: 4px 24px !important; }
+
+.dr-script-card { overflow: hidden; margin-bottom: 12px !important; }
+.dr-suggest { grid-column: 2 !important; grid-row: 1 / span 20; padding: 14px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); display: flex; flex-direction: column; gap: 8px; align-self: start; }
+.dr-suggest button { align-self: flex-start; }
 </style>

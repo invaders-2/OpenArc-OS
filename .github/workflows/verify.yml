@@ -1,0 +1,36 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Typecheck, build and core Node tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck React and Vue
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Core Node tests
+        run: node --test tests/canvas-lifecycle.test.mjs tests/canvas-network-security.test.mjs tests/canvas-proxy-download.test.mjs tests/calendar-video-account-isolation.test.mjs tests/dxos-protocol.test.mjs tests/model-egress.test.mjs

@@ -63,6 +63,8 @@ const SKILL_COMMANDS = Object.freeze({
 
   // ---- 技能包（skill-pack.cjs / skill-import.cjs） ----
   "skill/pack/list": { risk: "read", credential: false, summary: "列出已安装的技能包与包内文档" },
+  "skill/pack/inspectOnline": { risk: "read", credential: false, summary: "读取公开 GitHub 仓库固定版本并生成一次性安装预览" },
+  "skill/pack/installStaged": { risk: "manage", credential: false, summary: "按当前账号的预览令牌导入 GitHub 技能包且默认停用" },
   "skill/pack/install": { risk: "manage", credential: false, summary: "安装一个完整技能包并注册包内路由技能" },
   "skill/pack/import": { risk: "manage", credential: false, summary: "从 ZIP 导入单个/多个功能技能到技能目录" },
   "skill/pack/export": { risk: "read", credential: false, summary: "把技能或技能包导出为可再次导入的 ZIP" },

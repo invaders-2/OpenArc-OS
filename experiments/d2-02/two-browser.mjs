@@ -24,8 +24,8 @@ import { createRequire } from "node:module";
 import { Probe, VERDICT, appUrl, serveDist, launch, sleep } from "./lib/app.mjs";
 
 const require = createRequire(import.meta.url);
-const domain = require("../../electron/window-domain.cjs");
-const manager = require("../../electron/window-manager.cjs");
+const domain = require("../../electron/window-domain.ts");
+const manager = require("../../electron/window-manager.ts");
 const { NativeViewController } = require("../../electron/native-view-controller.cjs");
 
 const HOST = { width: 1440, height: 1000 };

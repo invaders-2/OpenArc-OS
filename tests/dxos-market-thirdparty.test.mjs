@@ -267,7 +267,7 @@ test("⑩ 目录里的 packageUrl 也必须过 HTTPS 白名单；坏条目进 re
 });
 
 test("⑪ main.cjs 装配契约：注册表/解析器/更新服务/第三方服务/市场委托", () => {
-  const main = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(ROOT, "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes('require("./market-third-party-service.cjs")'));
   assert.ok(main.includes("createThirdPartyRegistry({"), "必须创建第三方注册表");
   assert.ok(main.includes("createThirdPartyMarket({"), "必须创建第三方市场服务");

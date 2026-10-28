@@ -79,7 +79,7 @@ function makeAgentCall(bundle) {
 // ① 装配契约（源码级 + 进程内真实构造）
 // ---------------------------------------------------------------------------
 test("装配契约：main.cjs 用 createDxosFsAdapterForUserData 装配，同一份实例喂 agent/skill bundle，健康报告 fsAdapter=true", async () => {
-  const main = fs.readFileSync(path.join(process.cwd(), "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(process.cwd(), "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes("createDxosFsAdapterForUserData"), "main.cjs 必须用共享装配函数构造 fsAdapter");
   assert.ok(main.includes('createDxosFsAdapterForUserData(app.getPath("userData"))'), "必须落在 <userData>/dxos/fs");
   assert.ok(/let\s+dxosFsAdapter\s*=\s*null;/.test(main), "装配失败要能保持 null");

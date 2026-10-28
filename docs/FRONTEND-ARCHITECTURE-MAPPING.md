@@ -19,7 +19,7 @@ DX-OS 0.5.1 的**前端源码不随包**：`app.asar` 只有主进程 + node_mod
 | Vite 构建、按 chunk 懒加载 | Vite 7 + `@vitejs/plugin-vue@6` | 上游每个功能一个 chunk；我们 Phase 1 先落壳层 |
 | **无 vue-router**（全产物 0 处匹配） | 不引路由库 | 导航由壳层状态驱动（Pinia `stores/shell.ts`），与上游一致 |
 | 壳层 8 模块：Wallpaper / Desktop / Dock / Launchpad / WindowLayer / ControlCenter / Overlays / QuickLook | `src-vue/shell/` 同名 8 个 `.vue` | **结构对齐**；视觉完全换成本项目设计语言 |
-| 壳层与窗口层共享逻辑 | 沿用既有机制：渲染层直接引用 `electron/window-domain.cjs` 等（`vite.config.ts` 的 `devCjs()` 插件处理） | Phase 1 未接 IPC，机制保持不变 |
+| 壳层与窗口层共享逻辑 | 渲染层与主进程共用 `electron/*.ts` 纯领域实现；Node 22 / Electron 44 原生类型擦除，Vite 直接加载 ESM，无需 devCjs | Phase 1 未接 IPC，共享实现保持一致 |
 | 每功能一个 App chunk（Welcome/Files/Conversation/Settings/McpManager/SkillsApp/MarketApp…） | `src-vue/pages/`（Phase 1 只有 `Welcome.vue`） | 逐页迁移将在后续阶段进行 |
 | 一页一样式文件 | `<style scoped>` 就地 + 全部走 `var(--token)` | 我们不做"每页一个 CSS 文件"，改用 scoped 样式；理由见 §4 |
 | i18n 独立 chunk（zh-CN / en-US） | 未落地 | **待确认**：是否要引入 i18n（会新增依赖），Phase 1 文案为中文硬编码 |

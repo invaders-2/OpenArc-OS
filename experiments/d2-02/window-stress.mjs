@@ -2,7 +2,7 @@
  * D2-02B · 窗口压力流程与差分比对（§15 / §22 / §23 / §24 / §25 / §27 / §31 / §39）。
  *
  * 方法：**差分比对**。
- *   探针在 Node 侧用产品真实的 `electron/window-manager.cjs` 重放同一串命令，
+ *   探针在 Node 侧用产品真实的 `electron/window-manager.ts` 重放同一串命令，
  *   得到"域应当处于的状态"；同时在真实产品页上做对应的 UI 操作，读回 DOM。
  *   每一步都要求 **DOM 逐窗口等于域的投影**：
  *   位置 / 尺寸 / 层级 / 焦点 / 最小化 / 缩放手柄，一项都不能漂。
@@ -27,8 +27,8 @@ import { createRequire } from "node:module";
 import { Probe, VERDICT, appUrl, serveDist, launch, sleep } from "./lib/app.mjs";
 
 const require = createRequire(import.meta.url);
-const domain = require("../../electron/window-domain.cjs");
-const manager = require("../../electron/window-manager.cjs");
+const domain = require("../../electron/window-domain.ts");
+const manager = require("../../electron/window-manager.ts");
 
 const SEED_W = 1440;
 const SEED_H = 1000;

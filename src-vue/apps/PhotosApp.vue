@@ -125,6 +125,9 @@ import type {
 import "../../src/photos/photos.css";
 
 type Tab = "library" | "studio" | "ocr";
+const viewerItem = ref<any>(null);
+const size = ref(150);
+const libFilter = ref<"all" | "image" | "video" | "gen">("all");
 const tab = ref<Tab>("library");
 
 const host: unknown = typeof window === "undefined" ? null : window;
@@ -465,6 +468,7 @@ watch(tab, (value) => {
 });
 
 /* ── 详情：快速点选时只有最后一次响应落地 ── */
+function openViewer(item: any) { viewerItem.value = item; void openItem(item); }
 async function openItem(item: PhotoItem) {
   const seq = ++detailSeq;
   libSelected.value = item;
@@ -1292,10 +1296,13 @@ async function submitSend() {
 <template>
   <div class="split" data-photos-app="1">
     <nav class="split-side" :aria-label="t('照片子视图')">
-      <div class="split-section">{{ t("照片") }}</div>
-      <button type="button" class="split-nav" :aria-current="tab === 'library'" @click="tab = 'library'">
-        <ImageIcon :size="16" :stroke-width="1.25" /> {{ t("图库") }}
-      </button>
+      <div class="split-section">{{ t("图库") }}</div>
+      <button type="button" class="split-nav" :aria-current="libFilter === 'all' && tab === 'library'" @click="tab = 'library'; libFilter = 'all'"><ImageIcon :size="16" /> <span class="split-nav-label">{{ t("全部媒体") }}</span><small class="photos-count-sm">{{ page.total }}</small></button>
+      <button type="button" class="split-nav" :aria-current="libFilter === 'image' ? 'true' : undefined" @click="tab = 'library'; libFilter = 'image'"><ImageIcon :size="16" /> <span class="split-nav-label">{{ t("图片") }}</span></button>
+      <button type="button" class="split-nav" :aria-current="libFilter === 'video' ? 'true' : undefined" @click="tab = 'library'; libFilter = 'video'"><Film :size="16" /> <span class="split-nav-label">{{ t("视频") }}</span></button>
+      <button type="button" class="split-nav" :aria-current="libFilter === 'gen' ? 'true' : undefined" @click="tab = 'library'; libFilter = 'gen'"><Sparkles :size="16" /> <span class="split-nav-label">{{ t("生成产物") }}</span></button>
+      <div class="split-section">{{ t("相簿") }}</div>
+      <p class="photos-hint">还没有相簿。</p>
       <button type="button" class="split-nav" :aria-current="tab === 'studio'" @click="tab = 'studio'">
         <Wand2 :size="16" :stroke-width="1.25" /> {{ t("图像工坊") }}
       </button>
@@ -1383,14 +1390,21 @@ async function submitSend() {
         <div v-if="tab === 'library'" class="photos-lib" :class="{ 'has-inspector': !!libSelected }" data-photos-lib="1" :data-photos-state="libraryListState">
 
           <section class="photos-pane photos-pane--flat" :aria-label="t('照片网格')">
-            <div class="photos-toolbar">
-              <div class="photos-toolbar__grow">
-                <DsSearchField :value="query" :placeholder="t('按文件名筛选已载入的照片')" :label="t('筛选照片')" @update:value="query = $event" />
+            <div class="photos-toolbar photos-proto-toolbar">
+              <strong class="photos-title">{{ tab === "library" ? t("图库") : t("照片") }}</strong>
+              <span class="photos-count">{{ page.total }} 项</span>
+              <span class="toolbar-spacer" />
+              <div class="segmented text photos-size" role="group" aria-label="缩略图大小">
+                <button type="button" :aria-pressed="size === 110" @click="size = 110">{{ t("小") }}</button>
+                <button type="button" :aria-pressed="size === 150" @click="size = 150">{{ t("中") }}</button>
+                <button type="button" :aria-pressed="size === 210" @click="size = 210">{{ t("大") }}</button>
               </div>
+              <button type="button" class="photos-import" data-photos-import @click="openAddSource"><Upload :size="14" /> {{ t("导入") }}</button>
+            </div>
+            <div class="photos-subbar">
+              <DsSearchField :value="query" :placeholder="t('按文件名筛选已载入的照片')" :label="t('筛选照片')" @update:value="query = $event" />
               <span class="photos-count">{{ t("已载入 {loaded} / {total}", { loaded: page.loaded, total: page.total }) }}{{ page.truncated ? t("（还有更多）") : "" }}</span>
-              <DsButton variant="secondary" size="sm" :status="libBusy === 'reload' ? 'loading' : 'idle'" @click="loadPage(0)">
-                <RefreshCw :size="14" :stroke-width="1.5" /> {{ t("刷新") }}
-              </DsButton>
+              <DsButton variant="secondary" size="sm" :status="libBusy === 'reload' ? 'loading' : 'idle'" @click="loadPage(0)"><RefreshCw :size="14" :stroke-width="1.5" /> {{ t("刷新") }}</DsButton>
               <DsButton variant="secondary" size="sm" :disabled="!page.hasNext || libBusy !== null" @click="loadPage(page.nextOffset)">{{ t("加载更多") }}</DsButton>
               <DsButton variant="secondary" size="sm" :disabled="selection.length === 0" @click="openAssign">{{ selection.length ? t("归入文件夹（{n}）", { n: selection.length }) : t("归入文件夹") }}</DsButton>
             </div>
@@ -1415,11 +1429,12 @@ async function submitSend() {
             <div v-else class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('照片网格')">
               <ul ref="gridRoot" class="photos-grid" data-photos-grid>
                 <li v-for="item in visibleItems" :key="item.id" class="photos-card-host" :data-photo-id="item.id">
-                  <button type="button" class="photos-card" :aria-pressed="!!libSelected && libSelected.id === item.id" :aria-label="'查看 ' + item.name" @click="openItem(item)">
+                  <button type="button" class="photos-card" :data-photos-tile="item.id" :aria-pressed="!!libSelected && libSelected.id === item.id" :aria-label="'查看 ' + item.name" @click="openItem(item)" @dblclick="openViewer(item)">
                     <span class="photos-card__thumb">
                       <img v-if="thumbUrls[item.id]" :src="thumbUrls[item.id]" alt="" draggable="false" />
                       <ImageIcon v-else-if="thumbFailedIds[item.id]" :size="20" :stroke-width="1.25" />
                       <span v-else class="ds-spinner" aria-hidden="true" />
+                      <span class="photos-view-open" data-photos-open @click.stop="openViewer(item)">查看</span>
                       <span v-if="item.kind === 'video'" class="photos-card__kind">
                         <DsBadge tone="neutral" size="sm"><Film :size="11" :stroke-width="1.5" /> {{ t("视频") }}</DsBadge>
                       </span>
@@ -1433,7 +1448,7 @@ async function submitSend() {
             </div>
           </section>
 
-          <aside v-if="libSelected" class="photos-pane photos-inspector" :aria-label="t('照片详情')">
+          <aside v-if="libSelected && !viewerItem" class="photos-pane photos-inspector" :aria-label="t('照片详情')">
             <div class="photos-pane-head">
               <h3>{{ t("详情") }}</h3>
               <DsBadge v-if="libSelected" tone="neutral" size="sm">{{ photoKindLabel(libSelected.kind) }}</DsBadge>
@@ -1597,172 +1612,157 @@ async function submitSend() {
         </div>
 
         <!-- ═══════════════════ 图像工坊 ═══════════════════ -->
-        <div v-else-if="tab === 'studio'" class="photos-studio" data-photos-studio="1" :data-photos-state="studioListState">
-          <aside class="photos-pane photos-studio-side" :aria-label="t('图像工坊视图')">
-            <div class="photos-pane-head"><h3>{{ t("图像工坊") }}</h3></div>
-            <ul class="photos-list">
-              <li class="photos-row">
-                <button type="button" class="photos-row__main" :aria-pressed="studioView === 'projects'" @click="selectStudioView('projects')">
-                  <span class="photos-row__name">{{ t("项目") }}</span>
-                  <span class="photos-row__facts">{{ projects.length }}</span>
-                </button>
-              </li>
-              <li class="photos-row">
-                <button type="button" class="photos-row__main" :aria-pressed="studioView === 'trash'" @click="selectStudioView('trash')">
-                  <span class="photos-row__name">{{ t("回收站") }}</span>
-                  <span class="photos-row__facts">{{ trashed.length }}</span>
-                </button>
-              </li>
-            </ul>
-
-            <div class="photos-sub-head">
-              <span>{{ t("分组") }}</span>
-              <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="t('新建分组')" @click="openNewGroup">
-                <FolderPlus :size="14" :stroke-width="1.5" />
-              </button>
+        <div v-else-if="tab === 'studio'" class="photos-studio" :class="{ 'ps-trash': studioView === 'trash' }" data-photos-studio="1" :data-photos-state="studioListState">
+          <div class="ps-toolbar">
+            <h2 class="ps-title">
+              {{ t("图像工坊") }}
+              <small>{{ studioView === "trash" ? trashed.length + " 个项目" : projects.length + " 个项目 / " + groups.length + " 个分组" }}</small>
+            </h2>
+            <span class="toolbar-spacer" />
+            <div class="segmented text ps-switch" role="group" :aria-label="t('图像工坊视图')">
+              <button type="button" :aria-pressed="studioView === 'projects'" @click="selectStudioView('projects')">{{ t("项目") }}</button>
+              <button type="button" :aria-pressed="studioView === 'trash'" @click="selectStudioView('trash')">{{ t("回收站") }}</button>
             </div>
-            <ul class="photos-list">
-              <li v-for="group in studioGroupOptions" :key="group.id" class="photos-row">
-                <span class="photos-row__main">
-                  <span class="photos-row__name" :title="group.label">{{ group.label }}{{ group.isDefault ? t("（默认）") : "" }}</span>
-                  <span class="photos-row__facts">{{ projects.filter((project) => project.groupId === group.id).length }}</span>
-                </span>
-                <button v-if="!group.isDefault && group.mine" type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="'删除分组 ' + group.label" @click="openRemoveGroup({ id: group.id, name: group.label, mine: group.mine, isDefault: group.isDefault })">
-                  <Trash2 :size="13" :stroke-width="1.5" />
-                </button>
-              </li>
-            </ul>
-            <p class="photos-hint">{{ t("可见性是三态：私有 / 公开 / 指定成员。后端按 owner 与成员表过滤列表；共享项目对你是只读的。") }}</p>
-          </aside>
+            <DsButton v-if="studioView === 'projects'" size="sm" variant="secondary" @click="openNewGroup">
+              <FolderPlus :size="14" :stroke-width="1.5" /> {{ t("新建分组") }}
+            </DsButton>
+            <button type="button" class="ps-iconbtn" :aria-label="t('刷新')" :title="t('刷新')" :disabled="studioLoading" @click="studioReload">
+              <RefreshCw :size="14" :stroke-width="1.5" />
+            </button>
+            <DsButton v-if="studioView === 'projects'" size="sm" variant="primary" @click="openCreateDialog"><Plus :size="14" :stroke-width="1.5" /> {{ t("新建项目") }}</DsButton>
+          </div>
 
-          <section class="photos-pane photos-pane--flat" :aria-label="t('项目列表')">
-            <div class="photos-toolbar">
-              <DsButton size="sm" @click="openCreateDialog"><Plus :size="14" :stroke-width="1.5" /> {{ t("新建项目") }}</DsButton>
-              <DsButton size="sm" variant="secondary" :status="studioLoading ? 'loading' : 'idle'" @click="studioReload">
-                <RefreshCw :size="14" :stroke-width="1.5" /> {{ t("刷新") }}
-              </DsButton>
-              <span class="photos-count">{{ studioView === "trash" ? t("回收站 ") + trashed.length + " 个项目" : t("共 ") + projects.length + " 个项目 / " + groups.length + " 个分组" }}</span>
-            </div>
-
-            <p v-if="studioNotice" class="photos-hint" :class="{ 'photos-error': studioNotice.tone === 'error' }" :role="studioNotice.tone === 'error' ? 'alert' : 'status'">{{ studioNotice.text }}</p>
-
-            <p v-if="studioFailure && studioPool.length" class="photos-error" role="alert" :data-photos-error-code="studioFailure.code">{{ t("刷新项目未完成：{reason}", { reason: photocraftErrorText(studioFailure.code) }) }}</p>
+          <section class="ps-list" :aria-label="studioView === 'trash' ? t('回收站项目') : t('项目列表')">
+            <p v-if="studioNotice" class="ps-notice" :class="{ 'ps-notice--error': studioNotice.tone === 'error' }" :role="studioNotice.tone === 'error' ? 'alert' : 'status'">{{ studioNotice.text }}</p>
+            <p v-if="studioFailure && studioPool.length" class="ps-notice ps-notice--error" role="alert" :data-photos-error-code="studioFailure.code">{{ t("刷新项目未完成：{reason}", { reason: photocraftErrorText(studioFailure.code) }) }}</p>
 
             <DsPageState v-if="studioListState === 'loading'" kind="loading" :title="t('正在读取项目…')" />
             <DsPageState v-else-if="studioListState === 'error' || studioListState === 'unavailable' || studioListState === 'unauthorized'" :kind="studioErrorKind" :title="t('读取项目失败')" :description="studioFailure ? photocraftErrorText(studioFailure.code) : ''" :on-action="studioReload" />
             <DsPageState v-else-if="studioListState === 'empty'" kind="empty" :title="studioView === 'trash' ? t('回收站是空的') : t('还没有项目')" :description="studioView === 'trash' ? t('移入回收站的项目会出现在这里，可以恢复或彻底删除。') : t('新建一个项目开始：可以只建空项目，也可以带上一个本地文件作为源文件。')" />
-            <div v-else-if="studioView === 'trash'" class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('回收站项目')">
-              <ul class="photos-list">
-                <li v-for="project in trashed" :key="project.id" class="photos-trash-row">
-                  <span class="photos-trash-row__name" :title="project.title">{{ project.title }}</span>
-                  <span class="photos-trash-row__facts">{{ formatBytes(project.sourceSize) }} · 删除于 {{ formatTimestamp(Number(project.deletedAt || 0) / 1000) }}</span>
-                  <div class="photos-actions">
+            <div v-else-if="studioView === 'trash'" class="ds-scroll ps-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('回收站项目')">
+              <ul class="ps-rows">
+                <li v-for="project in trashed" :key="project.id" class="ps-row ps-row--trash">
+                  <span class="ps-row__text">
+                    <span class="ps-row__title" :title="project.title">{{ project.title }}</span>
+                    <span class="ps-row__meta">
+                      <span>{{ formatBytes(project.sourceSize) }}</span>
+                      <span>{{ t("删除于 ") + formatTimestamp(Number(project.deletedAt || 0) / 1000) }}</span>
+                    </span>
+                  </span>
+                  <span class="ps-row__actions">
                     <DsButton size="sm" variant="secondary" :status="studioBusy === 'restore:' + project.id ? 'loading' : 'idle'" @click="runRestore(project)">
                       <RotateCcw :size="14" :stroke-width="1.5" /> {{ t("恢复") }}
                     </DsButton>
                     <DsButton size="sm" variant="danger" :disabled="!canPurge(project)" @click="openPurgeDialog(project)">{{ t("彻底删除") }}</DsButton>
-                  </div>
+                  </span>
                 </li>
               </ul>
             </div>
-            <div v-else class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('项目列表')">
-              <div class="photos-groups">
-                <section v-for="bucket in buckets" :key="bucket.group.id" class="photos-group" :aria-label="'分组 ' + bucket.group.name">
-                  <div class="photos-group__head">
-                    <strong>{{ bucket.group.name }}</strong>
-                    <DsBadge v-if="bucket.isDefault" tone="neutral" size="sm">{{ t("默认") }}</DsBadge>
-                    <DsBadge v-if="!bucket.mine" tone="neutral" size="sm">{{ t("共享") }}</DsBadge>
-                    <span>{{ bucket.projects.length }} 个项目</span>
-                  </div>
-                  <ul v-if="bucket.projects.length" class="photos-list">
-                    <li v-for="project in bucket.projects" :key="project.id">
-                      <button type="button" class="photos-project" :class="{ 'is-active': studioSelectedId === project.id }" :aria-pressed="studioSelectedId === project.id" @click="studioSelectedId = project.id">
-                        <span class="photos-project__title" :title="project.title">{{ project.title }}</span>
-                        <span class="photos-project__facts">
-                          <DsBadge :tone="project.visibility === 'public' ? 'success' : project.visibility === 'restricted' ? 'warning' : 'neutral'" size="sm">{{ visibilityLabel(project.visibility) }}</DsBadge>
+            <div v-else class="ds-scroll ps-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('项目列表')">
+              <section v-for="bucket in buckets" :key="bucket.group.id" class="ps-group" :aria-label="'分组 ' + bucket.group.name">
+                <div class="ps-group__head">
+                  <h3>{{ bucket.group.name }}</h3>
+                  <span class="ps-group__count">{{ bucket.projects.length }} 个项目</span>
+                  <DsBadge v-if="bucket.isDefault" tone="neutral" size="sm">{{ t("默认") }}</DsBadge>
+                  <DsBadge v-if="!bucket.mine" tone="neutral" size="sm">{{ t("共享") }}</DsBadge>
+                  <button v-if="!bucket.group.isDefault && bucket.mine" type="button" class="ps-iconbtn ps-iconbtn--danger ps-group__remove" :aria-label="'删除分组 ' + bucket.group.name" :title="t('删除分组')" @click="openRemoveGroup({ id: bucket.group.id, name: bucket.group.name, mine: bucket.mine, isDefault: bucket.group.isDefault })">
+                    <Trash2 :size="13" :stroke-width="1.5" />
+                  </button>
+                </div>
+                <ul v-if="bucket.projects.length" class="ps-rows">
+                  <li v-for="project in bucket.projects" :key="project.id">
+                    <button type="button" class="ps-row" :class="{ 'is-active': studioSelectedId === project.id }" :aria-pressed="studioSelectedId === project.id" @click="studioSelectedId = project.id">
+                      <span class="ps-row__text">
+                        <span class="ps-row__title" :title="project.title">{{ project.title }}</span>
+                        <span class="ps-row__meta">
+                          <span>{{ visibilityLabel(project.visibility) }}</span>
                           <span>{{ project.mine ? t("我的") : t("共享") }}</span>
                           <span>{{ formatBytes(project.sourceSize) }}</span>
                           <span>{{ formatTimestamp(Number(project.updatedAt || 0) / 1000) }}</span>
                         </span>
-                      </button>
-                    </li>
-                  </ul>
-                  <p v-else class="photos-hint">{{ t("这个分组还没有项目。") }}</p>
-                </section>
-              </div>
+                      </span>
+                    </button>
+                  </li>
+                </ul>
+                <p v-else class="ps-group__empty">{{ t("这个分组还没有项目。") }}</p>
+              </section>
             </div>
           </section>
 
-          <aside class="photos-pane photos-studio-detail" :aria-label="t('项目详情')">
-            <div class="photos-pane-head">
+          <aside v-if="studioView === 'projects'" class="ps-detail" :aria-label="t('项目详情')">
+            <div class="ps-detail__head">
               <h3>{{ t("项目详情") }}</h3>
               <DsBadge v-if="studioSelected" :tone="studioSelected.access === 'owner' ? 'neutral' : 'warning'" size="sm">{{ studioSelected.access === "owner" ? t("所有者") : t("只读共享") }}</DsBadge>
             </div>
-            <div class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('项目详情')">
-              <p v-if="!studioSelected" class="photos-hint">{{ t("从中间选择一个项目，可以改信息、下载源文件、写入导出目录、发送到画布，或移入回收站。") }}</p>
-              <div v-else class="photos-detail" :data-photos-project-detail="studioSelected.id">
-                <dl class="photos-kv">
-                  <dt>{{ t("所有者") }}</dt>
-                  <dd>{{ studioSelected.ownerName || "—" }}</dd>
-                  <dt>{{ t("分组") }}</dt>
-                  <dd>{{ studioGroupName }}</dd>
-                  <dt>{{ t("可见性") }}</dt>
-                  <dd>{{ visibilityLabel(studioSelected.visibility) }}（{{ studioSelected.visibility }}）</dd>
-                  <dt>{{ t("成员") }}</dt>
-                  <dd>{{ studioSelected.members.length ? studioSelected.members.join("、") : "—" }}</dd>
-                  <dt>{{ t("源文件") }}</dt>
-                  <dd>{{ studioSelected.sourceName || t("（无源文件）") }}</dd>
-                  <dt>{{ t("大小") }}</dt>
-                  <dd>{{ formatBytes(studioSelected.sourceSize) }}</dd>
-                  <dt>SHA-256</dt>
-                  <dd class="is-mono" :title="studioSelected.sourceSha256">{{ studioSelected.sourceSha256 || "—" }}</dd>
-                  <dt>{{ t("更新时间") }}</dt>
-                  <dd>{{ formatTimestamp(Number(studioSelected.updatedAt || 0) / 1000) }}</dd>
-                </dl>
+            <div class="ds-scroll ps-detail__scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('项目详情')">
+              <div v-if="!studioSelected" class="ps-empty">
+                <Wand2 :size="24" :stroke-width="1.25" aria-hidden="true" />
+                <p>{{ t("从左侧选择一个项目，可以查看项目信息、修改设置，或发送到画布。") }}</p>
+              </div>
+              <div v-else class="ps-detail__body" :data-photos-project-detail="studioSelected.id">
+                <div class="ps-identity">
+                  <h4 class="ps-identity__title" :title="studioSelected.title">{{ studioSelected.title }}</h4>
+                  <p class="ps-identity__meta" :title="studioSelected.sourceName">{{ studioSelected.sourceName || t("（无源文件）") }}</p>
+                </div>
 
-                <p v-if="!studioOwners" class="photos-hint-box" data-photos-readonly>{{ t("你不是这个项目的所有者，只能查看与下载；改名、可见性、成员、导出与移入回收站都不可用。") }}</p>
+                <section class="ps-section" :aria-label="t('项目信息')">
+                  <h3 class="ps-section__title">{{ t("项目信息") }}</h3>
+                  <dl class="ps-kv">
+                    <div><dt>{{ t("所有者") }}</dt><dd>{{ studioSelected.ownerName || "—" }}</dd></div>
+                    <div><dt>{{ t("分组") }}</dt><dd>{{ studioGroupName }}</dd></div>
+                    <div><dt>{{ t("可见性") }}</dt><dd>{{ visibilityLabel(studioSelected.visibility) }}</dd></div>
+                    <div><dt>{{ t("成员") }}</dt><dd>{{ studioSelected.members.length ? studioSelected.members.join("、") : "—" }}</dd></div>
+                    <div><dt>{{ t("大小") }}</dt><dd>{{ formatBytes(studioSelected.sourceSize) }}</dd></div>
+                    <div><dt>SHA-256</dt><dd class="ps-kv__mono" :title="studioSelected.sourceSha256">{{ studioSelected.sourceSha256 || "—" }}</dd></div>
+                    <div><dt>{{ t("更新时间") }}</dt><dd>{{ formatTimestamp(Number(studioSelected.updatedAt || 0) / 1000) }}</dd></div>
+                  </dl>
+                </section>
 
-                <section class="photos-group" :aria-label="t('项目设置')">
-                  <div class="photos-pane-head"><h3>{{ t("设置") }}</h3></div>
+                <p v-if="!studioOwners" class="ps-hintbox" data-photos-readonly>{{ t("你不是这个项目的所有者，只能查看与下载；改名、可见性、成员、导出与移入回收站都不可用。") }}</p>
+
+                <section class="ps-section" :aria-label="t('项目设置')">
+                  <h3 class="ps-section__title">{{ t("设置") }}</h3>
                   <DsTextField label="项目名称" :model-value="projectTitle" :disabled="!studioOwners" hint="最多 120 个字；后端会清掉文件名里的非法字符。" @update:model-value="projectTitle = $event" />
-                  <div class="photos-form__row">
+                  <div class="ps-field">
                     <label for="photos-project-group">{{ t("分组") }}</label>
                     <select id="photos-project-group" class="photos-select" v-model="projectGroupDraft" :disabled="!studioOwners">
                       <option v-for="group in studioGroupOptions" :key="group.id" :value="group.id">{{ group.label }}{{ group.isDefault ? t("（默认）") : "" }}</option>
                     </select>
                   </div>
-                  <div class="photos-form__row">
+                  <div class="ps-field">
                     <span>{{ t("可见性") }}</span>
                     <div class="segmented text" role="group" :aria-label="t('可见性')">
                       <button v-for="option in studioControl.options" :key="option.id" type="button" :aria-pressed="option.selected" :disabled="option.disabled" :title="option.hint" @click="projectVisibility = option.id">{{ option.label }}</button>
                     </div>
-                    <p class="photos-hint" data-photos-visibility-note>{{ studioControl.note }}</p>
+                    <p class="ps-hint" data-photos-visibility-note>{{ studioControl.note }}</p>
                   </div>
-                  <div v-if="studioControl.requiresMembers" class="photos-form__row">
+                  <div v-if="studioControl.requiresMembers" class="ps-field">
                     <label for="photos-members">{{ t("成员账号 ID（一行一个，也接受空格或逗号分隔）") }}</label>
                     <textarea id="photos-members" class="photos-textarea" v-model="projectMembersText" :disabled="!studioOwners" placeholder="usr_xxx" />
                   </div>
-                  <div class="photos-actions">
-                    <DsButton size="sm" :status="studioBusy === 'save' ? 'loading' : 'idle'" :disabled="!studioOwners" @click="saveProject">{{ t("保存设置") }}</DsButton>
+                  <div class="ps-actions ps-actions--end">
+                    <DsButton size="sm" variant="primary" :status="studioBusy === 'save' ? 'loading' : 'idle'" :disabled="!studioOwners" @click="saveProject">{{ t("保存设置") }}</DsButton>
                   </div>
                 </section>
 
-                <section class="photos-group" :aria-label="t('文件与发送')">
-                  <div class="photos-pane-head"><h3>{{ t("文件与发送") }}</h3></div>
-                  <div class="photos-actions">
+                <section class="ps-section" :aria-label="t('文件与发送')">
+                  <h3 class="ps-section__title">{{ t("文件与发送") }}</h3>
+                  <div class="ps-actions ps-actions--grid">
                     <DsButton size="sm" variant="secondary" :disabled="!studioSelected.sourceNodeId || studioBusy === 'download'" :status="studioBusy === 'download' ? 'loading' : 'idle'" @click="studioDownloadSource">
                       <Download :size="14" :stroke-width="1.5" /> {{ t("下载源文件") }}
                     </DsButton>
                     <DsButton size="sm" variant="secondary" :disabled="!studioOwners" :status="studioBusy === 'export' ? 'loading' : 'idle'" @click="exportFileInput?.click()">
                       <Upload :size="14" :stroke-width="1.5" /> {{ t("写入导出目录") }}
                     </DsButton>
-                    <DsButton size="sm" :disabled="!studioSelected.sourceNodeId" @click="openSend">
+                    <DsButton size="sm" variant="secondary" :disabled="!studioSelected.sourceNodeId" @click="openSend">
                       <Send :size="14" :stroke-width="1.5" /> {{ t("发送到画布") }}
                     </DsButton>
-                    <DsButton v-if="studioView === 'projects'" size="sm" variant="danger" :disabled="!studioOwners" @click="openTrashDialog(studioSelected)">{{ t("移入回收站") }}</DsButton>
                   </div>
                   <input ref="exportFileInput" type="file" hidden aria-hidden="true" tabindex="-1" @change="submitExport" />
-                  <p class="photos-hint">{{ t("「写入导出目录」把本机选中的文件写进项目的「导出/」目录并刷新预览（后端 photocraft/projects/export）。") }}</p>
+                  <p class="ps-hint">{{ t("「写入导出目录」把本机选中的文件写进项目的「导出/」目录并刷新预览（后端 photocraft/projects/export）。") }}</p>
+                  <div class="ps-actions">
+                    <DsButton size="sm" variant="danger" :disabled="!studioOwners" @click="openTrashDialog(studioSelected)">{{ t("移入回收站") }}</DsButton>
+                  </div>
                 </section>
               </div>
             </div>
@@ -1957,6 +1957,29 @@ async function submitSend() {
         </DsDialog>
       </div>
     </div>
+    <div class="photos-viewer" :class="{ 'is-open': !!viewerItem }" data-photos-viewer>
+      <div class="photos-viewer__bar" data-photos-viewer-toolbar>
+        <button type="button" class="photos-vbtn ghost" aria-label="返回图库" @click="viewerItem = null">←</button>
+        <b class="photos-viewer__name">{{ viewerItem?.name || "查看器" }}</b>
+        <span class="toolbar-spacer" />
+        <div class="segmented text photos-vseg" role="group" aria-label="查看模式">
+          <button type="button" aria-pressed="true">查看</button>
+          <button type="button" disabled title="抠图没有后端能力（NOT VERIFIED）">抠图</button>
+          <button type="button" disabled title="扩图没有后端能力（NOT VERIFIED）">扩图</button>
+          <button type="button" disabled title="裁剪没有后端能力（NOT VERIFIED）">裁剪</button>
+        </div>
+        <button type="button" class="photos-vbtn ghost" aria-label="收藏" disabled title="收藏没有后端命令（NOT VERIFIED）">♡</button>
+        <button type="button" class="photos-vbtn" disabled title="另存需要抠图/裁剪能力（NOT VERIFIED）">存为新图片</button>
+      </div>
+      <div class="photos-viewer__stage" data-photos-viewer-image>
+        <div class="photos-viewer__img">
+        <img v-if="detail.status === 'ready' && detail.preview" :src="detail.preview" :alt="viewerItem?.name || '预览'" />
+        <img v-else-if="viewerItem && thumbUrls[viewerItem.id]" :src="thumbUrls[viewerItem.id]" :alt="viewerItem?.name || '预览'" />
+        <span v-else class="ds-spinner" aria-hidden="true" />
+        </div>
+      </div>
+      <div class="photos-viewer__status" data-photos-viewer-status>双击缩略图打开 · Esc 返回 · 原图不会被修改</div>
+    </div>
   </div>
 </template>
 
@@ -2056,5 +2079,444 @@ async function submitSend() {
   color: var(--muted);
   font-size: var(--fs-micro);
 }
+
+.photos-proto-toolbar { height: 52px; min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 0.5px solid var(--line); }
+.photos-title { font-size: 15px; font-weight: var(--fw-medium); }
+.photos-subbar { display: flex; align-items: center; gap: 8px; padding: 6px 16px; }
+.photos-size button { height: 26px; padding: 0 10px; }
+.photos-import { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-caption); }
+.photos-count-sm { margin-left: auto; color: var(--muted); font-size: var(--fs-micro); }
+.photos-lib .split-side, .split-side { flex: 0 0 200px; }
+.photos-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(var(--photos-size, 150px), 1fr)) !important; gap: 10px !important; padding: 14px 16px !important; }
+.photos-card { aspect-ratio: 1; border-radius: 10px; overflow: hidden; padding: 0 !important; display: block !important; }
+.photos-card__thumb { width: 100%; height: 100%; }
+.photos-card__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.photos-card__name, .photos-card__meta { display: none; }
+.photos-card[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--text); }
+.photos-viewer { position: absolute; inset: 0; z-index: 60; background: rgb(var(--content-rgb) / 0.98); display: flex; flex-direction: column; }
+.photos-viewer__bar { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 0.5px solid var(--line); }
+.photos-viewer__name { font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.photos-viewer__stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 20px; }
+.photos-viewer__stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+.photos-viewer__status { height: 34px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: var(--fs-micro); border-top: 0.5px solid var(--line); }
+.photos-vbtn { height: 28px; padding: 0 10px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-caption); }
+.photos-vbtn.ghost { background: transparent; }
+
+.split { position: relative; }
+.split-main, .photos-lib, .photos-view { padding: 0 !important; }
+.photos-subbar { display: none !important; }
+.photos-grid { padding: 0 18px !important; gap: 4px !important; }
+.photos-scroll { padding: 0 !important; }
+.photos-proto-toolbar { margin: 0 !important; width: 100%; box-sizing: border-box; }
+
+.photos-grid { padding: 0 18px !important; }
+.photos-view-open { position: absolute; right: 6px; top: 6px; z-index: 2; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); background: rgb(0 0 0 / 0.55); color: #fff; font-size: 10px; }
+.photos-card { position: relative; }
+
+.photos-inspector { display: none !important; }
+.photos-viewer { opacity: 0; pointer-events: none; transition: opacity 160ms ease; }
+.photos-viewer.is-open { opacity: 1; pointer-events: auto; }
+.photos-lib { display: block !important; }
+.split { gap: 0; }
+.split-main { margin-left: -8px !important; }
+.photos-grid { grid-template-columns: repeat(auto-fill, 152px) !important; gap: 4px !important; padding: 0 18px !important; }
+
+.photos-proto-toolbar .photos-count { margin-left: 32px; }
+.photos-size { width: 119px; }
+.photos-import { width: 72px; justify-content: center; }
+.photos-grid { margin-top: -8px; }
+
+.photos-viewer { left: 208px !important; right: 0 !important; top: 0 !important; bottom: 0 !important; }
+.photos-viewer__stage { padding: 0 !important; }
+.photos-viewer__img { width: 540px; height: 405px; max-width: 100%; max-height: 100%; display: grid; place-items: center; }
+.photos-viewer__img img { width: 100%; height: 100%; object-fit: contain; }
+.photos-viewer__status { height: 28px !important; }
+.photos-proto-toolbar .photos-count { min-width: 31px; font-size: 12px; }
+
+.photos-card__check { opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+.photos-card:hover .photos-card__check, .photos-card[aria-pressed="true"] .photos-card__check { opacity: 1; pointer-events: auto; }
+.photos-view-open { display: none; }
+.photos-card:hover .photos-view-open, .photos-card[aria-pressed="true"] .photos-view-open { display: block; }
+.photos-proto-toolbar > button:not(.photos-import), .photos-proto-toolbar > .photos-import ~ * { display: none !important; }
+
+:global(.window:has([data-photos-app]) .window-tab-actions) { display: none !important; }
+
+/* ══ 图像工坊（task-30）：页面标题 + 列表 + 详情，中性灰阶、无发丝边框 ══ */
+.photos-studio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(264px, 300px);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 0;
+  padding: 0 16px 16px;
+  min-width: 0;
+  min-height: 0;
+}
+.photos-studio.ps-trash {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ps-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 0;
+}
+.ps-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-headline);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+.ps-title small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
+}
+.ps-switch button {
+  height: 26px;
+  padding: 0 12px;
+}
+.ps-iconbtn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  transition: background var(--dur-feedback) var(--ease-standard), color var(--dur-feedback) var(--ease-standard);
+}
+.ps-iconbtn:hover:not(:disabled) {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.ps-iconbtn:disabled {
+  opacity: var(--disabled-opacity);
+}
+.ps-iconbtn--danger:hover:not(:disabled) {
+  background: rgb(var(--failed-rgb) / 0.12);
+  color: var(--failed);
+}
+.ps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+.ps-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ps-notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+.ps-notice--error {
+  color: var(--failed);
+}
+.ps-group {
+  margin: 0 0 16px;
+}
+.ps-group:last-child {
+  margin-bottom: 0;
+}
+.ps-group__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 4px;
+  padding: 0 12px;
+}
+.ps-group__head h3 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-medium);
+}
+.ps-group__count {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+.ps-group__remove {
+  width: 24px;
+  height: 24px;
+  margin-left: var(--space-1);
+  opacity: 0.45;
+}
+.ps-group:hover .ps-group__remove,
+.ps-group__remove:focus-visible {
+  opacity: 1;
+}
+.ps-group__empty {
+  margin: 0;
+  padding: 4px 12px 8px;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.ps-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ps-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  color: var(--text);
+  transition: background var(--dur-feedback) var(--ease-standard);
+}
+.ps-row:hover {
+  background: var(--row-hover);
+}
+.ps-row.is-active,
+.ps-row[aria-pressed="true"] {
+  background: rgb(var(--text-rgb) / 0.08);
+}
+.ps-row--trash {
+  flex-wrap: wrap;
+}
+.ps-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ps-row__title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--fs-secondary);
+}
+.ps-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+.ps-row__meta > span:not(:first-child)::before {
+  content: "·";
+  margin-right: 4px;
+  color: rgb(var(--text-rgb) / 0.3);
+}
+.ps-row__actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+}
+.ps-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+}
+.ps-detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+}
+.ps-detail__head h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-medium);
+}
+.ps-detail__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ps-detail__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.ps-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 200px;
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+.ps-empty p {
+  margin: 0;
+  max-width: 220px;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+}
+.ps-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ps-identity__title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-headline);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+.ps-identity__meta {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.ps-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.ps-section__title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-medium);
+}
+.ps-kv {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-caption);
+}
+.ps-kv > div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-height: 20px;
+}
+.ps-kv dt {
+  color: var(--muted);
+}
+.ps-kv dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.ps-kv__mono {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+.ps-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+  overflow-wrap: anywhere;
+}
+.ps-hintbox {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--content-rgb) / 0.55);
+  color: var(--text);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+  overflow-wrap: anywhere;
+}
+.ps-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ps-field > label,
+.ps-field > span {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.ps-field > .segmented {
+  align-self: flex-start;
+}
+.ps-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.ps-actions--end {
+  justify-content: flex-end;
+}
+.ps-actions--grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.ps-actions--grid :deep(.ds-btn) {
+  width: 100%;
+}
+.ps-actions--grid :deep(.ds-btn:nth-child(3)) {
+  grid-column: 1 / -1;
+}
+@container (max-width: 960px) {
+  .photos-studio {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 0.9fr);
+    row-gap: 12px;
+  }
+  .photos-studio.ps-trash {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+}
+
 </style>
 

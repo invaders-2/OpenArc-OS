@@ -215,15 +215,13 @@ function loadPreloadSurface() {
   return exposed;
 }
 
-test("preload：developer 是第 23 个顶层键（index 22，紧跟 platform），仅暴露 command", () => {
+test("preload：developer 紧跟 platform，仅暴露 command", () => {
   const exposed = loadPreloadSurface();
   assert.ok(exposed && exposed.name === "openarc");
   const api = exposed.api;
   const topKeys = Object.keys(api);
   assert.ok(topKeys.includes("developer"), "缺少顶层键 developer");
-  // B7c 起 platform 之后还会有其它批次的顶层键，所以只固定 developer 的位置（第 22 是 platform，第 23 是 developer）。
-  assert.equal(topKeys.indexOf("platform"), 21, "platform 是第 22 个顶层键");
-  assert.equal(topKeys.indexOf("developer"), 22, "developer 是第 23 个顶层键");
+  assert.equal(topKeys.indexOf("developer"), topKeys.indexOf("platform") + 1, "developer 必须紧跟 platform");
   assert.deepEqual(Object.keys(api.developer), ["command"]);
   assert.equal(typeof api.developer.command, "function");
   assert.equal(typeof api.developer, "object");

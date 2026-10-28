@@ -74,13 +74,13 @@ function loadWhitelist(exportName) {
   return Array.isArray(value) ? value.slice() : Object.keys(value);
 }
 
-test("preload 真实暴露的顶层键恰为 40，且与探针契约逐字一致", () => {
+test("preload 真实暴露的顶层键恰为 42，且与探针契约逐字一致", () => {
   const { api, exposedNames } = loadExposedPreload();
   assert.deepEqual(exposedNames, ["openarc"], "preload 只应 exposeInMainWorld openarc");
   assert.ok(api && typeof api === "object", "openarc 必须是对象");
   const keys = Object.keys(api);
-  assert.equal(keys.length, 40, "顶层键必须恰为 40（当前 " + keys.length + "）");
-  assert.equal(new Set(keys).size, 40, "顶层键不得重复");
+  assert.equal(keys.length, CONTRACT.topLevel.length, "顶层键数量必须与真实契约一致（当前 " + keys.length + "）");
+  assert.equal(new Set(keys).size, CONTRACT.topLevel.length, "顶层键不得重复");
   assert.deepEqual(keys, CONTRACT.topLevel.map((entry) => entry.key), "探针 CONTRACT.topLevel 顺序/集合必须与 preload 真实导出一致");
 });
 
@@ -167,8 +167,8 @@ test("每个契约通道 / 函数都真实存在于 preload 暴露面", () => {
   for (const entry of CONTRACT.health) check(entry);
 });
 
-test("trusted 边界：main.cjs trusted() 双条件与 preload 无原始能力（静态核对）", () => {
-  const main = fs.readFileSync(MAIN_PATH, "utf8");
+test("trusted 边界：security-policies.cjs trusted() 双条件与 preload 无原始能力（静态核对）", () => {
+  const main = fs.readFileSync(path.join(ROOT, "electron", "security-policies.cjs"), "utf8");
   assert.ok(/function trusted\(/.test(main), "main.cjs 必须有 trusted()");
   assert.ok(/event\.sender\s*!==\s*win\?\.webContents/.test(main), "trusted() 必须校验 event.sender === win.webContents");
   assert.ok(/event\.senderFrame\?\.url/.test(main) && /url\s*===\s*uiURL/.test(main), "trusted() 必须校验 senderFrame.url 属于外壳页");
@@ -177,9 +177,9 @@ test("trusted 边界：main.cjs trusted() 双条件与 preload 无原始能力�
   // 每个命令通道都已经在 main.cjs 可达的模块里显式注册（主进程入口只负责装配）。
   const CHANNEL_REGISTRATIONS = [
     { endpoint: "identity:command", module: "electron/identity-bootstrap.cjs" },
-    { endpoint: "windows:sync", module: "electron/main.cjs" },
-    { endpoint: "browser:command", module: "electron/main.cjs" },
-    { endpoint: "files:list", module: "electron/main.cjs" },
+    { endpoint: "windows:sync", module: "electron/window-browser-ipc.cjs" },
+    { endpoint: "browser:command", module: "electron/window-browser-ipc.cjs" },
+    { endpoint: "files:list", module: "electron/files-ipc.cjs" },
     { endpoint: "agent:command", module: "electron/agent-bootstrap.cjs" },
     { endpoint: "skill:command", module: "electron/skill-bootstrap.cjs" },
     { endpoint: "media:command", module: "electron/media-bootstrap.cjs" },
@@ -210,8 +210,9 @@ test("trusted 边界：main.cjs trusted() 双条件与 preload 无原始能力�
     assert.ok(fs.existsSync(abs), "接线模块不存在：" + rel);
     assert.ok(fs.readFileSync(abs, "utf8").includes(endpoint), rel + " 未注册命令通道 " + endpoint);
   }
+  const composition = fs.readFileSync(path.join(ROOT, "electron", "runtime-composition.cjs"), "utf8");
   for (const registrar of ["registerIdentityIpc", "registerMcpIpc", "registerCanvasIpc", "registerTaskIpc", "registerSkillIpc", "registerAgentIpc", "registerMediaIpc", "registerAutomationIpc", "registerPlatformIpc", "registerDeveloperIpc", "registerIntegrationIpc", "registerMarketIpc", "registerSystemFontsIpc", "registerOcrIpc", "registerFileTransferIpc", "registerCodexCanvasIpc", "registerLocalProxyIpc", "registerPhotosIpc", "registerPhotocraftIpc", "registerAppExchangeIpc", "registerCliIpc"]) {
-    assert.ok(main.includes(registrar), "main.cjs 未装配 " + registrar);
+    assert.ok(composition.includes(registrar), "runtime-composition.cjs 未装配 " + registrar);
   }
 });
 

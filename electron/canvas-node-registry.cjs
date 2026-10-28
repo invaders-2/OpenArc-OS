@@ -44,10 +44,18 @@ const string = (maxLength, extra = {}) => ({ type: "string", maxLength, ...extra
 const integer = (minimum, maximum) => ({ type: "integer", minimum, maximum });
 const array = (items, extra = {}) => ({ type: "array", items, ...extra });
 
+/**
+ * 媒体串上限：既可能是 https 直链，也可能是画布素材的 data URL —— 图床（canvas/assetPublicUrl）
+ * 不可用时，桥会给图片内嵌压缩后的 data URL（1.5MB 内的 JPEG 转 base64 约 2MB 字符）。
+ * 400 会把这种合法输入判成"参数非法"，生成在发请求前就失败（真机：视频节点 68ms FAILED，
+ * node.data.gen.err = CANVAS_NODE_PARAMS_INVALID，errors=[{path:"params.images[0]",message:"长度超过 400"}]）。
+ * 真实体积上限在各消费点（readAsset / importAsset / 上传器），这里只留一个防呆上界。
+ */
+const MAX_MEDIA_STRING = 4 * 1024 * 1024;
 const mediaProperties = {
-  images: array(string(400), { maxItems: 8 }),
-  videos: array(string(400), { maxItems: 8 }),
-  audios: array(string(400), { maxItems: 8 }),
+  images: array(string(MAX_MEDIA_STRING), { maxItems: 8 }),
+  videos: array(string(MAX_MEDIA_STRING), { maxItems: 8 }),
+  audios: array(string(MAX_MEDIA_STRING), { maxItems: 8 }),
 };
 
 /** 生成类参数：模型 / 尺寸等由 canvas-service 已有的解析链消费；这里只做输入形状约束。 */
@@ -92,7 +100,7 @@ const PARAM_SCHEMAS = Object.freeze({
   },
   "builtin.table": { type: "object", properties: { protocolParams: { type: "object" }, table: { type: "object" }, rows: array({ type: "object" }) }, additionalProperties: true },
   "builtin.image-compare": { type: "object", properties: { ...mediaProperties, columns: integer(1, 8) }, required: ["images"], additionalProperties: true },
-  "builtin.mosaic": { type: "object", properties: { images: array(string(400), { minItems: 1, maxItems: 12 }), texts: array(string(2000), { maxItems: 12 }), columns: integer(1, 8), gap: integer(0, 64), background: string(32) }, required: ["images"], additionalProperties: true },
+  "builtin.mosaic": { type: "object", properties: { images: array(string(MAX_MEDIA_STRING), { minItems: 1, maxItems: 12 }), texts: array(string(2000), { maxItems: 12 }), columns: integer(1, 8), gap: integer(0, 64), background: string(32) }, required: ["images"], additionalProperties: true },
   "builtin.group": { type: "object", properties: {}, additionalProperties: true },
   "builtin.prompt": { type: "object", properties: { prompt: string(20000) }, additionalProperties: true },
   "builtin.sticky": { type: "object", properties: { prompt: string(20000) }, additionalProperties: true },
@@ -261,7 +269,7 @@ class CanvasNodeRegistry {
     let reason = "no-executor-port";
     if (profile.kind === "asset" || profile.kind === "local") { available = true; reason = null; }
     else if (profile.kind === "generation") {
-      const port = type === "builtin.video-generator" && typeof this.ports.videoGeneration === "function" ? this.ports.videoGeneration : this.ports.generation;
+      const port = type === "builtin.video-generator" && typeof this.ports.videoGeneration === "function" ? this.ports.videoGeneration : (type === "builtin.audio-generator" && typeof this.ports.audioGeneration === "function" ? this.ports.audioGeneration : this.ports.generation);
       const supported = typeof port === "function" && (typeof port.supports !== "function" || port.supports(type));
       available = !!supported;
       reason = typeof port !== "function" ? "no-generation-port" : available ? null : "unsupported-model-kind";
@@ -391,7 +399,7 @@ class CanvasNodeRegistry {
         outputs = { [executor.output]: validation.params.ref || validation.params.url || null };
       } else {
         const portName = executor.kind === "generation"
-          ? (resolvedType === "builtin.video-generator" && typeof this.ports.videoGeneration === "function" ? "videoGeneration" : "generation")
+          ? (resolvedType === "builtin.video-generator" && typeof this.ports.videoGeneration === "function" ? "videoGeneration" : (resolvedType === "builtin.audio-generator" && typeof this.ports.audioGeneration === "function" ? "audioGeneration" : "generation"))
           : executor.kind === "media-process" ? "mediaProcess" : "plugin";
         const port = this.ports[portName];
         if (typeof port !== "function") return fail(ERROR.NODE_EXECUTOR_UNAVAILABLE, { ...base, reason: executor.reason });

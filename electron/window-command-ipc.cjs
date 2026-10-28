@@ -12,8 +12,8 @@
  *   · 单次上限 64 条，防止一次 IPC 无限计算。
  *   · 返回值只含窗口域字段（appId / bounds / meta / tabGroupId），不含任何路径 / 凭据。
  */
-const domain = require("./window-domain.cjs");
-const manager = require("./window-manager.cjs");
+const domain = require("./window-domain.ts");
+const manager = require("./window-manager.ts");
 
 const MAX_WINDOW_COMMANDS = 64;
 

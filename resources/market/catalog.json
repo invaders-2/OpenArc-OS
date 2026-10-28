@@ -6,19 +6,3256 @@
     "id": "local",
     "title": "本地市场"
   },
-  "categories": [],
-  "items": [],
-  "apps": [],
-  "skillPacks": [],
+  "categories": [
+    {
+      "id": "creative",
+      "name": "创作",
+      "icon": "✦",
+      "description": "内置创作类应用：画布、相册、音乐、视频剪辑。"
+    },
+    {
+      "id": "efficiency",
+      "name": "效率",
+      "icon": "⚡",
+      "description": "内置效率类应用：浏览器、对话。"
+    },
+    {
+      "id": "team-resource",
+      "name": "团队与资源",
+      "icon": "◍",
+      "description": "内置团队与资源类应用：资源库、项目。"
+    },
+    {
+      "id": "brand-design",
+      "name": "品牌设计",
+      "icon": "◈",
+      "description": "换背景、产品图、品牌物料类模板。"
+    },
+    {
+      "id": "film-creative",
+      "name": "影视创意",
+      "icon": "▦",
+      "description": "脚本、分镜、首帧与镜头运动类模板。"
+    },
+    {
+      "id": "ecommerce-ads",
+      "name": "电商广告",
+      "icon": "◇",
+      "description": "卖点拆解、批量出图与海报类模板。"
+    },
+    {
+      "id": "interactive-games",
+      "name": "互动游戏",
+      "icon": "◉",
+      "description": "关卡场景、游戏 UI 与角色立绘类模板。",
+      "count": 0
+    },
+    {
+      "id": "social-media-content",
+      "name": "社媒内容",
+      "icon": "✳",
+      "description": "封面、九宫格、口播与播客类模板。",
+      "count": 0
+    }
+  ],
+  "apps": [
+    {
+      "id": "canvas",
+      "name": "AI Studio",
+      "version": "0.1.0",
+      "build": 1,
+      "builtIn": true,
+      "category": "software",
+      "categoryIds": [
+        "creative"
+      ],
+      "subtitle": "无限画布：图像、视频与工作流",
+      "summary": "无限画布：在自由节点里写提示词、接素材、串工作流，按节点逐个生成图像、视频与文本。",
+      "prompt": "给一款白色运动水壶做三张电商主图，干净白底，主标题突出卖点",
+      "tags": [
+        "画布",
+        "生成",
+        "工作流"
+      ],
+      "featured": true,
+      "publishedAt": 1760860800000,
+      "sections": {
+        "what": "在无限画布上把文字、图片、视频节点连成工作流，逐节点调用已配置的模型生成内容。",
+        "context": "想做的画面 / 视频描述；如需参考图先把素材拖进画布；生成前需在「设置 › 模型与服务商」配好模型。",
+        "how": "新建画布 → 添加节点并写提示词 → 连上游素材 → 点生成；多节点可以按顺序逐段跑，也可以右键「运行到此」。",
+        "output": "画布文档与各节点产物（图片 / 视频 / 文本），产物会进生成历史，也可以保存到素材库。",
+        "scope": "画布只负责编排与调用：模型、密钥、计费都在服务商侧；没有配置模型时不会假装能生成。",
+        "followUp": "从「应用市场 › 项目模板」一键建好 5 套常用工作流；或直接把复制到的提示词粘进首个节点。"
+      },
+      "ratio": "16/9",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "电商主图",
+          "description": "给产品生成干净底色的主图"
+        },
+        {
+          "title": "分镜短片",
+          "description": "按脚本逐镜头生成视频"
+        }
+      ],
+      "tools": [
+        "画布",
+        "素材库",
+        "模型服务"
+      ]
+    },
+    {
+      "id": "photos",
+      "name": "相册",
+      "version": "0.1.0",
+      "build": 1,
+      "builtIn": true,
+      "category": "software",
+      "categoryIds": [
+        "creative"
+      ],
+      "subtitle": "汇总访达里的全部图片",
+      "summary": "汇总访达里的全部图片，按网格浏览、查看原图，也能导入画布或素材库。",
+      "tags": [
+        "照片",
+        "浏览"
+      ],
+      "featured": false,
+      "publishedAt": 1760428800000,
+      "sections": {
+        "what": "把本机（访达）里的图片汇总成一个相册，方便快速翻看与再次使用。",
+        "context": "访达里已有的图片；相册本身不下载、不联网取图。",
+        "how": "打开「相册」读取本机图片索引，点开一张看原图与详情，可下载或导入画布 / 素材库。",
+        "output": "可浏览的图片列表与原图预览；导入动作会在画布或素材库里生成对应资源。",
+        "scope": "只读本机已授权的图片；不索引云端网盘，也不做图片编辑。",
+        "followUp": "需要改图时把图片导入画布，用画布节点或图片编辑工具处理。"
+      },
+      "ratio": "4/3",
+      "useCases": [
+        {
+          "title": "翻看素材",
+          "description": "按网格浏览本机图片"
+        },
+        {
+          "title": "导入画布",
+          "description": "把选中的图送进画布当参考图"
+        }
+      ],
+      "tools": [
+        "相册",
+        "画布"
+      ]
+    },
+    {
+      "id": "music",
+      "name": "音乐",
+      "version": "0.1.0",
+      "build": 1,
+      "builtIn": true,
+      "category": "software",
+      "categoryIds": [
+        "creative"
+      ],
+      "subtitle": "播放访达里的音频文件",
+      "summary": "播放访达里的音频文件：列表选曲、进度与音量的本地播放器。",
+      "tags": [
+        "音频",
+        "播放"
+      ],
+      "featured": false,
+      "publishedAt": 1760342400000,
+      "sections": {
+        "what": "播放本机访达里的音频文件，用来试听生成或导入的音频素材。",
+        "context": "访达里已有的音频文件。",
+        "how": "打开「音乐」读取本机音频索引，点选即播；播放控制在本机完成，不上传音频。",
+        "output": "本机音频播放。",
+        "scope": "只做本地播放，不接入在线音乐服务，也不提供转码。",
+        "followUp": "想生成音乐或配音，在画布用「音频」节点并配置音频模型。"
+      },
+      "ratio": "16/9",
+      "modelHint": "音频模型",
+      "useCases": [
+        {
+          "title": "试听音频",
+          "description": "播放本机音频文件"
+        }
+      ],
+      "tools": [
+        "音乐",
+        "素材库"
+      ]
+    },
+    {
+      "id": "video",
+      "name": "视频剪辑",
+      "version": "0.1.0",
+      "build": 1,
+      "builtIn": true,
+      "category": "software",
+      "categoryIds": [
+        "creative"
+      ],
+      "subtitle": "拼接、裁剪视频并用本机 FFmpeg 导出",
+      "summary": "把本机视频按入点 / 出点裁剪、拼接，用本机 FFmpeg 导出成片。",
+      "tags": [
+        "视频",
+        "剪辑",
+        "导出"
+      ],
+      "featured": false,
+      "publishedAt": 1760256000000,
+      "sections": {
+        "what": "把本机视频片段裁剪、排序、拼接，导出成一个成片文件。",
+        "context": "访达里的视频文件；导出需要本机带 FFmpeg（应用内会显示是否可用）。",
+        "how": "在「视频剪辑」里选片段、拖时间线定入点 / 出点，点导出由本机 FFmpeg 渲染。",
+        "output": "导出到本机的成片文件。",
+        "scope": "只做剪辑与转码，不做特效合成；FFmpeg 不可用时如实报错，不伪造导出成功。",
+        "followUp": "需要生成素材时先在画布出视频节点，再回到这里剪。"
+      },
+      "ratio": "16/9",
+      "modelHint": "视频模型",
+      "useCases": [
+        {
+          "title": "裁剪拼接",
+          "description": "按入点出点剪片段并导出"
+        },
+        {
+          "title": "导出成片",
+          "description": "用本机 FFmpeg 渲染"
+        }
+      ],
+      "tools": [
+        "视频剪辑",
+        "素材库",
+        "FFmpeg"
+      ]
+    },
+    {
+      "id": "resource-library",
+      "name": "资源库",
+      "version": "0.1.0",
+      "build": 1,
+      "builtIn": true,
+      "category": "software",
+      "categoryIds": [
+        "team-resource"
+      ],
+      "subtitle": "可被助理引用的资源",
+      "summary": "管理可被助理、画布与其它应用引用的图片、文档与素材。",
+      "tags": [
+        "资源",
+        "素材",
+        "引用"
+      ],
+      "featured": false,
+      "publishedAt": 1760173200000,
+      "sections": {
+        "what": "集中管理可被助理、画布与其它应用引用的资源（图片 / 文档 / 素材）。",
+        "context": "要归档的文件或画布产物；按范围（个人 / 团队）与权限共享。",
+        "how": "导入或从画布保存进资源库，按文件夹 / 搜索查找；引用时用资源标识，不复制大段内容。",
+        "output": "带归属与权限的资源条目，可被其它应用引用。",
+        "scope": "权限决定谁能看 / 改；删除进回收站，可恢复。",
+        "followUp": "在画布或对话里引用资源；团队共享时先在「组织治理」确认可见范围。"
+      },
+      "ratio": "4/3",
+      "useCases": [
+        {
+          "title": "归档素材",
+          "description": "把文件与画布产物收进资源库"
+        },
+        {
+          "title": "被助理引用",
+          "description": "在对话或画布引用资源"
+        }
+      ],
+      "tools": [
+        "资源库",
+        "对话",
+        "画布"
+      ]
+    },
+    {
+      "id": "browser",
+      "name": "浏览器",
+      "version": "0.1.0",
+      "build": 1,
+      "builtIn": true,
+      "category": "software",
+      "categoryIds": [
+        "efficiency"
+      ],
+      "subtitle": "受控的网页浏览与下载",
+      "summary": "在桌面里开标签页浏览网页：地址栏、前进后退、下载面板都走受控主进程。",
+      "tags": [
+        "网页",
+        "浏览"
+      ],
+      "featured": false,
+      "publishedAt": 1760086800000,
+      "sections": {
+        "what": "在 OpenArc 桌面内浏览网页，用于查资料、比对页面或下载文件。",
+        "context": "要访问的网址；网站权限（摄像头 / 定位等）会单独提示。",
+        "how": "打开「浏览器」输入地址，按标签页管理；下载进入下载面板，由主进程落盘。",
+        "output": "网页视图与下载结果。",
+        "scope": "导航受安全策略约束（危险协议 / 非白名单跳转会被拦并记录）；不注入脚本、不伪装 UA。",
+        "followUp": "需要把网页内容用于生成时，把关键信息复制到「对话」或画布提示词里。"
+      },
+      "ratio": "16/9",
+      "useCases": [
+        {
+          "title": "查资料",
+          "description": "在桌面里开标签页浏览"
+        },
+        {
+          "title": "下载文件",
+          "description": "下载进本机下载面板"
+        }
+      ],
+      "tools": [
+        "浏览器",
+        "下载"
+      ]
+    },
+    {
+      "id": "chat",
+      "name": "对话",
+      "version": "0.1.0",
+      "build": 1,
+      "builtIn": true,
+      "category": "software",
+      "categoryIds": [
+        "efficiency"
+      ],
+      "subtitle": "和助理对话、交代任务",
+      "summary": "和助理对话、交代任务：可以提问、让它调用工具，也能把结果沉淀成任务记录。",
+      "prompt": "帮我把这段文字总结成 3 条要点，并给出下一步建议",
+      "tags": [
+        "对话",
+        "助理",
+        "任务"
+      ],
+      "featured": true,
+      "publishedAt": 1759914000000,
+      "sections": {
+        "what": "和助理多轮对话、交代任务；需要动手的操作会按工具权限与审批执行。",
+        "context": "你想问的问题或要交代的任务；可附上资源库里的素材。没有配置对话模型时会提示去设置里添加。",
+        "how": "在「对话」输入内容发送；助理按需调用已授权工具，需要确认的操作会先停下来等你批准。",
+        "output": "对话回复与任务记录（含执行摘要）；结果未知会与失败分开标注。",
+        "scope": "工具调用受权限与 MCP 开关约束；不会绕过审批，也不会展示模型内部思维链。",
+        "followUp": "把常用指令存成技能，或在「应用市场 › 官方技能」里复制提示词。"
+      },
+      "ratio": "1/1",
+      "modelHint": "对话模型",
+      "useCases": [
+        {
+          "title": "总结要点",
+          "description": "把长文压成 3 条要点"
+        },
+        {
+          "title": "交代任务",
+          "description": "让助理按工具权限执行"
+        }
+      ],
+      "tools": [
+        "对话",
+        "技能中心",
+        "模型服务"
+      ]
+    },
+    {
+      "id": "projects",
+      "name": "项目",
+      "version": "0.1.0",
+      "build": 1,
+      "builtIn": true,
+      "category": "software",
+      "categoryIds": [
+        "team-resource"
+      ],
+      "subtitle": "项目与成员协作",
+      "summary": "用项目把任务、成员与资源收在一起，按权限协作。",
+      "tags": [
+        "项目",
+        "协作"
+      ],
+      "featured": false,
+      "publishedAt": 1759827600000,
+      "sections": {
+        "what": "用项目聚合任务、成员与资源，方便按范围协作与追踪。",
+        "context": "项目名称与成员；成员权限在「组织治理」里分配。",
+        "how": "新建项目 → 邀请成员 → 在项目里放任务与资源；可见范围由资源与项目权限共同决定。",
+        "output": "项目及其成员、任务与资源清单。",
+        "scope": "越权成员看不到项目内容；删除与转移需要管理权限。",
+        "followUp": "把项目里反复做的流程写成技能，或从「项目模板」起一张画布。"
+      },
+      "ratio": "4/3",
+      "useCases": [
+        {
+          "title": "项目协作",
+          "description": "把任务、成员、资源收在一起"
+        }
+      ],
+      "tools": [
+        "项目",
+        "组织治理",
+        "资源库"
+      ]
+    }
+  ],
+  "skillPacks": [
+    {
+      "id": "chat",
+      "name": "对话回复",
+      "version": "1.0.0",
+      "description": "普通对话、问答、解释概念；不适合长文写作（用 writing）和代码（用 code）。",
+      "summary": "内置官方技能：对话 / 问答 / 解释概念。",
+      "prompt": "你是一个直接、自然、可靠的中文对话助手。回答用户问题；不需要生成图片；不输出无关解释。",
+      "tags": [
+        "对话",
+        "官方技能"
+      ],
+      "publishedAt": 1759255200000,
+      "featured": false,
+      "sections": {
+        "what": "普通对话、问答、解释概念；不适合长文写作（用 writing）和代码（用 code）。",
+        "context": "用户的问题或对话内容",
+        "how": "把用户的问题作为指令交给当前默认对话模型，直接回复。",
+        "output": "对话文本（在对话里直接显示）。",
+        "scope": "内置官方技能：通过对话或 /chat 显式调用；启用技能不会自动获得应用、设备或文件权限。",
+        "followUp": "在「对话」里追问，或在「应用市场 › 官方技能」里复制提示词。"
+      },
+      "ratio": "1/1",
+      "modelHint": "对话模型",
+      "useCases": [
+        {
+          "title": "对话问答",
+          "description": "解释概念、回答追问"
+        }
+      ],
+      "tools": [
+        "对话"
+      ]
+    },
+    {
+      "id": "writing",
+      "name": "写作生成",
+      "version": "1.0.0",
+      "description": "生成诗歌、文案、故事、脚本、邮件、标题等原创文本，输出可直接交付的成品。",
+      "summary": "内置官方技能：按体裁与语气写可直接交付的文本。",
+      "prompt": "你是中文写作助手。按用户要求创作可直接交付的文本，如诗歌、文案、故事、标题、邮件。只输出成品，除非用户要求解释。",
+      "tags": [
+        "写作",
+        "官方技能",
+        "精选"
+      ],
+      "publishedAt": 1760301600000,
+      "featured": true,
+      "sections": {
+        "what": "生成诗歌、文案、故事、脚本、邮件、标题等原创文本，输出可直接交付的成品。",
+        "context": "写作要求，包含体裁、主题、长度、语气等",
+        "how": "把写作要求与素材交给当前默认对话模型，按 systemPrompt 的约束只输出成品。",
+        "output": "可直接交付的文本成品。",
+        "scope": "内置官方技能：通过对话或 /writing 显式调用；不会获得额外权限，也不抓取外部资料。",
+        "followUp": "在「对话」里继续改稿，或复制提示词到自己的编辑器。"
+      },
+      "ratio": "4/3",
+      "modelHint": "对话模型",
+      "useCases": [
+        {
+          "title": "按体裁写作",
+          "description": "公众号、邮件、文案按体裁写"
+        }
+      ],
+      "tools": [
+        "对话",
+        "技能中心"
+      ]
+    },
+    {
+      "id": "rewrite",
+      "name": "文本改写",
+      "version": "1.0.0",
+      "description": "润色、改写、扩写、缩写、翻译或调整语气，保持原意。",
+      "summary": "内置官方技能：润色 / 改写 / 扩写 / 缩写 / 翻译。",
+      "prompt": "你是文本改写助手。根据用户要求润色、改写、扩写、缩写、翻译或调整语气。尽量保留原意，只输出改写结果。",
+      "tags": [
+        "改写",
+        "官方技能"
+      ],
+      "publishedAt": 1759514400000,
+      "featured": false,
+      "sections": {
+        "what": "润色、改写、扩写、缩写、翻译或调整语气，保持原意。",
+        "context": "改写要求 + 原文",
+        "how": "按你的改写要求把原文交给当前默认对话模型，尽量保留原意，只输出改写结果。",
+        "output": "改写后的文本。",
+        "scope": "内置官方技能：通过对话或 /rewrite 显式调用；不会获得额外权限。",
+        "followUp": "连续改写可再发一轮要求，或复制提示词复用。"
+      },
+      "ratio": "4/3",
+      "modelHint": "对话模型",
+      "useCases": [
+        {
+          "title": "润色改写",
+          "description": "扩写缩写、换语气"
+        }
+      ],
+      "tools": [
+        "对话",
+        "技能中心"
+      ]
+    },
+    {
+      "id": "code",
+      "name": "代码助手",
+      "version": "1.0.0",
+      "description": "写代码、解释代码、分析报错、给出技术修复方案。",
+      "summary": "内置官方技能：写代码 / 解释代码 / 分析报错。",
+      "prompt": "你是代码与技术助手。可以写代码、解释代码、分析报错、给出修复方案。需要代码时使用清晰代码块。",
+      "tags": [
+        "代码",
+        "官方技能",
+        "精选"
+      ],
+      "publishedAt": 1760647200000,
+      "featured": true,
+      "sections": {
+        "what": "写代码、解释代码、分析报错、给出技术修复方案。",
+        "context": "编程需求、代码片段或报错信息",
+        "how": "把你的需求 / 代码片段 / 报错交给当前默认对话模型，需要代码时用清晰代码块输出。",
+        "output": "代码、解释或修复方案（文本）。",
+        "scope": "内置官方技能：通过对话或 /code 显式调用；不会自行执行代码，也不会访问本机文件。",
+        "followUp": "把代码贴回工程里验证，或在对话里继续追问报错。"
+      },
+      "ratio": "4/3",
+      "modelHint": "对话模型",
+      "useCases": [
+        {
+          "title": "写代码",
+          "description": "按需求写并解释代码"
+        }
+      ],
+      "tools": [
+        "对话",
+        "技能中心"
+      ]
+    },
+    {
+      "id": "analysis",
+      "name": "文本分析",
+      "version": "1.0.0",
+      "description": "总结、归纳、对比、提取要点、诊断问题，输出结构化结论。",
+      "summary": "内置官方技能：总结 / 对比 / 提取要点 / 诊断问题。",
+      "prompt": "你是分析总结助手。擅长总结、归纳、对比、提取要点、诊断问题。输出结构清晰，优先给结论。",
+      "tags": [
+        "分析",
+        "官方技能"
+      ],
+      "publishedAt": 1759773600000,
+      "featured": false,
+      "sections": {
+        "what": "总结、归纳、对比、提取要点、诊断问题，输出结构化结论。",
+        "context": "分析要求 + 待分析的文本材料",
+        "how": "按分析要求把材料交给当前默认对话模型，输出结构清晰、结论优先的结果。",
+        "output": "结构化分析结论（文本）。",
+        "scope": "内置官方技能：通过对话或 /analysis 显式调用；只分析你给的文本，不抓取外部资料。",
+        "followUp": "在对话里继续追问细节，或复制提示词复用。"
+      },
+      "ratio": "4/3",
+      "modelHint": "对话模型",
+      "useCases": [
+        {
+          "title": "总结对比",
+          "description": "提取要点与差异"
+        }
+      ],
+      "tools": [
+        "对话",
+        "资源库"
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "id": "tpl-text-to-video",
+      "name": "文字生视频",
+      "version": "1.0.0",
+      "kind": "text",
+      "category": "film-creative",
+      "summary": "一段文字脚本 → 一条短片：画布会连好「视频脚本」文本节点与「短片」视频节点。",
+      "prompt": "写一段 10 秒短片的分镜脚本，3 个镜头",
+      "nodeTitle": "视频脚本",
+      "tags": [
+        "视频",
+        "脚本",
+        "模板"
+      ],
+      "publishedAt": 1760750400000,
+      "featured": true,
+      "steps": [
+        {
+          "title": "视频脚本",
+          "detail": "文本节点，提示词：写一段 10 秒短片的分镜脚本，3 个镜头"
+        },
+        {
+          "title": "短片",
+          "detail": "视频节点，提示词：按上游脚本生成，电影感，节奏紧凑"
+        },
+        {
+          "title": "连线",
+          "detail": "脚本 → 短片，按上游文本生成视频"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-t2v-script",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "视频脚本",
+            "prompt": "写一段 10 秒短片的分镜脚本，3 个镜头"
+          },
+          {
+            "id": "tpl-t2v-video",
+            "kind": "video",
+            "x": 460,
+            "y": 0,
+            "w": 340,
+            "h": 220,
+            "title": "短片",
+            "prompt": "按上游脚本生成，电影感，节奏紧凑"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_t2v_1",
+            "from": "tpl-t2v-script",
+            "to": "tpl-t2v-video"
+          }
+        ]
+      },
+      "sections": {
+        "what": "从一句创意出发拿到分镜脚本，再按脚本生成一条短片；画布会按顺序把两个节点连好。",
+        "context": "一句创意或一段现成脚本；要真正生成视频，需要先在「系统设置 › 模型与服务商」配好可用的视频模型。",
+        "how": "立即体验会在画布上创建「视频脚本」（文本）与「短片」（视频）两个节点并连好；脚本节点已带好提示词。",
+        "output": "一张新画布：2 个节点 + 1 条连线，脚本节点带模板提示词。",
+        "scope": "只创建节点与连线，不会自动调用模型或扣费；生成需要你确认后点「生成」。",
+        "followUp": "打开画布改脚本，再点生成；也可以复制提示词到自己的文档里。"
+      },
+      "ratio": "16/9",
+      "modelHint": "视频模型",
+      "useCases": [
+        {
+          "title": "一句话出短片",
+          "description": "脚本→镜头→成片"
+        }
+      ],
+      "tools": [
+        "画布",
+        "视频模型"
+      ]
+    },
+    {
+      "id": "tpl-image-rebackground",
+      "name": "图片换背景",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "brand-design",
+      "summary": "上传产品图 → 保持主体不变换背景：连好「原图」与「换背景」两个图片节点。",
+      "prompt": "保持主体不变，背景换成清晨的木质书桌，左侧窗光",
+      "nodeTitle": "换背景",
+      "tags": [
+        "换背景",
+        "产品图",
+        "模板"
+      ],
+      "publishedAt": 1760232000000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "原图",
+          "detail": "图片节点，用来上传或拖入原图（还没有图片时是空位）"
+        },
+        {
+          "title": "换背景",
+          "detail": "图片节点，提示词：保持主体不变，背景换成清晨的木质书桌，左侧窗光"
+        },
+        {
+          "title": "连线",
+          "detail": "原图 → 换背景，用原图作为参考生成"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-bg-source",
+            "kind": "image",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "原图"
+          },
+          {
+            "id": "tpl-bg-result",
+            "kind": "image",
+            "x": 460,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "换背景",
+            "prompt": "保持主体不变，背景换成清晨的木质书桌，左侧窗光"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_bg_1",
+            "from": "tpl-bg-source",
+            "to": "tpl-bg-result"
+          }
+        ]
+      },
+      "sections": {
+        "what": "保留商品 / 主体不动，只替换背景，适合品牌物料与产品图。",
+        "context": "一张原图（立即体验后拖入「原图」节点）；以及你想要的背景描述。",
+        "how": "立即体验会创建「原图」「换背景」两个图片节点并连好，换背景节点带好提示词。",
+        "output": "一张新画布：2 个节点 + 1 条连线；原图节点等待你放入图片。",
+        "scope": "只创建节点与连线，不会自动生成；原图为空时不会凭空造图。",
+        "followUp": "把原图拖进画布，改背景描述后点生成。"
+      },
+      "ratio": "2/3",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "换背景",
+          "description": "保留主体只换背景"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-first-frame-video",
+      "name": "首帧生成视频",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "film-creative",
+      "summary": "一张图作为首帧 → 镜头运动成片：连好「首帧」图片节点与「首帧视频」视频节点。",
+      "prompt": "镜头缓慢环绕主体，光线从左扫到右",
+      "nodeTitle": "首帧",
+      "tags": [
+        "首帧",
+        "视频",
+        "模板"
+      ],
+      "publishedAt": 1760360400000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "首帧",
+          "detail": "图片节点，放第一帧画面"
+        },
+        {
+          "title": "首帧视频",
+          "detail": "视频节点，提示词：镜头缓慢环绕主体，光线从左扫到右"
+        },
+        {
+          "title": "连线",
+          "detail": "首帧 → 首帧视频，把图当首帧生成"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-i2v-frame",
+            "kind": "image",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 260,
+            "title": "首帧"
+          },
+          {
+            "id": "tpl-i2v-video",
+            "kind": "video",
+            "x": 460,
+            "y": 0,
+            "w": 340,
+            "h": 220,
+            "title": "首帧视频",
+            "prompt": "镜头缓慢环绕主体，光线从左扫到右"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_i2v_1",
+            "from": "tpl-i2v-frame",
+            "to": "tpl-i2v-video"
+          }
+        ]
+      },
+      "sections": {
+        "what": "用一张图当首帧，让视频模型沿你描述的镜头运动生成短片。",
+        "context": "一张首帧图片 + 镜头运动描述；需要可用的视频模型。",
+        "how": "立即体验会创建「首帧」（图片）与「首帧视频」（视频）并连好；视频节点带好提示词。",
+        "output": "一张新画布：2 个节点 + 1 条连线。",
+        "scope": "只创建节点与连线，不会自动生成或扣费。",
+        "followUp": "把首帧图片拖进节点，微调镜头描述后点生成。"
+      },
+      "ratio": "16/9",
+      "modelHint": "视频模型",
+      "useCases": [
+        {
+          "title": "首帧成片",
+          "description": "一张图生成镜头运动"
+        }
+      ],
+      "tools": [
+        "画布",
+        "视频模型"
+      ]
+    },
+    {
+      "id": "tpl-ecom-poster",
+      "name": "电商卖点套图",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "ecommerce-ads",
+      "summary": "产品图 + 产品信息 → 卖点拆解 → 3 张海报：6 个节点 + 8 条连线的工作流模板。",
+      "prompt": "输出 3 个卖点海报方案，以“海报1”“海报2”“海报3”开头，每个包含主标题、画面、文案",
+      "nodeTitle": "卖点拆解",
+      "tags": [
+        "电商",
+        "海报",
+        "批量",
+        "模板"
+      ],
+      "publishedAt": 1760812800000,
+      "featured": true,
+      "steps": [
+        {
+          "title": "产品图",
+          "detail": "图片节点，放产品图"
+        },
+        {
+          "title": "产品信息",
+          "detail": "文本节点，手写产品 / 卖点 / 人群 / 风格偏好"
+        },
+        {
+          "title": "卖点拆解",
+          "detail": "文本节点，提示词：输出 3 个卖点海报方案…"
+        },
+        {
+          "title": "海报 1–3",
+          "detail": "3 个图片节点，提示词：参考 @卖点拆解·海报N，基于产品图生成竖版卖点海报"
+        },
+        {
+          "title": "连线",
+          "detail": "产品图/产品信息 → 卖点拆解；产品图与卖点拆解各连 3 张海报，共 8 条连线"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-ecom-product",
+            "kind": "image",
+            "x": 0,
+            "y": 0,
+            "w": 260,
+            "h": 260,
+            "title": "产品图"
+          },
+          {
+            "id": "tpl-ecom-info",
+            "kind": "text",
+            "x": 0,
+            "y": 320,
+            "w": 260,
+            "h": 220,
+            "title": "产品信息",
+            "text": "产品：\n卖点：\n人群：\n风格偏好："
+          },
+          {
+            "id": "tpl-ecom-breakdown",
+            "kind": "text",
+            "x": 360,
+            "y": 120,
+            "w": 300,
+            "h": 240,
+            "title": "卖点拆解",
+            "prompt": "输出 3 个卖点海报方案，以“海报1”“海报2”“海报3”开头，每个包含主标题、画面、文案"
+          },
+          {
+            "id": "tpl-ecom-poster-1",
+            "kind": "image",
+            "x": 760,
+            "y": -40,
+            "w": 240,
+            "h": 300,
+            "title": "海报 1",
+            "prompt": "参考 @卖点拆解·海报1，基于产品图生成竖版卖点海报"
+          },
+          {
+            "id": "tpl-ecom-poster-2",
+            "kind": "image",
+            "x": 760,
+            "y": 320,
+            "w": 240,
+            "h": 300,
+            "title": "海报 2",
+            "prompt": "参考 @卖点拆解·海报2，基于产品图生成竖版卖点海报"
+          },
+          {
+            "id": "tpl-ecom-poster-3",
+            "kind": "image",
+            "x": 760,
+            "y": 680,
+            "w": 240,
+            "h": 300,
+            "title": "海报 3",
+            "prompt": "参考 @卖点拆解·海报3，基于产品图生成竖版卖点海报"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_ecom_1",
+            "from": "tpl-ecom-product",
+            "to": "tpl-ecom-breakdown"
+          },
+          {
+            "id": "e_ecom_2",
+            "from": "tpl-ecom-info",
+            "to": "tpl-ecom-breakdown"
+          },
+          {
+            "id": "e_ecom_3",
+            "from": "tpl-ecom-product",
+            "to": "tpl-ecom-poster-1"
+          },
+          {
+            "id": "e_ecom_4",
+            "from": "tpl-ecom-product",
+            "to": "tpl-ecom-poster-2"
+          },
+          {
+            "id": "e_ecom_5",
+            "from": "tpl-ecom-product",
+            "to": "tpl-ecom-poster-3"
+          },
+          {
+            "id": "e_ecom_6",
+            "from": "tpl-ecom-breakdown",
+            "to": "tpl-ecom-poster-1"
+          },
+          {
+            "id": "e_ecom_7",
+            "from": "tpl-ecom-breakdown",
+            "to": "tpl-ecom-poster-2"
+          },
+          {
+            "id": "e_ecom_8",
+            "from": "tpl-ecom-breakdown",
+            "to": "tpl-ecom-poster-3"
+          }
+        ]
+      },
+      "sections": {
+        "what": "把产品信息和产品图整理成 3 个卖点海报方案，再逐张出图。",
+        "context": "产品图、产品与卖点信息、目标人群与风格偏好。",
+        "how": "立即体验会一次性建好 6 个节点并连好：产品图、产品信息、卖点拆解、海报 1/2/3（产品图与卖点拆解都连到 3 张海报，共 8 条连线）。",
+        "output": "一张新画布：6 个节点 + 8 条连线，卖点拆解节点带好提示词。",
+        "scope": "只创建节点与连线，不会自动生成；出图需要你可用的图片模型。",
+        "followUp": "先填产品信息与产品图，生成卖点拆解后再逐张出海报。"
+      },
+      "ratio": "2/3",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "卖点套图",
+          "description": "卖点拆解→3 张海报"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型",
+        "素材库"
+      ]
+    },
+    {
+      "id": "tpl-table-batch",
+      "name": "表格批量出图",
+      "version": "1.0.0",
+      "kind": "text",
+      "category": "ecommerce-ads",
+      "summary": "文本任务拆解 → 多维表格 → 逐行出图：适合一次做 4 张不同场景的宣传图。",
+      "prompt": "把下面的产品拆成 4 张不同场景的宣传图任务",
+      "nodeTitle": "任务拆解",
+      "tags": [
+        "批量",
+        "表格",
+        "模板"
+      ],
+      "publishedAt": 1760476800000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "任务拆解",
+          "detail": "文本节点，输出类型设为「多维表格」，提示词：把下面的产品拆成 4 张不同场景的宣传图任务"
+        },
+        {
+          "title": "多维表格",
+          "detail": "表格节点，承接逐行任务"
+        },
+        {
+          "title": "逐行出图",
+          "detail": "图片节点，提示词：按这一行的描述生成宣传图，主体保持一致"
+        },
+        {
+          "title": "连线",
+          "detail": "任务拆解 → 多维表格 → 逐行出图"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-tb-breakdown",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 240,
+            "title": "任务拆解",
+            "prompt": "把下面的产品拆成 4 张不同场景的宣传图任务",
+            "params": {
+              "output": "table"
+            }
+          },
+          {
+            "id": "tpl-tb-table",
+            "kind": "table",
+            "x": 440,
+            "y": 0,
+            "w": 420,
+            "h": 240,
+            "title": "多维表格",
+            "table": {
+              "title": "多维表格",
+              "columns": [
+                "场景",
+                "画面描述",
+                "比例"
+              ],
+              "rows": [
+                [
+                  "",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "",
+                  ""
+                ]
+              ]
+            }
+          },
+          {
+            "id": "tpl-tb-image",
+            "kind": "image",
+            "x": 1000,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "逐行出图",
+            "prompt": "按这一行的描述生成宣传图，主体保持一致"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_tb_1",
+            "from": "tpl-tb-breakdown",
+            "to": "tpl-tb-table"
+          },
+          {
+            "id": "e_tb_2",
+            "from": "tpl-tb-table",
+            "to": "tpl-tb-image"
+          }
+        ]
+      },
+      "sections": {
+        "what": "把一个产品的宣传需求拆成多行任务，按行批量出图。",
+        "context": "产品信息与想要的场景方向；需要可用的对话模型（拆解）与图片模型（出图）。",
+        "how": "立即体验会创建「任务拆解」（文本，输出多维表格）、「多维表格」、「逐行出图」三个节点并连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线，任务拆解节点带好提示词。",
+        "scope": "只创建节点与连线，不会自动生成；批量执行需要你确认。",
+        "followUp": "先跑任务拆解得到表格，再按行生成。"
+      },
+      "ratio": "16/9",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "批量出图",
+          "description": "表格逐行生成宣传图"
+        }
+      ],
+      "tools": [
+        "画布",
+        "表格",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-storyboard-video",
+      "name": "分镜表到视频",
+      "version": "1.0.0",
+      "kind": "text",
+      "category": "film-creative",
+      "summary": "一句创意 → 分镜表 → 逐镜头视频：适合把想法快速落成一条片子。",
+      "prompt": "一条 15 秒的产品开箱短片，节奏由慢到快",
+      "nodeTitle": "创意",
+      "tags": [
+        "分镜",
+        "视频",
+        "模板"
+      ],
+      "publishedAt": 1760682000000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "创意",
+          "detail": "文本节点，输出类型设为「分镜表」，提示词：一条 15 秒的产品开箱短片，节奏由慢到快"
+        },
+        {
+          "title": "分镜表",
+          "detail": "表格节点，逐行承接镜头"
+        },
+        {
+          "title": "逐镜头视频",
+          "detail": "视频节点，提示词：按这一行的镜头描述生成"
+        },
+        {
+          "title": "连线",
+          "detail": "创意 → 分镜表 → 逐镜头视频"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-sb-idea",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 240,
+            "title": "创意",
+            "prompt": "一条 15 秒的产品开箱短片，节奏由慢到快",
+            "params": {
+              "output": "storyboard"
+            }
+          },
+          {
+            "id": "tpl-sb-storyboard",
+            "kind": "table",
+            "x": 440,
+            "y": 0,
+            "w": 460,
+            "h": 240,
+            "title": "分镜表",
+            "table": {
+              "title": "分镜表",
+              "columns": [
+                "镜头",
+                "画面",
+                "运镜",
+                "时长",
+                "台词 / 字幕"
+              ],
+              "rows": [
+                [
+                  "",
+                  "",
+                  "",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "",
+                  "",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "",
+                  "",
+                  "",
+                  ""
+                ]
+              ]
+            }
+          },
+          {
+            "id": "tpl-sb-video",
+            "kind": "video",
+            "x": 1040,
+            "y": 0,
+            "w": 340,
+            "h": 220,
+            "title": "逐镜头视频",
+            "prompt": "按这一行的镜头描述生成"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_sb_1",
+            "from": "tpl-sb-idea",
+            "to": "tpl-sb-storyboard"
+          },
+          {
+            "id": "e_sb_2",
+            "from": "tpl-sb-storyboard",
+            "to": "tpl-sb-video"
+          }
+        ]
+      },
+      "sections": {
+        "what": "把一句创意拆成分镜表，再逐镜头生成视频。",
+        "context": "一句创意（可再补产品信息）；需要可用的对话模型与视频模型。",
+        "how": "立即体验会创建「创意」（文本，输出分镜表）、「分镜表」、「逐镜头视频」三个节点并连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线，创意节点带好提示词。",
+        "scope": "只创建节点与连线，不会自动生成；逐镜头生成需要你确认。",
+        "followUp": "先跑创意得到分镜表，再按行生成视频。"
+      },
+      "ratio": "16/9",
+      "modelHint": "视频模型",
+      "useCases": [
+        {
+          "title": "分镜成片",
+          "description": "分镜表逐镜头生成"
+        }
+      ],
+      "tools": [
+        "画布",
+        "表格",
+        "视频模型"
+      ]
+    },
+    {
+      "id": "tpl-text-to-image",
+      "name": "文字生图",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "brand-design",
+      "summary": "一句画面描述 → 一张成品图：一个带提示词的文本节点加一个图片节点，改词就能重出。",
+      "prompt": "极简产品台面：一只白色陶瓷杯放在浅灰水泥台上，左侧柔光，背景虚化，商业摄影",
+      "nodeTitle": "画面描述",
+      "tags": [
+        "文生图",
+        "画面描述",
+        "品牌视觉"
+      ],
+      "publishedAt": 1788339600000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "画面描述",
+          "detail": "文本节点，写下主体、光线、构图与风格"
+        },
+        {
+          "title": "成品图",
+          "detail": "图片节点，提示词：极简产品台面：一只白色陶瓷杯放在浅灰水泥台上，左侧柔光，背景虚化，商业摄影"
+        },
+        {
+          "title": "连线",
+          "detail": "画面描述 → 成品图，按上游文字出图"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-t2i-brief",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "画面描述",
+            "text": "主体：\n光线：\n构图：\n风格："
+          },
+          {
+            "id": "tpl-t2i-output",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "成品图",
+            "prompt": "极简产品台面：一只白色陶瓷杯放在浅灰水泥台上，左侧柔光，背景虚化，商业摄影"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_t2i_1",
+            "from": "tpl-t2i-brief",
+            "to": "tpl-t2i-output"
+          }
+        ]
+      },
+      "sections": {
+        "what": "把一句画面描述落成一张成品图，节点和连线已经铺好。",
+        "context": "一句能说清主体、光线与构图的描述；以及可用的图片模型。",
+        "how": "立即体验会建好「画面描述」文本节点与「成品图」图片节点并连好。",
+        "output": "一张新画布：2 个节点 + 1 条连线。",
+        "scope": "只建节点与连线，不会自动出图或扣费。",
+        "followUp": "改描述里的主体与光线，再点生成对比效果。"
+      },
+      "ratio": "1/1",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "一句话出图",
+          "description": "描述 → 成品图"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-product-scene",
+      "name": "商品场景合成",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "brand-design",
+      "summary": "商品图先去背、再合成到指定场景，三步串成一条商品场景工作流。",
+      "prompt": "把这只商品放进午后咖啡馆的木桌上，旁边有咖啡杯与绿植，暖色侧光，浅景深",
+      "nodeTitle": "商品原图",
+      "tags": [
+        "商品图",
+        "去背",
+        "场景合成"
+      ],
+      "publishedAt": 1788598800000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "商品原图",
+          "detail": "图片节点，放需要合成的商品图"
+        },
+        {
+          "title": "去背白底",
+          "detail": "图片节点，提示词：去掉原图背景，主体边缘干净，纯白背景，保留投影"
+        },
+        {
+          "title": "场景画面",
+          "detail": "图片节点，提示词：把这只商品放进午后咖啡馆的木桌上，旁边有咖啡杯与绿植，暖色侧光，浅景深"
+        },
+        {
+          "title": "连线",
+          "detail": "商品原图 → 去背白底 → 场景画面，前一步的输出是后一步的参考"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-prodscene-source",
+            "kind": "image",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "商品原图"
+          },
+          {
+            "id": "tpl-prodscene-cutout",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "去背白底",
+            "prompt": "去掉原图背景，主体边缘干净，纯白背景，保留投影"
+          },
+          {
+            "id": "tpl-prodscene-scene",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "场景画面",
+            "prompt": "把这只商品放进午后咖啡馆的木桌上，旁边有咖啡杯与绿植，暖色侧光，浅景深"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_prodscene_1",
+            "from": "tpl-prodscene-source",
+            "to": "tpl-prodscene-cutout"
+          },
+          {
+            "id": "e_prodscene_2",
+            "from": "tpl-prodscene-cutout",
+            "to": "tpl-prodscene-scene"
+          }
+        ]
+      },
+      "sections": {
+        "what": "先抠干净主体，再把它放进真实感的场景里，商品图不再只有白底一张。",
+        "context": "一张商品原图；以及你想让商品出现在什么场景。",
+        "how": "立即体验会建好「商品原图」「去背白底」「场景画面」三个图片节点并依次连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，原图为空时不会凭空造图。",
+        "followUp": "先出白底图确认边缘，再改场景描述重出。"
+      },
+      "ratio": "4/5",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "场景化商品图",
+          "description": "去背 → 合成场景"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型",
+        "素材库"
+      ]
+    },
+    {
+      "id": "tpl-brand-board",
+      "name": "品牌视觉板",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "brand-design",
+      "summary": "品牌关键词 → 视觉方向 → 一张品牌版面，配色、字体与主视觉一次定调。",
+      "prompt": "为「山野茶事」做品牌视觉板：主色墨绿与米白，衬线标题字，主视觉是一杯热茶与雾气",
+      "nodeTitle": "品牌关键词",
+      "tags": [
+        "品牌",
+        "视觉板",
+        "配色"
+      ],
+      "publishedAt": 1788858000000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "品牌关键词",
+          "detail": "文本节点，填品牌名、行业、想要的气质与不想要的"
+        },
+        {
+          "title": "视觉方向",
+          "detail": "文本节点，提示词：列出主色、辅助色与标题字体，再说清三个画面元素与整体气质"
+        },
+        {
+          "title": "品牌版面",
+          "detail": "图片节点，提示词：为「山野茶事」做品牌视觉板：主色墨绿与米白，衬线标题字，主视觉是一杯热茶与雾气"
+        },
+        {
+          "title": "连线",
+          "detail": "品牌关键词 → 视觉方向 → 品牌版面"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-brandboard-brief",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "品牌关键词",
+            "text": "品牌名：\n行业：\n想要的气质：\n不想要的："
+          },
+          {
+            "id": "tpl-brandboard-direction",
+            "kind": "text",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "视觉方向",
+            "prompt": "列出主色、辅助色与标题字体，再说清三个画面元素与整体气质"
+          },
+          {
+            "id": "tpl-brandboard-board",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "品牌版面",
+            "prompt": "为「山野茶事」做品牌视觉板：主色墨绿与米白，衬线标题字，主视觉是一杯热茶与雾气"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_brandboard_1",
+            "from": "tpl-brandboard-brief",
+            "to": "tpl-brandboard-direction"
+          },
+          {
+            "id": "e_brandboard_2",
+            "from": "tpl-brandboard-direction",
+            "to": "tpl-brandboard-board"
+          }
+        ]
+      },
+      "sections": {
+        "what": "把品牌气质先落成文字方向，再压成一张能拿去开会的视觉板。",
+        "context": "品牌名、行业与想要的气质；要有可用的对话模型与图片模型。",
+        "how": "立即体验会建好「品牌关键词」「视觉方向」「品牌版面」三个节点并依次连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，不会自动调用模型或扣费。",
+        "followUp": "先定视觉方向再出图，换主色时只改方向节点重跑。"
+      },
+      "ratio": "3/2",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "开案定调",
+          "description": "关键词 → 方向 → 版面"
+        }
+      ],
+      "tools": [
+        "画布",
+        "对话模型",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-sticker-pack",
+      "name": "贴纸表情包",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "brand-design",
+      "summary": "角色描述 → 一张贴纸母版 → 一组表情变体，聊天贴纸与周边都能用。",
+      "prompt": "把这只柴犬角色做成九张贴纸：开心、疑惑、加班、吃饭、睡觉、点赞、生气、流泪、摸鱼，白边描边，纯色背景",
+      "nodeTitle": "角色描述",
+      "tags": [
+        "贴纸",
+        "表情",
+        "周边"
+      ],
+      "publishedAt": 1789117200000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "角色描述",
+          "detail": "文本节点，写角色外形、性格与画风"
+        },
+        {
+          "title": "贴纸母版",
+          "detail": "图片节点，提示词：一只圆润的柴犬角色，正面站立，黑色描边，纯白背景，扁平插画"
+        },
+        {
+          "title": "表情变体",
+          "detail": "图片节点，提示词：把这只柴犬角色做成九张贴纸：开心、疑惑、加班、吃饭、睡觉、点赞、生气、流泪、摸鱼，白边描边，纯色背景"
+        },
+        {
+          "title": "连线",
+          "detail": "角色描述 → 贴纸母版 → 表情变体，母版保证同一个角色"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-stickers-brief",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "角色描述",
+            "text": "角色：\n性格：\n画风：\n用在哪："
+          },
+          {
+            "id": "tpl-stickers-base",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "贴纸母版",
+            "prompt": "一只圆润的柴犬角色，正面站立，黑色描边，纯白背景，扁平插画"
+          },
+          {
+            "id": "tpl-stickers-set",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "表情变体",
+            "prompt": "把这只柴犬角色做成九张贴纸：开心、疑惑、加班、吃饭、睡觉、点赞、生气、流泪、摸鱼，白边描边，纯色背景"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_stickers_1",
+            "from": "tpl-stickers-brief",
+            "to": "tpl-stickers-base"
+          },
+          {
+            "id": "e_stickers_2",
+            "from": "tpl-stickers-base",
+            "to": "tpl-stickers-set"
+          }
+        ]
+      },
+      "sections": {
+        "what": "先定一个角色母版，再批量出表情变体，整组贴纸风格不会跑。",
+        "context": "角色的外形与性格描述；以及想要的贴纸情绪清单。",
+        "how": "立即体验会建好「角色描述」「贴纸母版」「表情变体」三个节点并依次连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，生成需要可用的图片模型与你确认。",
+        "followUp": "母版满意后再改表情清单，一次重出整组。"
+      },
+      "ratio": "1/1",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "贴纸包",
+          "description": "母版 → 表情变体"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型",
+        "素材库"
+      ]
+    },
+    {
+      "id": "tpl-character-turnaround",
+      "name": "角色三视图",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "film-creative",
+      "summary": "一份角色设定 → 正面、侧面、背面三张设定图，剧集与游戏都能直接对上。",
+      "prompt": "按设定画角色正面图：全身，站姿，平光，纯色背景，比例准确",
+      "nodeTitle": "角色设定",
+      "tags": [
+        "角色设定",
+        "三视图",
+        "设定稿"
+      ],
+      "publishedAt": 1789376400000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "角色设定",
+          "detail": "文本节点，填姓名、年龄、体型、服装与关键道具"
+        },
+        {
+          "title": "正面图",
+          "detail": "图片节点，提示词：按设定画角色正面图：全身，站姿，平光，纯色背景，比例准确"
+        },
+        {
+          "title": "侧面与背面",
+          "detail": "图片节点，提示词：同一角色画侧面图／背面图，与正面图比例、服装一致"
+        },
+        {
+          "title": "连线",
+          "detail": "角色设定 → 正面图／侧面图／背面图，三张共用同一份设定"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-turnaround-brief",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "角色设定",
+            "text": "姓名：\n年龄：\n体型：\n服装：\n关键道具："
+          },
+          {
+            "id": "tpl-turnaround-front",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "正面图",
+            "prompt": "按设定画角色正面图：全身，站姿，平光，纯色背景，比例准确"
+          },
+          {
+            "id": "tpl-turnaround-side",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "侧面图",
+            "prompt": "同一角色画侧面图：全身，站姿，平光，纯色背景，与正面图比例一致"
+          },
+          {
+            "id": "tpl-turnaround-back",
+            "kind": "image",
+            "x": 1620,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "背面图",
+            "prompt": "同一角色画背面图：全身，站姿，平光，纯色背景，服装细节与正面图一致"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_turnaround_1",
+            "from": "tpl-turnaround-brief",
+            "to": "tpl-turnaround-front"
+          },
+          {
+            "id": "e_turnaround_2",
+            "from": "tpl-turnaround-brief",
+            "to": "tpl-turnaround-side"
+          },
+          {
+            "id": "e_turnaround_3",
+            "from": "tpl-turnaround-brief",
+            "to": "tpl-turnaround-back"
+          }
+        ]
+      },
+      "sections": {
+        "what": "把文字设定变成三视图，让美术与建模拿到同一份参照。",
+        "context": "一份写清外形、服装与道具的角色设定；以及可用的图片模型。",
+        "how": "立即体验会建好「角色设定」文本节点与正面、侧面、背面三个图片节点，并全部连到设定上。",
+        "output": "一张新画布：4 个节点 + 3 条连线。",
+        "scope": "只建节点与连线，三张图都为空位，不会自动生成。",
+        "followUp": "先出正面图确认比例，再拿正面图当参考补侧面与背面。"
+      },
+      "ratio": "3/2",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "角色设定",
+          "description": "设定 → 三视图"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型",
+        "素材库"
+      ]
+    },
+    {
+      "id": "tpl-image-to-video",
+      "name": "参考图生视频",
+      "version": "1.0.0",
+      "kind": "video",
+      "category": "film-creative",
+      "summary": "一张参考图配一句运动描述，镜头真的动起来：参考图与短片节点已连好。",
+      "prompt": "参考这张图的构图与配色，生成 5 秒视频：镜头推近，水面泛起涟漪，光线渐暖",
+      "nodeTitle": "参考图",
+      "tags": [
+        "图生视频",
+        "镜头运动",
+        "参考图"
+      ],
+      "publishedAt": 1789635600000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "参考图",
+          "detail": "图片节点，放要沿用的画面"
+        },
+        {
+          "title": "运动描述",
+          "detail": "文本节点，提示词：写一句镜头运动与氛围变化，例如：镜头缓慢推近，光线由冷转暖"
+        },
+        {
+          "title": "短片",
+          "detail": "视频节点，提示词：参考这张图的构图与配色，生成 5 秒视频：镜头推近，水面泛起涟漪，光线渐暖"
+        },
+        {
+          "title": "连线",
+          "detail": "参考图与运动描述都连到短片，图定画面、字定运动"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-i2vref-image",
+            "kind": "image",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "参考图"
+          },
+          {
+            "id": "tpl-i2vref-motion",
+            "kind": "text",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "运动描述",
+            "prompt": "写一句镜头运动与氛围变化，例如：镜头缓慢推近，光线由冷转暖"
+          },
+          {
+            "id": "tpl-i2vref-video",
+            "kind": "video",
+            "x": 1080,
+            "y": 0,
+            "w": 340,
+            "h": 220,
+            "title": "短片",
+            "prompt": "参考这张图的构图与配色，生成 5 秒视频：镜头推近，水面泛起涟漪，光线渐暖",
+            "params": {
+              "dur": 5
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_i2vref_1",
+            "from": "tpl-i2vref-image",
+            "to": "tpl-i2vref-video"
+          },
+          {
+            "id": "e_i2vref_2",
+            "from": "tpl-i2vref-motion",
+            "to": "tpl-i2vref-video"
+          }
+        ]
+      },
+      "sections": {
+        "what": "用一张现成的图锁住画面，再用文字控制镜头怎么动。",
+        "context": "一张参考图与一句运动描述；需要可用的视频模型。",
+        "how": "立即体验会建好「参考图」「运动描述」「短片」三个节点，并把图和描述都连到短片。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，不会自动生成或扣费。",
+        "followUp": "拖入参考图，改一句运动描述后再点生成。"
+      },
+      "ratio": "16/9",
+      "modelHint": "视频模型",
+      "useCases": [
+        {
+          "title": "图生视频",
+          "description": "参考图 + 运动描述"
+        }
+      ],
+      "tools": [
+        "画布",
+        "视频模型",
+        "素材库"
+      ]
+    },
+    {
+      "id": "tpl-ecom-detail-long",
+      "name": "详情页长图",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "ecommerce-ads",
+      "summary": "卖点脚本 → 详情页首屏、卖点屏、场景屏三张竖版稿，拼起来就是长图。",
+      "prompt": "生成详情页第一屏：主图加主标题加一句核心卖点，竖版 3:4，四周留页边距",
+      "nodeTitle": "卖点脚本",
+      "tags": [
+        "详情页",
+        "长图",
+        "电商"
+      ],
+      "publishedAt": 1789894800000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "卖点脚本",
+          "detail": "文本节点，提示词：按「痛点—卖点—证据」写详情页三段文案，每段不超过两行"
+        },
+        {
+          "title": "首屏",
+          "detail": "图片节点，提示词：生成详情页第一屏：主图加主标题加一句核心卖点，竖版 3:4，四周留页边距"
+        },
+        {
+          "title": "卖点屏",
+          "detail": "图片节点，提示词：三个卖点图标加一段说明，与首屏风格一致"
+        },
+        {
+          "title": "场景屏",
+          "detail": "图片节点，提示词：使用场景实拍感画面，底部留出参数区"
+        },
+        {
+          "title": "连线",
+          "detail": "卖点脚本 → 首屏／卖点屏／场景屏，三屏共用一份文案"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-detaillong-copy",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "卖点脚本",
+            "prompt": "按「痛点—卖点—证据」写详情页三段文案，每段不超过两行"
+          },
+          {
+            "id": "tpl-detaillong-first",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "首屏",
+            "prompt": "生成详情页第一屏：主图加主标题加一句核心卖点，竖版 3:4，四周留页边距"
+          },
+          {
+            "id": "tpl-detaillong-point",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "卖点屏",
+            "prompt": "生成详情页第二屏：三个卖点图标加一段说明，竖版 3:4，风格与首屏一致"
+          },
+          {
+            "id": "tpl-detaillong-scene",
+            "kind": "image",
+            "x": 1080,
+            "y": 360,
+            "w": 300,
+            "h": 300,
+            "title": "场景屏",
+            "prompt": "生成详情页第三屏：使用场景实拍感画面，竖版 3:4，底部留出参数区"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_detaillong_1",
+            "from": "tpl-detaillong-copy",
+            "to": "tpl-detaillong-first"
+          },
+          {
+            "id": "e_detaillong_2",
+            "from": "tpl-detaillong-copy",
+            "to": "tpl-detaillong-point"
+          },
+          {
+            "id": "e_detaillong_3",
+            "from": "tpl-detaillong-copy",
+            "to": "tpl-detaillong-scene"
+          }
+        ]
+      },
+      "sections": {
+        "what": "把详情页拆成首屏、卖点屏、场景屏三屏，各自出图后再拼成一张长图。",
+        "context": "产品的痛点、卖点与证据；以及可用的图片模型。",
+        "how": "立即体验会建好「卖点脚本」文本节点与三个图片节点，三屏都连到脚本。",
+        "output": "一张新画布：4 个节点 + 3 条连线。",
+        "scope": "只建节点与连线，不会自动出图或扣费。",
+        "followUp": "先写脚本再逐屏生成，拼图与切图在画布外完成。"
+      },
+      "ratio": "9/16",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "详情页三屏",
+          "description": "脚本 → 首屏/卖点/场景"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型",
+        "表格"
+      ]
+    },
+    {
+      "id": "tpl-ecom-hero-triptych",
+      "name": "主图三连",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "ecommerce-ads",
+      "summary": "一张产品图 → 白底主图、场景主图、细节特写三张，凑齐商品首图组。",
+      "prompt": "白底主图：产品居中，纯白背景，柔和投影，顶部留白放价格标签",
+      "nodeTitle": "产品图",
+      "tags": [
+        "主图",
+        "商品图",
+        "三连"
+      ],
+      "publishedAt": 1790154000000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "产品图",
+          "detail": "图片节点，放一张清晰的产品图"
+        },
+        {
+          "title": "白底主图",
+          "detail": "图片节点，提示词：产品居中，纯白背景，柔和投影，顶部留白放价格标签"
+        },
+        {
+          "title": "场景主图",
+          "detail": "图片节点，提示词：产品放在原木桌面，晨光斜照，背景是家居环境"
+        },
+        {
+          "title": "细节特写",
+          "detail": "图片节点，提示词：镜头贴近材质纹理，浅景深，突出做工与接缝"
+        },
+        {
+          "title": "连线",
+          "detail": "产品图 → 三张主图，三张共用同一张产品图"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-triptych-product",
+            "kind": "image",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "产品图"
+          },
+          {
+            "id": "tpl-triptych-white",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "白底主图",
+            "prompt": "白底主图：产品居中，纯白背景，柔和投影，顶部留白放价格标签"
+          },
+          {
+            "id": "tpl-triptych-scene",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "场景主图",
+            "prompt": "场景主图：产品放在原木桌面，晨光斜照，背景是家居环境，主体不过曝"
+          },
+          {
+            "id": "tpl-triptych-detail",
+            "kind": "image",
+            "x": 1620,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "细节特写",
+            "prompt": "细节特写：镜头贴近产品材质纹理，浅景深，突出做工与接缝"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_triptych_1",
+            "from": "tpl-triptych-product",
+            "to": "tpl-triptych-white"
+          },
+          {
+            "id": "e_triptych_2",
+            "from": "tpl-triptych-product",
+            "to": "tpl-triptych-scene"
+          },
+          {
+            "id": "e_triptych_3",
+            "from": "tpl-triptych-product",
+            "to": "tpl-triptych-detail"
+          }
+        ]
+      },
+      "sections": {
+        "what": "用一张产品图派生出三种用途的主图，避免每张都从头描述。",
+        "context": "一张清晰、无遮挡的产品图；以及可用的图片模型。",
+        "how": "立即体验会建好「产品图」与三张主图节点，三张都连到产品图。",
+        "output": "一张新画布：4 个节点 + 3 条连线。",
+        "scope": "只建节点与连线，产品图为空时不会凭空造图。",
+        "followUp": "先出白底主图，再把满意的白底图连同场景描述一起重出。"
+      },
+      "ratio": "1/1",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "首图组",
+          "description": "一张产品图 → 三张主图"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-ecom-aplus",
+      "name": "A+ 卖点图",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "ecommerce-ads",
+      "summary": "卖点拆成表格 → 按行生成多屏卖点图，详情页 A+ 模块一屏屏补齐。",
+      "prompt": "把产品拆成 4 行卖点，每行给出场景、画面、文案与比例",
+      "nodeTitle": "卖点拆解",
+      "tags": [
+        "A+",
+        "卖点",
+        "批量"
+      ],
+      "publishedAt": 1790413200000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "卖点拆解",
+          "detail": "文本节点，输出类型设为「多维表格」，提示词：把产品拆成 4 行卖点，每行给出场景、画面、文案与比例"
+        },
+        {
+          "title": "卖点表",
+          "detail": "表格节点，逐行承接卖点，先空三行等你填"
+        },
+        {
+          "title": "卖点图",
+          "detail": "图片节点，提示词：按这一行的画面与文案生成一张卖点图，比例按这一行"
+        },
+        {
+          "title": "连线",
+          "detail": "卖点拆解 → 卖点表 → 卖点图"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-aplus-breakdown",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "卖点拆解",
+            "prompt": "把产品拆成 4 行卖点，每行给出场景、画面、文案与比例",
+            "params": {
+              "output": "table"
+            }
+          },
+          {
+            "id": "tpl-aplus-table",
+            "kind": "table",
+            "x": 540,
+            "y": 0,
+            "w": 460,
+            "h": 240,
+            "title": "卖点表",
+            "table": {
+              "title": "卖点表",
+              "columns": [
+                "卖点",
+                "画面",
+                "文案",
+                "比例"
+              ],
+              "rows": [
+                [
+                  "",
+                  "",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "",
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  "",
+                  "",
+                  ""
+                ]
+              ]
+            }
+          },
+          {
+            "id": "tpl-aplus-image",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "卖点图",
+            "prompt": "按这一行的画面与文案生成一张卖点图，比例按这一行"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_aplus_1",
+            "from": "tpl-aplus-breakdown",
+            "to": "tpl-aplus-table"
+          },
+          {
+            "id": "e_aplus_2",
+            "from": "tpl-aplus-table",
+            "to": "tpl-aplus-image"
+          }
+        ]
+      },
+      "sections": {
+        "what": "先把卖点拆成结构化表格，再按行出图，A+ 每一屏都有出处。",
+        "context": "产品信息与要强调的卖点；需要对话模型拆解与图片模型出图。",
+        "how": "立即体验会建好「卖点拆解」（文本，输出多维表格）、「卖点表」、「卖点图」三个节点并连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线，表格已带好列名。",
+        "scope": "只建节点与连线，批量执行需要你确认。",
+        "followUp": "先跑拆解得到表格，再逐行出图。"
+      },
+      "ratio": "3/2",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "A+ 模块",
+          "description": "表格逐行出卖点图"
+        }
+      ],
+      "tools": [
+        "画布",
+        "表格",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-ecom-multilang",
+      "name": "多语种改版",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "ecommerce-ads",
+      "summary": "一份中文卖点 → 多语种文案 → 对应语言的海报，出海素材一次改完。",
+      "prompt": "把这段卖点改写成英语、日语、西班牙语三版，语气口语化，长度接近原文",
+      "nodeTitle": "中文卖点",
+      "tags": [
+        "多语种",
+        "出海",
+        "本地化"
+      ],
+      "publishedAt": 1790672400000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "中文卖点",
+          "detail": "文本节点，填产品、卖点、目标市场与语气"
+        },
+        {
+          "title": "多语种文案",
+          "detail": "文本节点，提示词：把这段卖点改写成英语、日语、西班牙语三版，语气口语化，长度接近原文"
+        },
+        {
+          "title": "本地化海报",
+          "detail": "图片节点，提示词：用日语版文案生成竖版海报，日系极简排版，产品图保持一致"
+        },
+        {
+          "title": "连线",
+          "detail": "中文卖点 → 多语种文案 → 本地化海报"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-multilang-cn",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "中文卖点",
+            "text": "产品：\n卖点：\n目标市场：\n语气："
+          },
+          {
+            "id": "tpl-multilang-copy",
+            "kind": "text",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "多语种文案",
+            "prompt": "把这段卖点改写成英语、日语、西班牙语三版，语气口语化，长度接近原文"
+          },
+          {
+            "id": "tpl-multilang-poster",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "本地化海报",
+            "prompt": "用日语版文案生成竖版海报：日系极简排版，产品图保持一致，底部留出信息条"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_multilang_1",
+            "from": "tpl-multilang-cn",
+            "to": "tpl-multilang-copy"
+          },
+          {
+            "id": "e_multilang_2",
+            "from": "tpl-multilang-copy",
+            "to": "tpl-multilang-poster"
+          }
+        ]
+      },
+      "sections": {
+        "what": "中文卖点先翻成多语种，再按目标语言出海报，避免逐张重写文案。",
+        "context": "一份中文卖点、目标市场与语气；需要对话模型与图片模型。",
+        "how": "立即体验会建好「中文卖点」「多语种文案」「本地化海报」三个节点并依次连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，翻译与出图都需要你点生成。",
+        "followUp": "先确认译文再出海报，换语种只改文案节点。"
+      },
+      "ratio": "2/3",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "出海改版",
+          "description": "中文卖点 → 多语海报"
+        }
+      ],
+      "tools": [
+        "画布",
+        "对话模型",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-game-level-scene",
+      "name": "关卡场景设定",
+      "version": "1.0.0",
+      "kind": "video",
+      "category": "interactive-games",
+      "summary": "一段关卡描述 → 场景概念图 → 场景巡游视频，先对齐氛围再谈玩法。",
+      "prompt": "雨夜霓虹街区的巷口关卡：积水地面反射招牌，两侧卷帘门，远处有高架桥",
+      "nodeTitle": "关卡描述",
+      "tags": [
+        "关卡",
+        "场景",
+        "概念图"
+      ],
+      "publishedAt": 1790931600000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "关卡描述",
+          "detail": "文本节点，提示词：描述关卡目标、地形、氛围与玩家第一眼看到的东西"
+        },
+        {
+          "title": "场景概念图",
+          "detail": "图片节点，提示词：雨夜霓虹街区的巷口关卡：积水地面反射招牌，两侧卷帘门，远处有高架桥"
+        },
+        {
+          "title": "场景巡游",
+          "detail": "视频节点，提示词：从巷口缓慢向前推进，雨滴打在积水上，招牌灯光闪烁"
+        },
+        {
+          "title": "连线",
+          "detail": "关卡描述 → 场景概念图 → 场景巡游"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-level-brief",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "关卡描述",
+            "prompt": "描述关卡目标、地形、氛围与玩家第一眼看到的东西"
+          },
+          {
+            "id": "tpl-level-concept",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "场景概念图",
+            "prompt": "雨夜霓虹街区的巷口关卡：积水地面反射招牌，两侧卷帘门，远处有高架桥"
+          },
+          {
+            "id": "tpl-level-tour",
+            "kind": "video",
+            "x": 1080,
+            "y": 0,
+            "w": 340,
+            "h": 220,
+            "title": "场景巡游",
+            "prompt": "从巷口缓慢向前推进，镜头贴近地面，雨滴打在积水上，招牌灯光闪烁",
+            "params": {
+              "dur": 6
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_level_1",
+            "from": "tpl-level-brief",
+            "to": "tpl-level-concept"
+          },
+          {
+            "id": "e_level_2",
+            "from": "tpl-level-concept",
+            "to": "tpl-level-tour"
+          }
+        ]
+      },
+      "sections": {
+        "what": "把关卡氛围先画出来再让它动起来，方便和玩法、美术一起对。",
+        "context": "一段写清地形与氛围的关卡描述；需要图像模型与视频模型。",
+        "how": "立即体验会建好「关卡描述」「场景概念图」「场景巡游」三个节点并依次连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，不会自动生成或扣费。",
+        "followUp": "先定概念图，再用巡游视频检查走位与视线引导。"
+      },
+      "ratio": "16/9",
+      "modelHint": "视频模型",
+      "useCases": [
+        {
+          "title": "关卡预演",
+          "description": "描述 → 概念图 → 巡游"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型",
+        "视频模型"
+      ]
+    },
+    {
+      "id": "tpl-game-ui-screen",
+      "name": "游戏 UI 界面稿",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "interactive-games",
+      "summary": "一句界面需求 → 主界面稿 → 按钮与图标切图，结构定了再补素材。",
+      "prompt": "设计一张竖版手游主界面：顶部资源栏，中间角色立绘位，底部四个功能按钮，深色主题配金色描边",
+      "nodeTitle": "界面需求",
+      "tags": [
+        "UI",
+        "界面稿",
+        "手游"
+      ],
+      "publishedAt": 1791190800000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "界面需求",
+          "detail": "文本节点，提示词：写清页面类型、信息层级、主按钮与主题色"
+        },
+        {
+          "title": "界面稿",
+          "detail": "图片节点，提示词：设计一张竖版手游主界面：顶部资源栏，中间角色立绘位，底部四个功能按钮，深色主题配金色描边"
+        },
+        {
+          "title": "控件切图",
+          "detail": "图片节点，提示词：按界面稿拆出按钮与图标素材，透明背景，等距排列"
+        },
+        {
+          "title": "连线",
+          "detail": "界面需求 → 界面稿 → 控件切图"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-uiscreen-brief",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "界面需求",
+            "prompt": "写清页面类型、信息层级、主按钮与主题色"
+          },
+          {
+            "id": "tpl-uiscreen-layout",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "界面稿",
+            "prompt": "设计一张竖版手游主界面：顶部资源栏，中间角色立绘位，底部四个功能按钮，深色主题配金色描边"
+          },
+          {
+            "id": "tpl-uiscreen-assets",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "控件切图",
+            "prompt": "按界面稿拆出按钮与图标素材：四个功能按钮、两个资源图标，透明背景，等距排列"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_uiscreen_1",
+            "from": "tpl-uiscreen-brief",
+            "to": "tpl-uiscreen-layout"
+          },
+          {
+            "id": "e_uiscreen_2",
+            "from": "tpl-uiscreen-layout",
+            "to": "tpl-uiscreen-assets"
+          }
+        ]
+      },
+      "sections": {
+        "what": "先把界面结构画出来，再按稿拆控件素材，UI 与程序拿到同一份参照。",
+        "context": "一段说清页面类型与信息层级的界面需求；需要图像模型。",
+        "how": "立即体验会建好「界面需求」「界面稿」「控件切图」三个节点并依次连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，不会自动出图或扣费。",
+        "followUp": "界面稿定稿后再出切图，换主题色时改需求节点重跑。"
+      },
+      "ratio": "9/16",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "界面稿",
+          "description": "需求 → 界面 → 切图"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型",
+        "素材库"
+      ]
+    },
+    {
+      "id": "tpl-game-character-card",
+      "name": "角色立绘图鉴",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "interactive-games",
+      "summary": "角色设定 → 全身立绘 → 动作与表情变体，图鉴与商店皮肤都能复用。",
+      "prompt": "按设定画全身立绘：正面站姿，装备完整，边缘光，纯色渐变背景",
+      "nodeTitle": "角色设定",
+      "tags": [
+        "立绘",
+        "角色",
+        "图鉴"
+      ],
+      "publishedAt": 1791450000000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "角色设定",
+          "detail": "文本节点，填职业、性格、武器与配色"
+        },
+        {
+          "title": "全身立绘",
+          "detail": "图片节点，提示词：按设定画全身立绘：正面站姿，装备完整，边缘光，纯色渐变背景"
+        },
+        {
+          "title": "动作变体",
+          "detail": "图片节点，提示词：同一角色的三个动作变体：攻击、施法、受击，服装与配色保持一致"
+        },
+        {
+          "title": "连线",
+          "detail": "角色设定 → 全身立绘 → 动作变体"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-charcard-brief",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "角色设定",
+            "text": "职业：\n性格：\n武器：\n配色："
+          },
+          {
+            "id": "tpl-charcard-full",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "全身立绘",
+            "prompt": "按设定画全身立绘：正面站姿，装备完整，边缘光，纯色渐变背景"
+          },
+          {
+            "id": "tpl-charcard-variants",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "动作变体",
+            "prompt": "同一角色的三个动作变体：攻击、施法、受击，服装与配色保持一致，纯色背景"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_charcard_1",
+            "from": "tpl-charcard-brief",
+            "to": "tpl-charcard-full"
+          },
+          {
+            "id": "e_charcard_2",
+            "from": "tpl-charcard-full",
+            "to": "tpl-charcard-variants"
+          }
+        ]
+      },
+      "sections": {
+        "what": "从设定到立绘再到动作变体，同一角色的不同画面保持一致。",
+        "context": "一份写清职业、性格与配色的角色设定；需要图像模型。",
+        "how": "立即体验会建好「角色设定」「全身立绘」「动作变体」三个节点并依次连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，不会自动生成或扣费。",
+        "followUp": "立绘定稿后再出动作变体，换装备只改设定节点。"
+      },
+      "ratio": "2/3",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "角色图鉴",
+          "description": "设定 → 立绘 → 变体"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型",
+        "素材库"
+      ]
+    },
+    {
+      "id": "tpl-social-cover-set",
+      "name": "社媒封面组图",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "social-media-content",
+      "summary": "一个选题 → 三张不同风格的封面，横竖版式都在同一张画布上排好。",
+      "prompt": "做一张知识类视频封面：大字标题占上三分之一，人物半身出镜，高对比撞色",
+      "nodeTitle": "选题",
+      "tags": [
+        "封面",
+        "社媒",
+        "组图"
+      ],
+      "publishedAt": 1791709200000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "选题",
+          "detail": "文本节点，填选题、目标观众、标题字数与发布平台"
+        },
+        {
+          "title": "封面 1",
+          "detail": "图片节点，提示词：做一张知识类视频封面：大字标题占上三分之一，人物半身出镜，高对比撞色"
+        },
+        {
+          "title": "封面 2",
+          "detail": "图片节点，提示词：同选题换场景，户外实拍风，标题放左下角"
+        },
+        {
+          "title": "封面 3",
+          "detail": "图片节点，提示词：同选题换信息图风，三栏要点排版"
+        },
+        {
+          "title": "连线",
+          "detail": "选题 → 三张封面，三张共用同一个选题"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-coverset-topic",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "选题",
+            "text": "选题：\n目标观众：\n标题字数：\n发布平台："
+          },
+          {
+            "id": "tpl-coverset-a",
+            "kind": "image",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "封面 1",
+            "prompt": "做一张知识类视频封面：大字标题占上三分之一，人物半身出镜，高对比撞色"
+          },
+          {
+            "id": "tpl-coverset-b",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "封面 2",
+            "prompt": "同选题换场景：户外实拍风，标题放左下角，底部留出字幕安全区"
+          },
+          {
+            "id": "tpl-coverset-c",
+            "kind": "image",
+            "x": 1080,
+            "y": 360,
+            "w": 300,
+            "h": 300,
+            "title": "封面 3",
+            "prompt": "同选题换信息图风：三栏要点排版，配色与封面 1 呼应"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_coverset_1",
+            "from": "tpl-coverset-topic",
+            "to": "tpl-coverset-a"
+          },
+          {
+            "id": "e_coverset_2",
+            "from": "tpl-coverset-topic",
+            "to": "tpl-coverset-b"
+          },
+          {
+            "id": "e_coverset_3",
+            "from": "tpl-coverset-topic",
+            "to": "tpl-coverset-c"
+          }
+        ]
+      },
+      "sections": {
+        "what": "一个选题直接铺三张封面，风格拉开，方便挑一张再放大。",
+        "context": "选题、目标观众与标题字数；以及可用的图片模型。",
+        "how": "立即体验会建好「选题」文本节点与三张封面图片节点，并都连到选题。",
+        "output": "一张新画布：4 个节点 + 3 条连线。",
+        "scope": "只建节点与连线，不会自动出图或扣费。",
+        "followUp": "先定标题字数，再逐张调风格，满意的放大重出。"
+      },
+      "ratio": "16/9",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "封面组图",
+          "description": "选题 → 三张封面"
+        }
+      ],
+      "tools": [
+        "画布",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-social-grid-9",
+      "name": "九宫格景别",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "social-media-content",
+      "summary": "一个主题拆成九格景别 → 九宫格总览加单格放大，一次把整组图排满。",
+      "prompt": "把周末露营拆成九个景别：远景营地、中景帐篷、特写咖啡壶等，每格给一句画面描述",
+      "nodeTitle": "主题",
+      "tags": [
+        "九宫格",
+        "景别",
+        "社媒"
+      ],
+      "publishedAt": 1791968400000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "主题",
+          "detail": "文本节点，填主题、情绪与色调"
+        },
+        {
+          "title": "景别拆解",
+          "detail": "文本节点，提示词：把周末露营拆成九个景别，每格给一句画面描述"
+        },
+        {
+          "title": "九宫格总览",
+          "detail": "图片节点，提示词：按九格描述拼成 1:1 九宫格总览图，格间留白一致"
+        },
+        {
+          "title": "单格放大",
+          "detail": "图片节点，提示词：把第三格单独放大成 4:5 竖图，主体完整不裁切"
+        },
+        {
+          "title": "连线",
+          "detail": "主题 → 景别拆解 → 九宫格总览 → 单格放大"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-grid9-theme",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "主题",
+            "text": "主题：\n情绪：\n色调："
+          },
+          {
+            "id": "tpl-grid9-breakdown",
+            "kind": "text",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "景别拆解",
+            "prompt": "把周末露营拆成九个景别：远景营地、中景帐篷、特写咖啡壶等，每格给一句画面描述"
+          },
+          {
+            "id": "tpl-grid9-overview",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "九宫格总览",
+            "prompt": "按九格描述拼成 1:1 九宫格总览图，格间留白一致，整体色调统一"
+          },
+          {
+            "id": "tpl-grid9-single",
+            "kind": "image",
+            "x": 1080,
+            "y": 360,
+            "w": 300,
+            "h": 300,
+            "title": "单格放大",
+            "prompt": "把第三格单独放大成 4:5 竖图，主体完整不裁切，细节清楚"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_grid9_1",
+            "from": "tpl-grid9-theme",
+            "to": "tpl-grid9-breakdown"
+          },
+          {
+            "id": "e_grid9_2",
+            "from": "tpl-grid9-breakdown",
+            "to": "tpl-grid9-overview"
+          },
+          {
+            "id": "e_grid9_3",
+            "from": "tpl-grid9-overview",
+            "to": "tpl-grid9-single"
+          }
+        ]
+      },
+      "sections": {
+        "what": "先把一组图拆成九个景别，再拼总览与单格放大，社媒九宫格一次成组。",
+        "context": "一个主题与想要的色调；需要对话模型拆景别与图片模型出图。",
+        "how": "立即体验会建好「主题」「景别拆解」「九宫格总览」「单格放大」四个节点并依次连好。",
+        "output": "一张新画布：4 个节点 + 3 条连线。",
+        "scope": "只建节点与连线，不会自动生成或扣费。",
+        "followUp": "先确认景别清单，再拼总览，单格图留最后放大。"
+      },
+      "ratio": "1/1",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "九宫格",
+          "description": "主题 → 景别 → 拼图"
+        }
+      ],
+      "tools": [
+        "画布",
+        "对话模型",
+        "图像模型"
+      ]
+    },
+    {
+      "id": "tpl-social-podcast",
+      "name": "播客口播音频",
+      "version": "1.0.0",
+      "kind": "audio",
+      "category": "social-media-content",
+      "summary": "一个话题 → 口播稿 → 一段播客音频，先把稿子写顺再开口。",
+      "prompt": "围绕通勤时间怎么用写一段 90 秒口播稿：开场提问、三个建议、结尾一句行动号召",
+      "nodeTitle": "话题",
+      "tags": [
+        "播客",
+        "音频",
+        "口播"
+      ],
+      "publishedAt": 1792227600000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "话题",
+          "detail": "文本节点，提示词：写一句想聊的话题，最好带一个具体场景"
+        },
+        {
+          "title": "口播稿",
+          "detail": "文本节点，提示词：围绕通勤时间怎么用写一段 90 秒口播稿：开场提问、三个建议、结尾一句行动号召"
+        },
+        {
+          "title": "播客音频",
+          "detail": "音频节点，提示词：用沉稳的男声朗读上游口播稿，语速中等，句间留半秒停顿"
+        },
+        {
+          "title": "连线",
+          "detail": "话题 → 口播稿 → 播客音频"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-podcast-topic",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "话题",
+            "prompt": "写一句想聊的话题，最好带一个具体场景"
+          },
+          {
+            "id": "tpl-podcast-script",
+            "kind": "text",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "口播稿",
+            "prompt": "围绕通勤时间怎么用写一段 90 秒口播稿：开场提问、三个建议、结尾一句行动号召"
+          },
+          {
+            "id": "tpl-podcast-audio",
+            "kind": "audio",
+            "x": 1080,
+            "y": 0,
+            "w": 320,
+            "h": 180,
+            "title": "播客音频",
+            "prompt": "用沉稳的男声朗读上游口播稿，语速中等，句间留半秒停顿",
+            "params": {
+              "mode": "tts",
+              "dur": 60
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_podcast_1",
+            "from": "tpl-podcast-topic",
+            "to": "tpl-podcast-script"
+          },
+          {
+            "id": "e_podcast_2",
+            "from": "tpl-podcast-script",
+            "to": "tpl-podcast-audio"
+          }
+        ]
+      },
+      "sections": {
+        "what": "话题先落成口播稿，再交给音频节点读出来，一条播客从零到有。",
+        "context": "一个能聊起来的话题；需要对话模型写稿与可用的音频模型。",
+        "how": "立即体验会建好「话题」「口播稿」「播客音频」三个节点并依次连好。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，朗读需要你确认后再执行。",
+        "followUp": "稿子读顺了再合成音频，改语气只改音频节点提示词。"
+      },
+      "ratio": "1/1",
+      "modelHint": "音频模型",
+      "useCases": [
+        {
+          "title": "口播音频",
+          "description": "话题 → 稿子 → 音频"
+        }
+      ],
+      "tools": [
+        "画布",
+        "对话模型",
+        "音频模型"
+      ]
+    },
+    {
+      "id": "tpl-social-talking-head",
+      "name": "数字人口播",
+      "version": "1.0.0",
+      "kind": "video",
+      "category": "social-media-content",
+      "summary": "一张形象照加一份口播稿 → 数字人口播视频，口播账号的常规流水线。",
+      "prompt": "用这张形象照做数字人口播：正面半身，自然微动，背景为浅色书架，语速偏快",
+      "nodeTitle": "形象照",
+      "tags": [
+        "数字人",
+        "口播",
+        "短视频"
+      ],
+      "publishedAt": 1792486800000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "形象照",
+          "detail": "图片节点，放一张正面半身照"
+        },
+        {
+          "title": "口播稿",
+          "detail": "文本节点，提示词：把产品亮点写成 45 秒口播稿：开头三秒抓人，中间两个卖点，结尾一句号召"
+        },
+        {
+          "title": "口播视频",
+          "detail": "视频节点，提示词：用这张形象照做数字人口播：正面半身，自然微动，背景为浅色书架"
+        },
+        {
+          "title": "连线",
+          "detail": "形象照与口播稿都连到口播视频"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-talkhead-photo",
+            "kind": "image",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "形象照"
+          },
+          {
+            "id": "tpl-talkhead-script",
+            "kind": "text",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "口播稿",
+            "prompt": "把产品亮点写成 45 秒口播稿：开头三秒抓人，中间两个卖点，结尾一句号召"
+          },
+          {
+            "id": "tpl-talkhead-video",
+            "kind": "video",
+            "x": 1080,
+            "y": 0,
+            "w": 340,
+            "h": 220,
+            "title": "口播视频",
+            "prompt": "用这张形象照做数字人口播：正面半身，自然微动，背景为浅色书架，语速偏快",
+            "params": {
+              "dur": 45
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_talkhead_1",
+            "from": "tpl-talkhead-photo",
+            "to": "tpl-talkhead-video"
+          },
+          {
+            "id": "e_talkhead_2",
+            "from": "tpl-talkhead-script",
+            "to": "tpl-talkhead-video"
+          }
+        ]
+      },
+      "sections": {
+        "what": "形象与稿子分开准备，最后合成数字人口播，出镜成本压到最低。",
+        "context": "一张正面半身形象照与一份口播稿；需要可用的视频模型。",
+        "how": "立即体验会建好「形象照」「口播稿」「口播视频」三个节点，并把图和稿都连到视频。",
+        "output": "一张新画布：3 个节点 + 2 条连线。",
+        "scope": "只建节点与连线，生成需要可用的视频模型与你确认。",
+        "followUp": "先把口播稿读顺，再拖入形象照合成。"
+      },
+      "ratio": "9/16",
+      "modelHint": "视频模型",
+      "useCases": [
+        {
+          "title": "数字人口播",
+          "description": "形象 + 稿子 → 视频"
+        }
+      ],
+      "tools": [
+        "画布",
+        "视频模型",
+        "音频模型"
+      ]
+    },
+    {
+      "id": "tpl-social-calendar-poster",
+      "name": "节日借势海报",
+      "version": "1.0.0",
+      "kind": "image",
+      "category": "social-media-content",
+      "summary": "一个节日主题 → 借势文案 → 两张不同构图的借势海报，节前一天批量出。",
+      "prompt": "中秋借势海报：月色与桂花元素，主标题六个字以内，暖橙配深蓝，右下角留品牌位",
+      "nodeTitle": "节日主题",
+      "tags": [
+        "节日",
+        "海报",
+        "借势"
+      ],
+      "publishedAt": 1792746000000,
+      "featured": false,
+      "steps": [
+        {
+          "title": "节日主题",
+          "detail": "文本节点，填节日、品牌语气与必须出现的元素"
+        },
+        {
+          "title": "海报文案",
+          "detail": "文本节点，提示词：写三句中秋借势文案，每句不超过十二个字，避开陈词滥调"
+        },
+        {
+          "title": "借势海报 1",
+          "detail": "图片节点，提示词：中秋借势海报：月色与桂花元素，主标题六个字以内，暖橙配深蓝"
+        },
+        {
+          "title": "借势海报 2",
+          "detail": "图片节点，提示词：同主题换构图，俯拍月饼与茶具，标题竖排"
+        },
+        {
+          "title": "连线",
+          "detail": "节日主题 → 海报文案 → 两张借势海报"
+        }
+      ],
+      "doc": {
+        "nodes": [
+          {
+            "id": "tpl-festival-theme",
+            "kind": "text",
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "节日主题",
+            "text": "节日：\n品牌语气：\n必须出现的元素：\n品牌位位置："
+          },
+          {
+            "id": "tpl-festival-copy",
+            "kind": "text",
+            "x": 540,
+            "y": 0,
+            "w": 300,
+            "h": 220,
+            "title": "海报文案",
+            "prompt": "写三句中秋借势文案，每句不超过十二个字，避开陈词滥调"
+          },
+          {
+            "id": "tpl-festival-a",
+            "kind": "image",
+            "x": 1080,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "借势海报 1",
+            "prompt": "中秋借势海报：月色与桂花元素，主标题六个字以内，暖橙配深蓝，右下角留品牌位"
+          },
+          {
+            "id": "tpl-festival-b",
+            "kind": "image",
+            "x": 1620,
+            "y": 0,
+            "w": 300,
+            "h": 300,
+            "title": "借势海报 2",
+            "prompt": "同主题换构图：俯拍月饼与茶具，标题竖排，底部留出品牌位"
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_festival_1",
+            "from": "tpl-festival-theme",
+            "to": "tpl-festival-copy"
+          },
+          {
+            "id": "e_festival_2",
+            "from": "tpl-festival-copy",
+            "to": "tpl-festival-a"
+          },
+          {
+            "id": "e_festival_3",
+            "from": "tpl-festival-copy",
+            "to": "tpl-festival-b"
+          }
+        ]
+      },
+      "sections": {
+        "what": "节日借势最怕文案与画面脱节，这里先用文案定调，再出两张不同构图的海报。",
+        "context": "节日、品牌语气与必须出现的元素；需要对话模型与图片模型。",
+        "how": "立即体验会建好「节日主题」「海报文案」与两张海报节点并依次连好。",
+        "output": "一张新画布：4 个节点 + 3 条连线。",
+        "scope": "只建节点与连线，不会自动出图或扣费。",
+        "followUp": "先定三句文案，再按文案挑构图出图。"
+      },
+      "ratio": "4/5",
+      "modelHint": "图像模型",
+      "useCases": [
+        {
+          "title": "节日借势",
+          "description": "主题 → 文案 → 双构图海报"
+        }
+      ],
+      "tools": [
+        "画布",
+        "对话模型",
+        "图像模型"
+      ]
+    }
+  ],
+  "railPages": [
+    {
+      "id": "featured",
+      "title": "精选项目",
+      "itemIds": [
+        "canvas",
+        "chat",
+        "tpl-ecom-poster",
+        "tpl-text-to-video",
+        "writing",
+        "code"
+      ]
+    },
+    {
+      "id": "latest",
+      "title": "最新上线",
+      "itemIds": [
+        "canvas",
+        "tpl-ecom-poster",
+        "photos",
+        "tpl-text-to-video",
+        "tpl-storyboard-video",
+        "tpl-table-batch",
+        "chat"
+      ]
+    }
+  ],
   "fields": {
     "schema": "清单格式标识；market-service.cjs 只按 version 校验，此字段供人阅读",
     "version": "清单结构版本，必须为 1；不是 1 一律 MARKET_MANIFEST_INVALID",
     "generatedAt": "清单生成时间（毫秒）。0 表示未指定，服务读取时用当前时间补；仅影响展示",
     "page": "市场标题：{ id, title }；id 缺省回落 local",
-    "categories": "可选分类数组；为空时服务端按 software / games 兜底，不影响条目",
-    "items": "保留的条目总表，本版本恒为空；真实条目只从 apps / skillPacks 读取",
+    "categories": "可选分类数组；为空时服务端按 software / games 兜底，不影响条目。计数会把 App / 技能包 / 模板都算进去",
+    "items": "保留的条目总表，本版本恒为空；真实条目只从 apps / skillPacks / templates 读取",
     "apps": "本地 App 条目数组。空数组 = 本次没有可用 App（有效状态，不是错误）",
-    "skillPacks": "本地技能包条目数组。空数组 = 本次没有可用技能包"
+    "skillPacks": "本地技能包条目数组。空数组 = 本次没有可用技能包",
+    "templates": "项目模板条目数组（task-21 新增，可选）。条目必须带 id / name / prompt，非法条目被丢弃并计入 rejected.templates",
+    "railPages": "精选 rails（可选）：[{ id, title, itemIds }]，最多 6 条、每条最多 30 个 id；未知 id 在界面侧忽略"
   },
   "appItemFields": {
     "id": "必填；只允许 [a-zA-Z0-9._-]",
@@ -27,20 +3264,54 @@
     "build": "必填；大于 0 的整数",
     "category": "可选；games 或缺省 software",
     "subtitle": "可选；一句话副标题",
-    "summary": "可选；详细介绍",
+    "summary": "可选；详细介绍（详情第一段优先用它）",
+    "prompt": "可选；可复制提示词（最多 4000 字）",
+    "sections": "可选；六段详情 { what, context, how, output, scope, followUp }，每段最多 1200 字",
     "tags": "可选；字符串数组（最多 12）",
     "featured": "可选；布尔，是否推荐",
     "packageSize": "可选；字节数",
-    "publishedAt": "可选；毫秒时间戳"
+    "publishedAt": "可选；毫秒时间戳（「最新上线」据此倒序）",
+    "ratio": "封面比例（16/9、9/16、1/1、2/3、3/2、4/5、4/3、2/1 之一）",
+    "useCases": "用例数组 [{title,description}]，最多 20 条",
+    "tools": "支持的工具名数组，最多 20 个",
+    "modelHint": "推荐搭配的模型类型（≤60 字）；没有就留空"
   },
   "skillPackItemFields": {
-    "id": "必填；只允许 [a-zA-Z0-9._-]",
+    "id": "必填；只允许 [a-zA-Z0-9._-]；官方技能包与 skill/list 的 id 一致",
     "name": "必填；展示名",
     "version": "必填；非空字符串",
     "description": "可选；介绍",
+    "summary": "可选；详情用的一句话摘要",
+    "prompt": "可选；可复制提示词（最多 4000 字）",
+    "sections": "可选；六段详情，每段最多 1200 字",
+    "category": "可选；分类 id（必须与 categories[].id 对得上）",
+    "featured": "可选；布尔",
     "entry": "可选；相对入口路径（拒绝绝对路径与 .. 穿越）",
     "tags": "可选；字符串数组",
     "packageSize": "可选；字节数",
-    "publishedAt": "可选；毫秒时间戳"
+    "publishedAt": "可选；毫秒时间戳",
+    "ratio": "封面比例",
+    "useCases": "用例数组",
+    "tools": "支持的工具名数组",
+    "modelHint": "推荐搭配的模型类型"
+  },
+  "templateItemFields": {
+    "id": "必填；只允许 [a-zA-Z0-9._-]",
+    "name": "必填；展示名",
+    "prompt": "必填；模板提示词（最多 4000 字）——「复制提示词」与「立即体验」都靠它",
+    "version": "可选；缺省 1.0.0",
+    "kind": "可选；text | image | video | audio（决定立即体验创建的首节点类型），缺省 text",
+    "category": "可选；分类 id（必须与 categories[].id 对得上）",
+    "summary": "可选；一句话说明（详情第一段优先用它）",
+    "nodeTitle": "可选；立即体验创建的首节点标题，缺省取 steps[0].title 或 name",
+    "steps": "可选；[{ title, detail }]，最多 12 步，title ≤160 字、detail ≤800 字",
+    "tags": "可选；字符串数组（最多 12）",
+    "featured": "可选；布尔",
+    "publishedAt": "可选；毫秒时间戳（「最新上线」据此倒序）",
+    "sections": "可选；六段详情，每段最多 1200 字",
+    "ratio": "封面比例",
+    "useCases": "用例数组",
+    "tools": "支持的工具名数组",
+    "modelHint": "推荐搭配的模型类型"
   }
 }

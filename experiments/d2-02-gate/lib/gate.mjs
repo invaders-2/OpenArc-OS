@@ -62,15 +62,16 @@ export function runNative(probe, { timeout = 300000, env = {}, nativeDir: dir = 
     const timer = setTimeout(() => child.kill("SIGKILL"), timeout);
     child.on("exit", (code) => {
       clearTimeout(timer);
-      const m = stdout.match(/RESULT (\{[\s\S]*\})\s*$/);
-      if (!m) {
+      const resultLine = stdout.split(/\r?\n/).filter((line) => line.startsWith("RESULT ")).at(-1);
+      if (!resultLine) {
         return reject(
           new Error(
             `探针 ${probe} 未输出 RESULT（exit=${code}）\nstdout:\n${stdout.slice(-2500)}\nstderr:\n${stderr.slice(-1500)}`,
           ),
         );
       }
-      const report = JSON.parse(m[1]);
+      // RESULT 是单行 JSON；后续退出日志不能改变提取结果，报告里的失败仍由原 runner 判定。
+      const report = JSON.parse(resultLine.slice("RESULT ".length));
       report._stderr = stderr;
       report._exit = code;
       resolve(report);

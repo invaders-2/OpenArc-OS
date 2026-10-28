@@ -40,7 +40,7 @@ test("② 真实库副本：开关开启 → 备份 + v29 + foreign_key_check �
   const backupDir = path.join(dir, "backup");
   const store = new IdentityStore({ path: copy, backupDir }).open();
   try {
-    assert.equal(store.schemaVersion, 28);
+    assert.equal(store.schemaVersion, 30);
     const beforeChildren = Object.fromEntries(TASKS_CHILD_TABLES.map((table) => [table, table === "task_steps"
       ? count(store.connection, "task_steps") + count(store.connection, "dx_task_steps")
       : table === "task_events"
@@ -62,7 +62,7 @@ test("② 真实库副本：开关开启 → 备份 + v29 + foreign_key_check �
     // 备份文件本身仍是完整 v28
     const restored = new IdentityStore({ path: backup.path, backupDir: path.join(dir, "backup-restore") }).open();
     try {
-      assert.equal(restored.schemaVersion, 28);
+      assert.equal(restored.schemaVersion, 30);
       assert.equal(typeOf(restored.connection, "dx_tasks"), "table");
       assert.deepEqual(restored.connection.prepare("PRAGMA foreign_key_check").all(), []);
     } finally { restored.close(); }
@@ -71,7 +71,7 @@ test("② 真实库副本：开关开启 → 备份 + v29 + foreign_key_check �
   // 重启：已合并库允许打开（#migrate 对 v29 的显式合并例外），再次执行幂等。
   const reopened = new IdentityStore({ path: copy, backupDir, allowMergedV29: true }).open();
   try {
-    assert.equal(reopened.schemaVersion, 29);
+    assert.equal(reopened.schemaVersion, 30);
     assert.equal(merge.isTaskMergeApplied(reopened.connection), true);
     const again = merge.applyTaskMergeAtStartup({ store: reopened, userDataDir: dir, env: {}, enabled: true });
     assert.equal(again.applied, false);
@@ -89,7 +89,7 @@ test("③ 开关关闭：真库副本一个字节不动；失败回滚保留 v28
     const off = merge.applyTaskMergeAtStartup({ store, userDataDir: dir, env: {} });
     assert.equal(off.enabled, false);
     assert.equal(off.applied, false);
-    assert.equal(store.schemaVersion, 28);
+    assert.equal(store.schemaVersion, 30);
     assert.equal(typeOf(store.connection, "dx_tasks"), "table");
     assert.equal(store.migrationBackups.length, 0, "关闭时不得备份 / 写库");
   } finally { store.close(); }
@@ -111,7 +111,7 @@ test("③ 失败回滚：主键冲突 → 不进入 DDL，v28 与全部行保持
     assert.equal(result.state, "v28");
     assert.equal(result.rolledBack, true);
     assert.match(result.error.message, /冲突/);
-    assert.equal(store.schemaVersion, 28);
+    assert.equal(store.schemaVersion, 30);
     assert.equal(typeOf(store.connection, "dx_tasks"), "table");
     assert.equal(store.connection.prepare("SELECT type FROM sqlite_master WHERE name = 'tasks_v29'").get(), undefined, "失败不得留下半成品表");
     for (const [table, beforeCount] of Object.entries(before)) assert.equal(count(store.connection, table), beforeCount, table);
@@ -134,7 +134,7 @@ test("④ 启动路径：createIdentityService 按开关执行/不执行 v29，�
   const disabled = createIdentityService({ userDataDir: disabledDir, taskMergeV29: false });
   try {
     assert.equal(disabled.taskMergeV29.applied, false);
-    assert.equal(disabled.store.schemaVersion, 28);
+    assert.equal(disabled.store.schemaVersion, 30);
     assert.equal(typeOf(disabled.store.connection, "dx_tasks"), "table");
   } finally { disabled.store.close(); }
 });

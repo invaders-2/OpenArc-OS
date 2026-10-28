@@ -127,7 +127,7 @@ function videoTimeline(assetId, overrides = {}) {
 
 // ── ⓪ 迁移 v24（只新增表 / 幂等 / 高版本拒开 / 失败整级回滚） ─────────────
 test("迁移 v24：v23 老库升到 24、video_ 表只新增、重放幂等、高版本拒开、失败整级回滚", () => {
-  assert.equal(SCHEMA_VERSION, 28);
+  assert.equal(SCHEMA_VERSION, 30);
   const dir = tempDir("dxos-media-mig-");
   const file = path.join(dir, "identity.db");
   const raw = buildDb(file, 23);
@@ -136,21 +136,21 @@ test("迁移 v24：v23 老库升到 24、video_ 表只新增、重放幂等、�
   raw.close();
 
   const store = new IdentityStore({ path: file }).open();
-  assert.equal(store.schemaVersion, 28);
+  assert.equal(store.schemaVersion, 30);
   for (const table of ["video_projects", "video_assets", "video_render_jobs"]) assert.ok(hasTable(store.connection, table), "缺少 " + table);
   assert.equal(store.connection.prepare("SELECT COUNT(*) AS c FROM dx_tasks").get().c, 1, "既有数据必须保留");
   // 降回 23 再重放 v24：IF NOT EXISTS 幂等
   store.connection.exec("PRAGMA user_version = 23");
   store.close();
   const again = new IdentityStore({ path: file }).open();
-  assert.equal(again.schemaVersion, 28);
+  assert.equal(again.schemaVersion, 30);
   assert.ok(hasTable(again.connection, "video_render_jobs"));
   assert.ok(!!again.connection.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_video_jobs_queue'").get(), "v24 索引必须存在");
   again.close();
 
-  // 高版本拒开：user_version=29 > 28
+  // 高版本拒开：user_version=31 > 30
   const tooNew = new DatabaseSync(file);
-  tooNew.exec("PRAGMA user_version = 29");
+  tooNew.exec("PRAGMA user_version = 31");
   tooNew.close();
   assert.throws(() => new IdentityStore({ path: file }).open(), (error) => error instanceof SchemaTooNewError && error.code === "SCHEMA_TOO_NEW");
 
@@ -168,9 +168,9 @@ test("迁移 v24：v23 老库升到 24、video_ 表只新增、重放幂等、�
 });
 
 // ── ① 命令表 ─────────────────────────────────────────────────────────────
-test("命令表：62 条命令（B5a 16 + B5e 34 + task-9 2 + task-20 3 + task-25 4）、risk/credential/summary 合法", () => {
+test("命令表：66 条命令（含 2B 草稿 4 条）、risk/credential/summary 合法", () => {
   const required = [
-    "media/project/ensure", "media/asset/save", "media/asset/list", "media/asset/delete",
+    "media/project/ensure", "media/draft/get", "media/draft/latest", "media/draft/save", "media/draft/import-legacy", "media/asset/save", "media/asset/list", "media/asset/delete",
     "media/probe", "media/poster/get", "media/poster/invalidate",
     "media/render/submit", "media/render/get", "media/render/list", "media/render/run",
     "media/render/cancel", "media/render/heartbeat", "media/render/recover",
@@ -179,7 +179,7 @@ test("命令表：62 条命令（B5a 16 + B5e 34 + task-9 2 + task-20 3 + task-2
   const commands = mediaDomain.listMediaCommands();
   // 10-16：+3 短剧工坊前端（media/short-drama/get / image / visual-image）
   // task-9：+2 成片导出（media/render/export / media/short-drama/export）
-  assert.equal(commands.length, 62);
+  assert.equal(commands.length, 66);
   for (const name of required) assert.ok(mediaDomain.isMediaCommand(name), "缺少命令：" + name);
   for (const entry of commands) {
     assert.ok(Object.prototype.hasOwnProperty.call(mediaDomain.RISK_LEVELS, entry.risk), "非法 risk：" + entry.risk);

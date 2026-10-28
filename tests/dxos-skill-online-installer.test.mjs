@@ -57,7 +57,7 @@ test("D09 · 未注入安装器：结构化依赖缺失；注入 runner 后安�
   assert.ok(installed && installed.pack && installed.pack.id, JSON.stringify(installed));
   assert.equal(installed.source.provider, "ModelScope");
   assert.ok(Array.isArray(installed.skills) && installed.skills.length >= 1);
-  assert.equal(Object.keys(skillDomain.SKILL_COMMANDS).length, 15, "不得扩前端冻结命令白名单");
+  assert.equal(Object.keys(skillDomain.SKILL_COMMANDS).length, 17, "只新增 GitHub 预览与暂存安装两条受控命令");
   const service = fs.readFileSync(path.join(process.cwd(), "electron", "skill-service.cjs"), "utf8");
   assert.ok(service.includes("onlineInstaller"));
   assert.ok(service.includes("payload.onlineSource != null"));

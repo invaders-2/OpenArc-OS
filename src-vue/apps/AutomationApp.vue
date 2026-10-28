@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { Play, Plus, Sparkles, Square, Trash2 } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { Activity, History, List, Play, Plus, Sparkles, Square, Trash2, Zap } from "lucide-vue-next";
 import { iconUrl } from "../apps";
 import { useShellStore } from "../stores/shell";
 import DsDialog from "../design-system/DsDialog.vue";
@@ -62,6 +62,8 @@ const message = ref("");
 const failure = ref("");
 const filter = ref<"all" | "on" | "off">("all");
 const currentId = ref<string | null>(null);
+const view = ref<"overview" | "all" | "runs">("overview");
+const allRuns = ref<any[]>([]);
 const current = computed(() => items.value.find((a) => a.id === currentId.value) ?? null);
 const list = computed(() => items.value.filter((a) => (filter.value === "all" ? true : filter.value === "on" ? a.enabled : !a.enabled)));
 
@@ -78,15 +80,25 @@ async function load() {
 const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const pad = (n: number) => String(n).padStart(2, "0");
 function scheduleText(s: Schedule | null | undefined) {
-  if (!s) return "—";
-  if (s.type === "daily") return `每天 ${pad(s.hour)}:${pad(s.minute)}`;
-  if (s.type === "weekly") return `每${[...s.weekdays].sort().map((d) => WEEK[d].slice(1)).join("、")} ${pad(s.hour)}:${pad(s.minute)}`.replace("每", "每周");
-  if (s.type === "interval") {
-    const m = Math.round(s.everyMs / 60000);
-    return m % 60 === 0 ? `每 ${m / 60} 小时` : `每 ${m} 分钟`;
+  if (!s) return "触发时间未知（NOT VERIFIED）";
+  const kind = String((s as any).kind || (s as any).type || "");
+  const time = (s as any).time as string | undefined;
+  const hour = Number((s as any).hour);
+  const minute = Number((s as any).minute);
+  const clock = time || (Number.isFinite(hour) ? pad(hour) + ":" + pad(Number.isFinite(minute) ? minute : 0) : "");
+  if (kind === "daily") return clock ? `每天 ${clock}` : "每天（时间未知）";
+  if (kind === "weekly") {
+    const days = Array.isArray((s as any).weekdays) ? (s as any).weekdays : [];
+    const label = days.length ? days.map((d: number) => "周" + (WEEK[d] || "").slice(1)).join("、") : "每周";
+    return clock ? `${label} ${clock}` : label;
   }
-  if (s.type === "once") return `仅一次 · ${fmt(s.at)}`;
-  return `cron ${s.expression}`;
+  if (kind === "interval") {
+    const m = Math.round(Number((s as any).everyMs || 0) / 60000);
+    return m > 0 ? (m % 60 === 0 ? `每 ${m / 60} 小时` : `每 ${m} 分钟`) : "每隔一段时间";
+  }
+  if (kind === "once") return clock ? `仅一次 · ${clock}` : "仅一次";
+  if (kind === "cron") return (s as any).expression ? `cron ${(s as any).expression}` : "自定义计划（NOT VERIFIED）";
+  return "触发时间未知（NOT VERIFIED）";
 }
 const ACTION_LABEL: Record<string, string> = {
   agent_instruction: "让助理执行",
@@ -135,6 +147,27 @@ async function loadRuns(id: string) {
   const r = await send("automation/runs", { automationId: id, limit: 30 });
   if (r.ok && currentId.value === id) runs.value = (val(r).runs || []) as Run[];
 }
+async function loadAllRuns() {
+  const r = await send("automation/runs", { limit: 50 });
+  if (r.ok) allRuns.value = (val(r).runs || []) as any[];
+}
+const autoTitle = (id: string) => items.value.find((a) => a.id === id)?.title || "—";
+const runStatus = (st: string) => ({ success: "已完成", completed: "已完成", failed: "失败", running: "执行中", queued: "排队中", stopped: "已暂停" } as Record<string, string>)[st] || st;
+const fmtRun = (ts?: number) => {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+};
+const runDuration = (r: any) => {
+  if (!r.startedAt || !r.finishedAt) return "—";
+  const sec = Math.max(0, Math.round((Number(r.finishedAt) - Number(r.startedAt)) / 1000));
+  return sec + " s";
+};
+const stats = computed(() => [
+  { label: "运行正常", value: items.value.filter((a) => a.enabled && a.lastStatus !== "failed").length },
+  { label: "需要处理", value: items.value.filter((a) => a.lastStatus === "failed").length },
+  { label: "今天已运行", value: allRuns.value.filter((r) => r.startedAt && new Date(Number(r.startedAt)).toDateString() === new Date().toDateString()).length },
+]);
 function open(a: Def) {
   currentId.value = a.id;
   editing.value = false;
@@ -142,6 +175,9 @@ function open(a: Def) {
   void loadRuns(a.id);
 }
 const busy = ref<string | null>(null);
+watch(view, (v) => {
+  if (v === "runs" || v === "all") void loadAllRuns();
+});
 async function runNow(a: Def) {
   busy.value = "run:" + a.id;
   failure.value = "";
@@ -351,6 +387,7 @@ function scheduleReload() {
   reloadTimer = window.setTimeout(() => void load(), 300);
 }
 onMounted(() => {
+  void loadAllRuns();
   readLegacy();
   void load();
   off =
@@ -370,25 +407,20 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="split automation-app" data-automation-app>
-    <nav class="split-side" aria-label="自动化">
+    <nav class="split-side au-side" aria-label="自动化">
       <div class="split-section">自动化</div>
-      <button
-        v-for="[id, label] in ([['all', '全部'], ['on', '运行中'], ['off', '已暂停']] as const)"
-        :key="id" type="button" class="split-nav" :aria-current="filter === id ? 'true' : undefined" @click="filter = id; currentId = null; editing = false"
-      >
-        <span class="split-nav-label">{{ label }}</span>
-        <small class="planned-count">{{ id === "all" ? items.length : items.filter((a) => a.enabled === (id === "on")).length }}</small>
-      </button>
-      <p class="planned-note">
-        由 OpenArc 后台按时运行（{{ health?.schedulerRunning ? "调度器运行中" : "调度器未运行" }}）。OpenArc 完全退出时不会运行，错过的时间点不补跑。
-      </p>
+      <button type="button" class="split-nav" data-au-tab="overview" :aria-current="view === 'overview' ? 'true' : undefined" @click="view = 'overview'; currentId = null; editing = false"><Activity :size="16" /> <span class="split-nav-label">概览</span></button>
+      <button type="button" class="split-nav" data-au-tab="all" :aria-current="view === 'all' ? 'true' : undefined" @click="view = 'all'; currentId = null; editing = false"><List :size="16" /> <span class="split-nav-label">全部自动化</span><small class="au-count">{{ items.length }}</small></button>
+      <button type="button" class="split-nav" data-au-tab="runs" :aria-current="view === 'runs' ? 'true' : undefined" @click="view = 'runs'; currentId = null; editing = false"><History :size="16" /> <span class="split-nav-label">运行记录</span></button>
+      <div class="split-section">后台服务</div>
+      <p class="au-side-note" data-au-health><i class="au-dot-ok" />{{ health?.schedulerRunning ? "运行中 · 每 15 秒检查计划任务" : "调度器未运行" }}</p>
     </nav>
 
     <div class="split-main au-main">
-      <div class="pane-toolbar">
-        <strong class="pane-title">{{ editing ? (editId ? "编辑自动化" : "新建自动化") : current ? current.title : "自动化" }}</strong>
+      <div class="pane-toolbar au-toolbar">
+        <strong class="pane-title">{{ editing ? (editId ? "编辑自动化" : "新建自动化") : current ? current.title : ({ overview: "概览", all: "全部自动化", runs: "运行记录" } as any)[view] }}</strong>
         <div class="toolbar-spacer" />
-        <button class="icon-button" aria-label="新建自动化" title="新建自动化" data-automation-new @click="startNew"><Plus :size="15" /></button>
+        <button type="button" class="au-primary" data-automation-new @click="startNew"><Plus :size="14" /> 新建自动化</button>
       </div>
       <p v-if="message" class="vd-msg sk-msg" role="status">{{ message }}</p>
       <p v-if="failure" class="vd-msg sk-msg err" role="alert">{{ failure }}</p>
@@ -470,29 +502,73 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 列表 -->
+      <!-- 概览 / 列表 / 运行记录 -->
       <template v-else>
-        <div class="au-quick">
-          <Sparkles :size="15" />
-          <input v-model="quick" placeholder="用一句话创建，例如：每周一早上 9 点汇总上周的文稿" aria-label="用一句话创建自动化" data-automation-quick @keydown.enter.prevent="parseQuick" />
-          <button class="planned-today" :disabled="!quick.trim()" @click="parseQuick">生成</button>
-        </div>
-        <p v-if="quickError" class="vd-msg sk-msg err">{{ quickError }}</p>
-        <div v-if="list.length" class="au-list">
-          <button v-for="a in list" :key="a.id" type="button" class="au-item" :data-automation-item="a.id" @click="open(a)">
-            <span class="au-item-main">
-              <span class="au-item-name">{{ a.title }}</span>
-              <small>{{ scheduleText(a.schedule) }} · {{ actionText(a.action) }} · {{ nextText(a) }}{{ a.lastStatus ? " · 上次" + (STATUS[a.lastStatus] || a.lastStatus) : "" }}</small>
-            </span>
-            <span class="au-switch" role="switch" :aria-checked="a.enabled" :aria-label="(a.enabled ? '暂停 ' : '启用 ') + a.title" @click.stop="toggle(a)" />
-          </button>
-        </div>
-        <div v-else-if="!loading" class="empty-content">
-          <img class="large-icon" :src="iconUrl('clock')" alt="" draggable="false" />
-          <h2 class="planned-title">还没有自动化</h2>
-          <p>按时间让助理完成一项任务，例如每天早上整理桌面、每周汇总文稿。{{ desktopReason ? "（" + desktopReason + "）" : "" }}</p>
-          <button class="planned-cta" @click="startNew"><Plus :size="14" /> 新建自动化</button>
-        </div>
+        <template v-if="view === 'runs'">
+          <table class="au-runs" data-au-runs>
+            <thead><tr><th>时间</th><th>自动化</th><th>结果</th><th>耗时</th></tr></thead>
+            <tbody>
+              <tr v-for="r in allRuns" :key="r.id" class="au-run-row" :data-run-status="r.status">
+                <td class="au-num">{{ fmtRun(r.startedAt) }}</td><td>{{ autoTitle(r.automationId) }}</td>
+                <td><span class="badge" :class="{ ok: r.status === 'success' || r.status === 'completed' }">{{ runStatus(r.status) }}</span></td>
+                <td class="au-num">{{ runDuration(r) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="!allRuns.length" class="set-cap">还没有运行记录。</p>
+        </template>
+
+        <template v-else>
+          <template v-if="view === 'overview'">
+            <div class="au-overview-head"><b class="au-ov-title">让日常工作自己运转</b><p class="au-ov-desc">设置时间和应用动作，OpenArc 会在后台按顺序执行，结果写进通知与运行记录。</p></div>
+          </template>
+          <template v-if="view === 'overview'">
+            <div class="au-stats au-stats-inline">
+              <div v-for="st in stats" :key="'all-' + st.label" class="au-stat"><span>{{ st.label }}</span><b>{{ st.value }}</b></div>
+            </div>
+          </template>
+          <template v-else>
+          <div class="au-quick">
+            <Sparkles :size="15" />
+            <input v-model="quick" placeholder="用一句话创建，例如：每周一早上 9 点汇总上周的文稿" aria-label="用一句话创建自动化" data-automation-quick @keydown.enter.prevent="parseQuick" />
+            <button class="au-ghost" :disabled="!quick.trim()" @click="parseQuick">生成</button>
+          </div>
+          <p v-if="quickError" class="vd-msg sk-msg err">{{ quickError }}</p>
+          <div v-if="list.length" class="au-list" style="margin-top: 120px">
+            <div v-for="a in list" :key="a.id" class="au-rule" :data-au-rule="a.id" :data-automation-item="a.id">
+              <Zap :size="16" class="au-zap" />
+              <span class="au-rule-main" @click="open(a)">
+                <b>{{ a.title }}</b>
+                <small>{{ scheduleText(a.schedule) }} · {{ actionText(a.action) }}</small>
+                <small v-if="a.lastError" class="au-err">上次运行：{{ a.lastError }}</small>
+              </span>
+              <span class="au-next">下次 {{ nextText(a).replace(/^下次\s*/, "") }}</span>
+              <span class="au-status"><span v-if="a.lastStatus === 'running'" class="badge"><span class="au-spin" />执行中</span><span v-else class="badge" :class="{ ok: a.lastStatus === 'success' || a.lastStatus === 'completed' }">{{ runStatus(a.lastStatus || (a.enabled ? "queued" : "stopped")) }}</span></span>
+              <button type="button" class="au-run-one" :disabled="busy === 'run:' + a.id || a.lastStatus === 'running' || !a.enabled" @click.stop="runNow(a)">执行一次</button>
+              <span class="au-switch" role="switch" :aria-checked="a.enabled" :aria-label="(a.enabled ? '暂停 ' : '启用 ') + a.title" @click.stop="toggle(a)" />
+            </div>
+          </div>
+          <div v-else-if="!loading" class="empty-content">
+            <img class="large-icon" :src="iconUrl('clock')" alt="" draggable="false" />
+            <h2 class="planned-title">还没有自动化</h2>
+            <p>按时间让助理完成一项任务，例如每天早上整理桌面、每周汇总文稿。{{ desktopReason ? "（" + desktopReason + "）" : "" }}</p>
+            <button class="planned-cta" @click="startNew"><Plus :size="14" /> 新建自动化</button>
+          </div>
+          </template>
+          <template v-if="false">
+            <div class="split-section au-recent-title">最近运行</div>
+            <table class="au-runs">
+              <thead><tr><th>时间</th><th>自动化</th><th>结果</th><th>耗时</th></tr></thead>
+              <tbody>
+                <tr v-for="r in allRuns.slice(0, 3)" :key="'recent-' + r.id" class="au-run-row" :data-run-status="r.status">
+                  <td class="au-num">{{ fmtRun(r.startedAt) }}</td><td>{{ autoTitle(r.automationId) }}</td>
+                  <td><span class="badge" :class="{ ok: r.status === 'success' || r.status === 'completed' }">{{ runStatus(r.status) }}</span></td>
+                  <td class="au-num">{{ runDuration(r) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+        </template>
       </template>
     </div>
 
@@ -505,3 +581,85 @@ onBeforeUnmount(() => {
     </DsDialog>
   </div>
 </template>
+<style scoped>
+
+.au-side { flex: 0 0 200px; width: 200px; }
+.au-side .split-nav { height: 32px; min-height: 32px; }
+.au-count { margin-left: auto; color: var(--muted); font-size: var(--fs-micro); }
+.au-side-note { margin: 4px 10px; color: var(--muted); font-size: var(--fs-caption); line-height: 1.5; }
+.au-dot-ok { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #2fb344; margin-right: 6px; }
+.au-toolbar { height: 52px; min-height: 52px; margin: 0; padding: 0 20px; border-bottom: 0.5px solid var(--line); }
+.au-app .split-main, .automation-app .split-main { padding: 0 !important; margin-left: -8px !important; }
+.au-primary { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: var(--radius-pill); background: var(--text); color: var(--content); font-size: var(--fs-caption); }
+.au-overview { padding: 20px 24px; }
+.au-ov-title { font-size: 18px; font-weight: var(--fw-medium); }
+.au-ov-desc { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-secondary); }
+.au-stats { display: flex; gap: 12px; margin-top: 18px; }
+.au-stat { flex: 1; padding: 14px 16px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); display: flex; flex-direction: column; gap: 6px; }
+.au-stat span { color: var(--muted); font-size: var(--fs-micro); }
+.au-stat b { font-size: 28px; font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
+.au-quick { display: flex; align-items: center; gap: 8px; margin: 14px 24px 10px; padding: 0 10px; height: 34px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); }
+.au-quick input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; font-size: var(--fs-caption); }
+.au-ghost { height: 24px; padding: 0 10px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.08); font-size: var(--fs-micro); }
+.au-list { margin: 0 24px; border-radius: var(--radius-lg); overflow: hidden; }
+.au-rule { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 0 12px; border-bottom: 0.5px solid var(--line); }
+.au-zap { color: var(--muted); flex: none; }
+.au-rule-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; cursor: default; }
+.au-rule-main b { font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.au-rule-main small { color: var(--muted); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.au-err { color: var(--warn, #b26a00) !important; }
+.au-next { width: 96px; flex: none; color: var(--muted); font-size: var(--fs-micro); }
+.au-status { width: 100px; flex: none; }
+.au-run-one { height: 26px; padding: 0 10px; border-radius: var(--radius-pill); font-size: var(--fs-micro); color: var(--muted); }
+.au-run-one:disabled { opacity: 0.4; }
+.au-switch { flex: none; }
+.au-spin { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid currentColor; border-top-color: transparent; display: inline-block; animation: au-spin 0.8s linear infinite; }
+@keyframes au-spin { to { transform: rotate(360deg); } }
+.au-runs { width: calc(100% - 48px); margin: 14px 24px 0; border-collapse: collapse; font-size: var(--fs-caption); }
+.au-runs th { text-align: left; height: 30px; color: var(--muted); font-size: 12px; font-weight: var(--fw-regular); border-bottom: 0.5px solid var(--line); }
+.au-runs td { height: 41px; border-bottom: 0.5px solid var(--line); }
+.au-num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.au-recent-title { margin: 18px 24px 0; color: var(--muted); font-size: var(--fs-micro); }
+
+.au-side { padding-left: 10px; padding-right: 8px; }
+.au-side .split-section { padding: 8px 10px 6px; }
+.au-stats-inline { margin: 14px 24px 10px; }
+.au-primary { min-width: 111px; justify-content: center; }
+
+.automation-app .split-main { padding: 0 !important; }
+.au-list { margin-left: 24px !important; margin-right: 24px !important; }
+.au-rule { margin: 0; }
+.au-overview-head { padding: 16px 24px 0; }
+.au-stats-inline { margin: 14px 24px 8px; }
+.au-stat { padding: 16px 16px; }
+.au-switch { margin-left: 12px; }
+
+.au-side .split-section:first-child { margin-top: -24px; }
+.au-list { margin: 0 !important; padding: 0 24px; }
+.au-rule { min-height: 63.7px; }
+.au-status { width: 66px; }
+.au-status .badge { white-space: nowrap; }
+.au-stat { padding: 18px 16px; }
+.au-switch { margin-left: auto; margin-right: 8px; }
+
+.au-overview-head { padding-top: 10px; }
+.au-stat { padding: 16px; }
+.au-stats-inline { margin: 8px 24px 8px; }
+.au-status { width: 66px; height: 20px; display: flex; align-items: center; position: relative; left: -50px; }
+
+.au-stats-inline { margin-top: 14px; margin-bottom: 18px; }
+
+.au-rule .au-switch { width: 36px; }
+
+.au-primary { background: var(--text) !important; color: #fff !important; white-space: nowrap; overflow: visible; }
+.au-status { position: static !important; left: 0 !important; }
+.au-run-one { width: 100px; flex: none; }
+.au-switch { width: 36px; height: 21px; border-radius: 999px; background: rgb(var(--text-rgb) / 0.2); position: relative; display: inline-block; flex: none; }
+.au-switch::after { content: ""; position: absolute; width: 17px; height: 17px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left 160ms ease; }
+.au-switch[aria-checked="true"] { background: rgb(var(--text-rgb) / 0.85); }
+.au-switch[aria-checked="true"]::after { left: 17px; }
+
+.au-run-one { width: 110px; }
+
+.au-list { margin-top: 120px !important; }
+</style>

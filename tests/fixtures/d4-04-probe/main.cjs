@@ -13,6 +13,7 @@ const { registerIdentityIpc } = require(path.join(ROOT, "electron/identity-boots
 const { registerTaskIpc } = require(path.join(ROOT, "electron/task-bootstrap.cjs"));
 const { createDefaultExecutorLauncher } = require(path.join(ROOT, "electron/executor-launcher.cjs"));
 const { createOpenArcRuntime } = require(path.join(ROOT, "electron/runtime-boot.cjs"));
+const { AI_TASK_BUDGET } = require(path.join(ROOT, "electron/task-domain.cjs"));
 
 const uiURL = pathToFileURL(path.join(ROOT, "dist/index.html")).href;
 const ADMIN = "admin@openarc.test";
@@ -108,6 +109,7 @@ app.whenReady().then(async () => {
       userDataDir: userData,
       safeStorage,
       allowAdmin: true,
+      logger: { log: (record) => out("RUNTIME_LOG " + JSON.stringify(record)) },
       executorLauncher: createDefaultExecutorLauncher(),
       executorTestHook: () => executorSeam.fault,
     });
@@ -127,6 +129,9 @@ app.whenReady().then(async () => {
     ipcMain.handle("windows:sync", async () => ({ ok: true, results: [] }));
     ipcMain.handle("browser:navigate", async () => ({ ok: true }));
     ipcMain.handle("browser:action", async () => ({ ok: true }));
+    ipcMain.handle("browser:command", async (_event, command) => command && command.type === "browser/downloads" && command.action === "list" ? { ok: true, items: [] } : { ok: false, error: "BROWSER_UNAVAILABLE" });
+    ipcMain.handle("files:list", async () => ({ ok: true, entries: [] }));
+    ipcMain.handle("files:trashList", async () => ({ ok: true, entries: [] }));
     registerIdentityIpc({
       ipcMain, service: identity.service, authorization: identity.authorization, device: identity.deviceService,
       resource: identity.resourceService, resourceSearch: identity.searchService, resourcePreview: identity.previewService,
@@ -414,9 +419,10 @@ app.whenReady().then(async () => {
     const budgetExecs = identity.toolStore.executionsOfTask(budgetTask.taskId);
     const budgetCalls = identity.taskStore.callsOfTask(budgetTask.taskId);
     const budgetSxc = identity.sideEffectStore.callsOfTask(budgetTask.taskId);
-    check("Y1 · 预算到限 → Task/Step BLOCKED + Run 停止（不是 RUNNING）", budgetBlocked && taskStatus(budgetTask.taskId) === "BLOCKED" && !!budgetStep && budgetStep.status === "BLOCKED" && (!budgetRun || budgetRun.status !== "RUNNING"), JSON.stringify({ task: taskStatus(budgetTask.taskId), step: budgetStep ? budgetStep.status : "none", run: budgetRun ? budgetRun.status : "none" }), "BLOCKED/BLOCKED/非 RUNNING");
+    const budgetEligibility = identity.taskService.getResumeEligibility({ context: aiCtx(), taskId: budgetTask.taskId });
+    check("Y1 · 预算到限 → Task/Step BLOCKED + Run 停止（BUDGET_EXHAUSTED）", budgetBlocked && taskStatus(budgetTask.taskId) === "BLOCKED" && !!budgetStep && budgetStep.status === "BLOCKED" && !!budgetRun && budgetRun.status !== "RUNNING" && budgetEligibility.ok && budgetEligibility.stopReason === "BUDGET_EXHAUSTED", JSON.stringify({ task: taskStatus(budgetTask.taskId), step: budgetStep ? budgetStep.status : "none", run: budgetRun ? budgetRun.status : "none", stopReason: budgetEligibility.ok ? budgetEligibility.stopReason : budgetEligibility.error }), "BLOCKED/BLOCKED/BUDGET_EXHAUSTED");
     check("Y2 · 预算到限 → 0 Artifact / 0 Verification（不适用：该路径无 artifact 提交）", budgetArtifacts === 0 && budgetVerifs === 0, JSON.stringify({ artifacts: budgetArtifacts, verifications: budgetVerifs }), "0 / 0");
-    check("Y3 · 预算到限 → 只发生 bounded 受控 READ（>0 且 <=8），无 WRITE execution", budgetExecs.length > 0 && budgetExecs.length <= 8 && budgetExecs.every((e) => e.tool_id === "resource.search" && e.task_id === budgetTask.taskId), JSON.stringify({ execs: budgetExecs.length, tools: [...new Set(budgetExecs.map((e) => e.tool_id))], modelCalls: budgetCalls.length }), "1..8 次 resource.search（provider 请求 14 次被预算截断）");
+    check(`Y3 · 预算到限 → 只发生 bounded 受控 READ（>0 且 <=${AI_TASK_BUDGET.TOOL_CALLS}），无 WRITE execution`, budgetExecs.length > 0 && budgetExecs.length <= AI_TASK_BUDGET.TOOL_CALLS && budgetExecs.every((e) => e.tool_id === "resource.search" && e.task_id === budgetTask.taskId), JSON.stringify({ execs: budgetExecs.length, tools: [...new Set(budgetExecs.map((e) => e.tool_id))], modelCalls: budgetCalls.length }), `1..${AI_TASK_BUDGET.TOOL_CALLS} 次 resource.search（provider 请求 ${AI_TASK_BUDGET.TOOL_CALLS + 1} 次被预算截断）`);
     check("Y4 · 预算到限 → 0 SideEffectCall / 0 mutation / 无自动重试", budgetSxc.length === 0 && budgetExecs.filter((e) => e.tool_id === "resource.trash").length === 0, JSON.stringify({ sideEffectCalls: budgetSxc.length }), "0 SideEffectCall");
     await waitFor(async () => (await isDisabled("[data-ai-run]")) === false, 30000);
     check("Y5 · 预算到限 → Renderer BLOCKED 且 Run 复位（busy=false）", (await attr(".ai-panel", "data-ai-status")) === "BLOCKED" && (await isDisabled("[data-ai-run]")) === false, await attr(".ai-panel", "data-ai-status"), "BLOCKED + run enabled");
@@ -515,7 +521,7 @@ app.whenReady().then(async () => {
 
     const runningTasks = allAuditTasks.filter((t) => t.status === "RUNNING" || t.status === "PENDING").map((t) => t.task_id + "=" + t.status);
     check("L14 · 所有 task 收敛终态（无 RUNNING / PENDING）", runningTasks.length === 0, JSON.stringify(runningTasks), "[]");
-    check("L15 · 预算停止 task：bounded 受控 READ execution 保留且归属正确，0 Artifact", budgetExecs.length > 0 && budgetExecs.length <= 8 && budgetExecs.every((e) => e.task_id === budgetTask.taskId && e.step_id === budgetStep.step_id) && budgetArtifacts === 0, JSON.stringify({ execs: budgetExecs.length, artifacts: budgetArtifacts }), "1..8 exec + 0 artifact");
+    check("L15 · 预算停止 task：bounded 受控 READ execution 保留且归属正确，0 Artifact", budgetExecs.length > 0 && budgetExecs.length <= AI_TASK_BUDGET.TOOL_CALLS && budgetExecs.every((e) => e.task_id === budgetTask.taskId && e.step_id === budgetStep.step_id) && budgetArtifacts === 0, JSON.stringify({ execs: budgetExecs.length, artifacts: budgetArtifacts }), `1..${AI_TASK_BUDGET.TOOL_CALLS} exec + 0 artifact`);
     report.linkage = { taskCount: allAuditTasks.length, scenarioKinds: scenarioTasks.map((s) => s.kind), noCommit: noCommitDetails };
 
     // Secret scan

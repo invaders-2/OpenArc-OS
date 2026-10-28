@@ -967,24 +967,10 @@ const apimartImagesProtocol = {
         errorCode: ['$.data.error.code', '$.error.code'], errorMessage: ['$.data.error.message', '$.data.fail_reason', '$.error.message', '$.message'],
       },
     },
+    // 文档只有 POST /v1/uploads/images（multipart 字段 file）；/v1/uploads/videos|audios|files 不存在。
+    // 音视频参考素材只能给公网 URL 或 asset://，所以这里不再声明假的 upload-video / upload-audio。
     'upload-image': {
       method: 'POST', path: '/v1/uploads/images', requestMode: 'multipart', bodyTemplate: { file: { $file: '{{inputs.images}}' } },
-      response: { assetUrl: ['$.data.url', '$.url', '$.data.asset_url', '$.asset_url', '$.data.file_url', '$.file_url'] },
-    },
-    'upload-video': {
-      method: 'POST', path: '/v1/uploads/videos', requestMode: 'multipart', bodyTemplate: { file: { $file: '{{inputs.videos}}' } },
-      fallbacks: [
-        { path: '/v1/uploads/files', onStatus: [400, 404, 405, 415, 422, 500, 502, 503] },
-        { path: '/v1/uploads/images', onStatus: [400, 404, 405, 415, 422, 500, 502, 503] },
-      ],
-      response: { assetUrl: ['$.data.url', '$.url', '$.data.asset_url', '$.asset_url', '$.data.file_url', '$.file_url'] },
-    },
-    'upload-audio': {
-      method: 'POST', path: '/v1/uploads/audios', requestMode: 'multipart', bodyTemplate: { file: { $file: '{{inputs.audios}}' } },
-      fallbacks: [
-        { path: '/v1/uploads/files', onStatus: [400, 404, 405, 415, 422, 500, 502, 503] },
-        { path: '/v1/uploads/images', onStatus: [400, 404, 405, 415, 422, 500, 502, 503] },
-      ],
       response: { assetUrl: ['$.data.url', '$.url', '$.data.asset_url', '$.asset_url', '$.data.file_url', '$.file_url'] },
     },
     'audio-speech': {
@@ -1320,6 +1306,50 @@ apimartImagesProtocol.uiSchemas['apimart-seedream5'] = [
   { key: 'resolution', label: '分辨率', type: 'select', default: '1k', options: ['1k', '1.5k', '2k'].map((value) => ({ label: value.toUpperCase(), value })) },
   { key: 'n', label: '数量', type: 'number', min: 1, max: 1, default: 1 },
 ]
+// Seedream 4.0 / 4.5 / 5.0-Lite：文档分辨率档位是大写 1K/2K/4K（Lite 只支持 2K/3K/4K）。
+// 之前没有专用 profile，会落到通用 generate 发小写 1k，Lite 必错 → 按族补 profile + upper derive。
+for (const [profileId, match, resolutions, defaultResolution, label] of [
+  ['seedream-5-lite', ['seedream-5-0-lite', 'seedream-5.0-lite', 'doubao-seedream-5-0-lite', 'doubao-seedream-5.0-lite'], ['2K', '3K', '4K'], '2K', 'APIMart Seedream 5.0 Lite'],
+  ['seedream-4.5', ['seedream-4.5', 'seedream-4-5', 'doubao-seedream-4.5', 'doubao-seedream-4-5'], ['2K', '4K'], '2K', 'APIMart Seedream 4.5'],
+  ['seedream-4', ['seedream-4.0', 'seedream-4-0', 'doubao-seedream-4.0', 'doubao-seedream-4-0', 'seedream-4'], ['1K', '2K', '4K'], '2K', 'APIMart Seedream 4.0'],
+]) {
+  for (const intent of ['generate', 'edit']) {
+    const operationId = profileId + '-' + intent
+    apimartImagesProtocol.operations[operationId] = {
+      ...apimartImagesProtocol.operations.generate,
+      derive: {
+        size: { op: 'coalesce', values: [ref('params.size'), ref('params.aspect_ratio'), ref('params.aspectRatio'), literal('auto')] },
+        // 大写后按本族档位收敛（如 Lite 传 1K → 2K），避免文档不支持的档位直接 400
+        resolution: {
+          op: 'lookup',
+          value: { op: 'upper', value: { op: 'coalesce', values: [ref('params.resolution'), literal(defaultResolution)] } },
+          cases: Object.fromEntries(resolutions.map((value) => [value, value])),
+          fallback: defaultResolution,
+        },
+      },
+      bodyTemplate: {
+        model: '{{model}}', prompt: '{{prompt}}', n: '{{params.n}}', size: '{{derived.size}}', resolution: '{{derived.resolution}}',
+        ...(intent === 'edit' ? { image_urls: '{{inputs.images[*].url}}' } : {}),
+        nsfw_check: '{{params.nsfw_check}}',
+      },
+    }
+    apimartImagesProtocol.workflows[operationId] = { ...apimartImagesProtocol.workflows[intent], submit: operationId }
+  }
+  apimartImagesProtocol.modelProfiles[profileId] = {
+    label, match, capabilities: ['image.generate', 'image.edit'],
+    workflows: { 'image.generate': profileId + '-generate', 'image.edit': profileId + '-edit' },
+    uiSchemas: [profileId],
+    assets: apimartImagesProtocol.modelProfiles['seedream-5-pro'].assets,
+    defaults: { size: 'auto', resolution: defaultResolution, n: 1 },
+    limits: { resolution: { options: resolutions, default: defaultResolution }, references: { images: { max: 14 } }, output: { count: { min: 1, max: 4 } } },
+  }
+  apimartImagesProtocol.uiSchemas[profileId] = [
+    { key: 'size', label: '尺寸（像素或支持的比例）', type: 'text' },
+    { key: 'resolution', label: '分辨率', type: 'select', default: defaultResolution, options: resolutions.map((value) => ({ label: value, value })) },
+    { key: 'n', label: '数量', type: 'number', min: 1, max: 4, default: 1 },
+    { key: 'nsfw_check', label: '提交前内容审核', type: 'toggle', default: false },
+  ]
+}
 for (const [profileId, maxImages] of [['grok-imagine-image-2.0', 3], ['grok-imagine-image-quality', 3], ['grok-imagine-image', 5], ['grok-imagine-2.0-ext', 0], ['grok-imagine-1.5-apimart', 5], ['grok-imagine-1.5-ext', 5]]) {
   const ext = profileId === 'grok-imagine-2.0-ext'
   const relay15 = profileId.startsWith('grok-imagine-1.5-')

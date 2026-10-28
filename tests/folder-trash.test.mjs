@@ -1,5 +1,5 @@
 /**
- * 桌面虚拟文件夹 · 系统回收站语义单测（electron/folder-trash.cjs 纯逻辑 +
+ * 桌面虚拟文件夹 · 系统回收站语义单测（electron/folder-trash.ts 纯逻辑 +
  * file-service.cjs 的 groupId 分组），并覆盖任务要求的边界：
  *   · 嵌套子树整棵进回收站
  *   · 恢复回原位与原名称
@@ -16,7 +16,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const folderTrash = require("../electron/folder-trash.cjs");
+const folderTrash = require("../electron/folder-trash.ts");
 const { createFileService } = require("../electron/file-service.cjs");
 
 const F = (id, name, parentId, x = 10, y = 20) => (parentId ? { id, name, parentId, x, y } : { id, name, x, y });

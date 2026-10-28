@@ -322,7 +322,7 @@ test("③ 非白名单资产 URL 被过滤，不能借更新检查访问任意�
 
 // ── ④ 装配契约 ────────────────────────────────────────────────────────────
 test("④ main.cjs 装配：三个能力都走 desktop:command，代理 applyProxy/safeStorage 已接", () => {
-  const main = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(ROOT, "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes('require("./desktop-cache-service.cjs")'));
   assert.ok(main.includes('require("./desktop-update-service.cjs")'));
   assert.ok(main.includes("createDesktopCacheService({ userDataDir"));

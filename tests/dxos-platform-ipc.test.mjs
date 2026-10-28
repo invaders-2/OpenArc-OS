@@ -190,15 +190,15 @@ function loadPreloadSurface() {
   return exposed;
 }
 
-test("preload：platform 是第 22 个顶层键，仅暴露 command，且无原始能力", () => {
+test("preload：platform 是第 24 个顶层键，仅暴露 command，且无原始能力", () => {
   const exposed = loadPreloadSurface();
   assert.ok(exposed && exposed.name === "openarc");
   const api = exposed.api;
   const topKeys = Object.keys(api);
   assert.ok(topKeys.includes("platform"), "缺少顶层键 platform");
-  // B7c 起在 platform 之后追加后续批次键（integration / market / …），故只固定 platform 的位置（第 22 键，index 21）。
-  assert.ok(topKeys.length >= 22, "platform 至少是第 22 个顶层键（第 21 是 B6a automation）");
-  assert.equal(topKeys.indexOf("platform"), 21);
+  // automation 之后既有 calendar / uploadConsent，再接 platform；后续批次继续追加。
+  assert.ok(topKeys.length >= 24, "platform 至少是第 24 个顶层键");
+  assert.equal(topKeys.indexOf("platform"), 23);
   assert.deepEqual(Object.keys(api.platform), ["command"]);
   assert.equal(typeof api.platform.command, "function");
   // 负向断言：桥值只允许 function（以及既有 files 对象等复合桥），不允许原始 ipcRenderer

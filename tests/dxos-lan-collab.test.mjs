@@ -330,7 +330,7 @@ test("④ desktop:command 委托：命令白名单 / trusted 由既有 bootstrap
 });
 
 test("⑤ main.cjs 装配契约：opt-in LAN 服务注入 canvas service / authorization", () => {
-  const main = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(ROOT, "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes('require("./lan-collab-service.cjs")'));
   assert.ok(main.includes("createLanCollabService({"));
   assert.ok(main.includes("canvasService: identity.canvasDocService"));

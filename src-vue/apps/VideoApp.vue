@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { t } from "../i18n";
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { ChevronLeft, ChevronRight, Download, Pause, Play, Plus, Trash2, X } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { ChevronLeft, ChevronRight, Download, Film, Pause, Play, Plus, Sparkles, Trash2, X } from "lucide-vue-next";
 import { iconUrl } from "../apps";
 import { useShellStore } from "../stores/shell";
 import { fileUrl, kindOfExt } from "../wallpapers";
@@ -12,6 +12,8 @@ import { fileUrl, kindOfExt } from "../wallpapers";
  *   多轨编辑：media 域真实时间线（视频/音频/字幕轨、clip in/out、转场、时长对齐），
  *            渲染计划预览 → 提交渲染（media/render/submit）；粗剪走 media/rough-cut。
  *   所有命令经 window.openarc.media.command（{ok,value} / {ok:false,error,detail}）。
+ *   quick/multi 草稿存 media.video_project_drafts（owner + expectedVersion），不进入 render job；
+ *   旧 localStorage 只在用户显式点击导入时读取。
  *   本机限制：访达文件读取上限 12 MB，更大的素材不能经此导入多轨工程（如实提示）。
  */
 type Asset = { key: string; folderId: string; id: string; name: string };
@@ -49,47 +51,14 @@ type RenderJob = { id?: string; status?: string; progress?: number; error?: stri
 
 const shell = useShellStore();
 const bridge = window.openarc?.video;
+const videoIcon = iconUrl("video");
 const mediaBridge = window.openarc?.media;
-const KEY = "oa-video-project";
-const MEDIA_KEY = "oa-video-media-project";
-const saved = (() => {
-  try {
-    return JSON.parse(localStorage.getItem(KEY) || "null");
-  } catch {
-    return null;
-  }
-})();
-const savedMedia = (() => {
-  try {
-    return JSON.parse(localStorage.getItem(MEDIA_KEY) || "null");
-  } catch {
-    return null;
-  }
-})();
+const project = reactive<{ name: string; resolution: string; clips: QuickClip[] }>({ name: "未命名剪辑", resolution: "1080p", clips: [] });
 
-const project = reactive<{ name: string; resolution: string; clips: QuickClip[] }>({
-  name: typeof saved?.name === "string" ? saved.name : "未命名剪辑",
-  resolution: typeof saved?.resolution === "string" ? saved.resolution : "1080p",
-  clips: Array.isArray(saved?.clips) ? saved.clips : [],
-});
-watch(project, () => {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(project));
-  } catch {
-    /* 存储不可用 */
-  }
-}, { deep: true });
-
-/* ── 多轨工程 ─────────────────────────────────────────────────────────── */
+/* ── 多轨工程：media draft 为权威；旧键只在显式导入函数中读取 ───────────── */
 const mode = ref<"quick" | "multi">("quick");
-const mediaProjectId = ref<string>(
-  typeof savedMedia?.projectId === "string" && savedMedia.projectId
-    ? savedMedia.projectId
-    : crypto.randomUUID(),
-);
-const sources = reactive<Record<string, { folderId: string; id: string }>>(
-  savedMedia && typeof savedMedia.sources === "object" && savedMedia.sources ? savedMedia.sources : {},
-);
+const mediaProjectId = ref<string>(crypto.randomUUID());
+const sources = reactive<Record<string, { folderId: string; id: string }>>({});
 function blankTimeline(): Timeline {
   return {
     schemaVersion: "1.0",
@@ -107,18 +76,136 @@ function blankTimeline(): Timeline {
     transitions: [],
   };
 }
-const timeline = reactive<Timeline>(
-  savedMedia && savedMedia.timeline && Array.isArray(savedMedia.timeline.tracks) && savedMedia.timeline.tracks.length
-    ? { ...savedMedia.timeline, projectId: mediaProjectId.value }
-    : blankTimeline(),
-);
-watch([timeline, sources, mediaProjectId], () => {
-  try {
-    localStorage.setItem(MEDIA_KEY, JSON.stringify({ projectId: mediaProjectId.value, timeline, sources }));
-  } catch {
-    /* 存储不可用 */
+const timeline = reactive<Timeline>(blankTimeline());
+type VideoDraft = { projectId: string; quick: { name?: string; resolution?: string; clips?: QuickClip[] }; timeline: Timeline; sources: Record<string, { folderId: string; id: string }>; version: number; updatedAt: number };
+const draftReady = ref(false);
+const draftSaving = ref(false);
+const draftDirty = ref(false);
+const draftConflict = ref(false);
+const draftError = ref("");
+const draftNotice = ref("");
+const draftVersion = ref(0);
+const draftUpdatedAt = ref<number | null>(null);
+let generation = 0;
+let applyingDraft = false;
+let saveTimer: number | undefined;
+let saveChain: Promise<void> = Promise.resolve();
+let identityOff: (() => void) | null = null;
+const draftStatus = computed(() => draftConflict.value ? "版本冲突" : draftError.value ? "保存失败" : !draftReady.value ? "正在读取" : draftSaving.value ? "正在保存" : draftDirty.value ? "待保存" : draftVersion.value === 0 ? "尚未保存" : "工程已保存");
+function replaceSources(next: Record<string, { folderId: string; id: string }>) {
+  for (const key of Object.keys(sources)) delete sources[key];
+  Object.assign(sources, next || {});
+}
+function resetDraft() {
+  applyingDraft = true;
+  mediaProjectId.value = crypto.randomUUID();
+  project.name = "未命名剪辑";
+  project.resolution = "1080p";
+  project.clips.splice(0);
+  replaceSources({});
+  Object.assign(timeline, blankTimeline());
+  selected.value = null;
+  selectedMClipId.value = null;
+  mediaAssets.value = [];
+  plan.value = null;
+  job.value = null;
+  draftVersion.value = 0;
+  draftUpdatedAt.value = null;
+  draftConflict.value = false;
+  draftDirty.value = false;
+  applyingDraft = false;
+}
+async function applyDraft(draft: VideoDraft) {
+  applyingDraft = true;
+  project.name = typeof draft.quick?.name === "string" ? draft.quick.name : "未命名剪辑";
+  project.resolution = typeof draft.quick?.resolution === "string" ? draft.quick.resolution : "1080p";
+  project.clips.splice(0, project.clips.length, ...(Array.isArray(draft.quick?.clips) ? draft.quick.clips : []));
+  replaceSources(draft.sources || {});
+  Object.assign(timeline, draft.timeline, { projectId: mediaProjectId.value });
+  draftVersion.value = draft.version;
+  draftUpdatedAt.value = draft.updatedAt;
+  selected.value = project.clips[0]?.uid || null;
+  await nextTick();
+  applyingDraft = false;
+  draftReady.value = true;
+  draftDirty.value = false;
+}
+async function loadDraft() {
+  const current = generation;
+  draftReady.value = false;
+  draftError.value = "";
+  draftNotice.value = "";
+  const latest = await mediaCall<{ draft: VideoDraft | null }>("media/draft/latest", {});
+  if (current !== generation) return;
+  if (!latest) { draftError.value = mediaError.value; return; }
+  if (latest.draft) {
+    mediaProjectId.value = latest.draft.projectId;
+    project.name = typeof latest.draft.quick?.name === "string" ? latest.draft.quick.name : project.name;
   }
-}, { deep: true });
+  const ensured = await mediaCall<{ projectId: string }>("media/project/ensure", { projectId: mediaProjectId.value, projectName: project.name });
+  if (current !== generation) return;
+  if (!ensured) { draftError.value = mediaError.value; return; }
+  const value = await mediaCall<{ draft: VideoDraft | null }>("media/draft/get", { projectId: mediaProjectId.value });
+  if (current !== generation) return;
+  if (!value) { draftError.value = mediaError.value; return; }
+  if (value.draft) await applyDraft(value.draft);
+  else { draftVersion.value = 0; draftReady.value = true; draftDirty.value = false; }
+  if (current === generation) await loadMediaAssets();
+}
+async function saveDraft() {
+  if (!draftReady.value || draftConflict.value || !draftDirty.value) return;
+  const current = generation;
+  const expectedVersion = draftVersion.value;
+  const snapshot = JSON.parse(JSON.stringify({ quick: project, timeline, sources }));
+  draftSaving.value = true;
+  draftDirty.value = false;
+  draftError.value = "";
+  const value = await mediaCall<{ draft: VideoDraft }>("media/draft/save", { projectId: mediaProjectId.value, ...snapshot, expectedVersion });
+  if (current !== generation) return;
+  draftSaving.value = false;
+  if (!value?.draft) {
+    draftDirty.value = true;
+    const failure = mediaError.value;
+    mediaError.value = "";
+    draftError.value = failure;
+    if (failure.includes("MEDIA_CONFLICT")) draftConflict.value = true;
+    return;
+  }
+  draftVersion.value = value.draft.version;
+  draftUpdatedAt.value = value.draft.updatedAt;
+}
+function queueDraftSave() {
+  if (!draftReady.value || draftConflict.value || applyingDraft) return;
+  draftDirty.value = true;
+  if (saveTimer !== undefined) window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    saveTimer = undefined;
+    saveChain = saveChain.then(saveDraft);
+  }, 250);
+}
+watch([project, timeline, sources], queueDraftSave, { deep: true });
+function readLegacyDraft() {
+  const read = (key: string) => { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; } };
+  return { quick: read("oa-video-project"), media: read("oa-video-media-project") };
+}
+async function importLegacyDraft() {
+  const current = generation;
+  draftError.value = "";
+  draftNotice.value = "";
+  const legacy = readLegacyDraft();
+  const value = await mediaCall<{ imported: boolean; draft: VideoDraft }>("media/draft/import-legacy", {
+    projectId: mediaProjectId.value,
+    projectName: typeof legacy.quick?.name === "string" ? legacy.quick.name : project.name,
+    quick: legacy.quick && typeof legacy.quick === "object" ? legacy.quick : { name: "未命名剪辑", resolution: "1080p", clips: [] },
+    timeline: legacy.media?.timeline && typeof legacy.media.timeline === "object" ? legacy.media.timeline : blankTimeline(),
+    sources: legacy.media?.sources && typeof legacy.media.sources === "object" ? legacy.media.sources : {},
+  });
+  if (current !== generation) return;
+  if (!value?.draft) { draftError.value = "旧数据导入未完成：" + mediaError.value + "。旧数据未删除，可重试。"; return; }
+  draftConflict.value = false;
+  await applyDraft(value.draft);
+  draftNotice.value = value.imported ? "已导入旧版视频草稿；旧数据未删除。" : "当前账号已有草稿，未覆盖；旧数据未删除。";
+}
 
 const ff = ref<{ available: boolean; version?: string } | null>(null);
 const assets = ref<Asset[]>([]);
@@ -318,15 +405,18 @@ async function mediaCall<T>(command: string, payload: Record<string, unknown>): 
 async function ensureMediaProject() {
   if (!mediaBridge) return;
   if (mediaBusy.value === "project") return;
+  const current = generation;
   mediaBusy.value = "project";
   const ensured = await mediaCall<{ projectId: string }>("media/project/ensure", { projectId: mediaProjectId.value, projectName: project.name });
+  if (current !== generation) return;
   mediaBusy.value = null;
   if (!ensured) return;
   await Promise.all([loadMediaAssets(), mediaCall("media/health", {})]);
 }
 async function loadMediaAssets() {
+  const current = generation;
   const value = await mediaCall<{ assets: MediaAsset[] }>("media/asset/list", { projectId: mediaProjectId.value });
-  if (value) mediaAssets.value = Array.isArray(value.assets) ? value.assets : [];
+  if (current === generation && value) mediaAssets.value = Array.isArray(value.assets) ? value.assets : [];
 }
 async function importAsset(a: Asset) {
   if (!mediaBridge || mediaBusy.value) return;
@@ -359,6 +449,21 @@ async function importAsset(a: Asset) {
   addAssetClip(savedAsset.asset);
   mediaNotice.value = "已导入「" + a.name + "」并加入时间线。";
 }
+const videoReady = ref(false);
+watch(() => clip.value?.uid, () => (videoReady.value = false));
+const lanes = computed(() => {
+  const main = project.clips.map((c) => ({ ...c, uid: c.uid }));
+  return [
+    { name: "主画面", clips: main },
+    { name: "人声", clips: [] },
+    { name: "音乐", clips: [] },
+    { name: "字幕", clips: [] },
+  ];
+});
+const maxEnd = computed(() => Math.max(15, ...project.clips.map((c) => c.end), 1));
+const playRatio = computed(() => Math.max(0, Math.min(1, now.value / maxEnd.value)));
+const clipLeft = (c: any) => (c.start / maxEnd.value) * 100;
+const clipWidth = (c: any) => Math.max(2, ((c.end - c.start) / maxEnd.value) * 100);
 function trackForKind(kind: string): Track | undefined {
   if (kind === "audio") return timeline.tracks.find((t) => t.type === "music");
   if (kind === "subtitle") return timeline.tracks.find((t) => t.type === "subtitle");
@@ -608,13 +713,35 @@ onMounted(async () => {
   offProgress = bridge?.onProgress((e) => (progress.value = e.ratio)) ?? null;
   ff.value = bridge ? await bridge.status().catch(() => ({ available: false })) : null;
   void loadAssets();
-  void ensureMediaProject();
+  void loadDraft();
+  let account = "";
+  identityOff = window.openarc?.identity?.onEvent((event) => {
+    const snapshot = (event.snapshot || {}) as { userId?: string; sessionRef?: string };
+    const next = String(snapshot.userId || snapshot.sessionRef || "");
+    if (account && next === account) return;
+    account = next;
+    generation += 1;
+    if (saveTimer !== undefined) window.clearTimeout(saveTimer);
+    saveTimer = undefined;
+    draftReady.value = false;
+    draftSaving.value = false;
+    draftError.value = "";
+    draftNotice.value = "";
+    mediaError.value = "";
+    resetDraft();
+    void loadDraft();
+  }) || null;
 });
-onBeforeUnmount(() => offProgress?.());
+onBeforeUnmount(() => {
+  generation += 1;
+  identityOff?.();
+  if (saveTimer !== undefined) window.clearTimeout(saveTimer);
+  offProgress?.();
+});
 </script>
 
 <template>
-  <div class="split video-app">
+  <div class="split video-app video-proto">
     <nav class="split-side" :aria-label="t('素材')">
       <div class="split-section">{{ t("素材") }} <small class="planned-count">{{ assets.length }}</small></div>
       <div class="notes-list">
@@ -642,7 +769,13 @@ onBeforeUnmount(() => offProgress?.());
     </nav>
 
     <div class="split-main vd-main">
-      <div class="pane-toolbar">
+      <div class="pane-toolbar vd-proto-toolbar">
+        <img :src="videoIcon" alt="" width="18" height="18" />
+        <strong class="vd-title">{{ project.name || "未命名剪辑" }}</strong>
+        <span class="vd-meta" data-video-draft-status>{{ project.resolution }} · {{ fmt(total) }} · {{ draftStatus }}</span>
+        <div class="toolbar-spacer" />
+        <button type="button" class="planned-today" data-video-legacy-import :disabled="!draftReady" @click="importLegacyDraft">{{ t("导入旧版本机数据") }}</button>
+        <button type="button" class="vd-agent" data-video-agent disabled title="Agent 粗剪没有后端能力（NOT VERIFIED）"><Sparkles :size="13" /> Agent 粗剪</button>
         <div class="segmented text" role="group" :aria-label="t('剪辑模式')" data-video-mode>
           <button :aria-pressed="mode === 'quick'" data-video-mode-quick @click="setMode('quick')">{{ t("快速单轨") }}</button>
           <button :aria-pressed="mode === 'multi'" data-video-mode-multi @click="setMode('multi')">{{ t("多轨编辑") }}</button>
@@ -657,7 +790,7 @@ onBeforeUnmount(() => offProgress?.());
         </select>
         <template v-if="mode === 'quick'">
           <button v-if="exporting" class="planned-today" @click="bridge?.cancel()"><X :size="12" /> {{ t("取消") }}</button>
-          <button v-else class="planned-cta vd-export" :disabled="!project.clips.length || !ff?.available" @click="exportVideo">
+          <button v-else class="planned-cta vd-export" data-video-export :disabled="!project.clips.length || !ff?.available" @click="exportVideo">
             <Download :size="13" /> {{ t("导出") }}
           </button>
         </template>
@@ -669,66 +802,68 @@ onBeforeUnmount(() => offProgress?.());
       </div>
       <div v-if="exporting" class="vd-progress" role="progressbar" :aria-valuenow="Math.round(progress * 100)"><span :style="{ width: progress * 100 + '%' }" /></div>
       <p v-if="message" class="vd-msg">{{ message }}</p>
+      <p v-if="draftError" class="mt-error" role="alert" data-video-draft-error>{{ draftError }} <button v-if="draftConflict" class="mt-mini" type="button" data-video-draft-reload @click="loadDraft">{{ t("重新读取后端草稿") }}</button></p>
+      <p v-if="draftNotice" class="vd-msg" role="status" data-video-draft-notice>{{ draftNotice }}</p>
 
-      <!-- 快速单轨（保留原界面） -->
+      <!-- 原型：素材 / 预览 / 片段属性 / 时间线 -->
       <template v-if="mode === 'quick'">
-        <div v-if="!project.clips.length" class="empty-content">
-          <img class="large-icon" :src="iconUrl('video')" alt="" draggable="false" />
-          <h2 class="planned-title">{{ t("从左侧加入片段") }}</h2>
-          <p>{{ t("按顺序拼接多个视频，裁剪每段的入点和出点，然后导出成一个 MP4。") }}</p>
+        <div class="vd-proto" data-video-proto="1">
+          <div class="vd-top">
+            <div class="vd-bin" data-video-bin>
+              <div class="vd-bin-cap">素材 · {{ assets.length }}</div>
+              <button v-for="a in assets" :key="a.key" type="button" class="vd-bin-clip" data-video-bin-clip @click="add(a)">
+                <span class="vd-bin-thumb"><Film :size="16" /><small>视频</small></span>
+                <span class="vd-bin-name">{{ baseName(a.name) }}</span>
+              </button>
+              <p v-if="!assets.length" class="vd-hint">访达里还没有视频。</p>
+            </div>
+            <div class="vd-prev" data-video-preview>
+              <div class="vd-screen" data-video-screen>
+                <video v-if="clip" :key="clip.uid" ref="player" :src="fileUrl(clip.folderId, clip.id)" preload="metadata" @loadedmetadata="onLoaded" @loadeddata="videoReady = true" @timeupdate="onTime" @play="playing = true" @pause="playing = false" />
+                <div v-if="clip && !playing && now === 0" class="vd-screen-fallback"><Film :size="26" /><span>预览不可用（NOT VERIFIED）</span></div>
+                <div v-else class="vd-screen-empty"><Film :size="28" /><span>从素材格点击加入片段</span></div>
+              </div>
+              <div class="vd-prev-bar">
+                <button type="button" class="vd-vbtn" aria-label="回到开头" @click="now = 0">⏮</button>
+                <button type="button" class="vd-vbtn vd-play" @click="togglePlay">{{ playing ? "⏸" : "▶" }}</button>
+                <span class="vd-time">{{ fmt(now) }} / {{ fmt(total) }}</span>
+              </div>
+            </div>
+            <aside class="vd-props" data-video-props>
+              <b>片段属性</b>
+              <template v-if="clip">
+                <dl class="vd-kv">
+                  <dt>名称</dt><dd>{{ baseName(clip.name) }}</dd>
+                  <dt>起点</dt><dd>{{ fmt(clip.start) }}</dd>
+                  <dt>时长</dt><dd>{{ fmt(clip.end - clip.start) }}</dd>
+                </dl>
+                <label class="vd-field">音量<input type="range" min="0" max="1" step="0.01" value="1" disabled title="音量写入没有后端能力（NOT VERIFIED）" /></label>
+                <label class="vd-field">转场<select disabled title="转场没有后端能力（NOT VERIFIED）"><option>淡入（未接入）</option></select></label>
+                <button type="button" class="vd-danger" @click="remove(clip.uid)">删除片段</button>
+              </template>
+              <span v-else class="vd-hint">在时间线上点选一个片段</span>
+            </aside>
+          </div>
+
+          <div class="vd-timeline-proto" data-video-timeline>
+            <div class="vd-tl-bar">
+              <button type="button" class="vd-split" disabled title="分割片段没有后端能力（NOT VERIFIED）">在播放头处分割</button>
+              <span class="vd-hint">{{ timeline.durationMs ? fmtMs(timeline.durationMs) : "还没有片段" }}</span>
+            </div>
+            <div class="vd-ruler" data-video-ruler>
+              <span v-for="sec in 16" :key="sec" :style="{ left: ((sec - 1) / 15) * 100 + '%' }">{{ sec - 1 }}s</span>
+            </div>
+            <div class="vd-tracks">
+              <div v-for="(lane, li) in lanes" :key="lane.name" class="vd-track" data-video-track>
+                <span class="vd-track-name">{{ lane.name }}</span>
+                <div class="vd-lane">
+                  <div v-for="c in lane.clips" :key="c.uid" class="vd-clipbar" data-video-clipbar :class="{ on: c.uid === selected }" :style="{ left: clipLeft(c) + '%', width: clipWidth(c) + '%' }" @click="select(c.uid)">{{ baseName(c.name) }}</div>
+                </div>
+              </div>
+              <div class="vd-playhead" data-video-playhead :style="{ left: 'calc(84px + (100% - 84px) * ' + playRatio + ')' }" />
+            </div>
+          </div>
         </div>
-        <template v-else>
-          <div class="vd-stage">
-            <video
-              v-if="clip"
-              ref="player"
-              :key="clip.uid"
-              class="vd-video"
-              :src="fileUrl(clip.folderId, clip.id)"
-              preload="auto"
-              @loadedmetadata="onLoaded"
-              @timeupdate="onTime"
-              @play="playing = true"
-              @pause="playing = false"
-            />
-          </div>
-          <div class="vd-controls">
-            <button class="music-play" :aria-label="playing ? t('暂停') : t('播放片段')" @click="togglePlay"><Pause v-if="playing" :size="15" /><Play v-else :size="15" /></button>
-            <button class="planned-today" @click="previewAll">{{ t("预览全片") }}</button>
-            <span class="mono vd-time">{{ fmt(now) }}</span>
-            <div class="toolbar-spacer" />
-            <template v-if="clip">
-              <label class="vd-field">{{ t("入点") }} <input v-model.number="clip.start" type="number" step="0.1" min="0" @change="clamp(clip)" /></label>
-              <button class="planned-today" :title="t('把入点设为当前播放位置')" @click="setIn">{{ t("设为当前") }}</button>
-              <label class="vd-field">{{ t("出点") }} <input v-model.number="clip.end" type="number" step="0.1" min="0" @change="clamp(clip)" /></label>
-              <button class="planned-today" :title="t('把出点设为当前播放位置')" @click="setOut">{{ t("设为当前") }}</button>
-            </template>
-          </div>
-          <div class="vd-timeline" role="list" :aria-label="t('时间线')">
-            <button
-              v-for="c in project.clips"
-              :key="c.uid"
-              type="button"
-              role="listitem"
-              class="vd-clip"
-              :aria-current="c.uid === selected ? 'true' : undefined"
-              :style="{ flexGrow: Math.max(0.5, c.end - c.start) }"
-              @click="select(c.uid)"
-            >
-              <span class="vd-clip-name">{{ baseName(c.name) }}</span>
-              <small>{{ fmt(c.end - c.start) }}</small>
-            </button>
-          </div>
-          <div class="vd-footer">
-            <span>{{ project.clips.length }} 个片段 · 总长 {{ fmt(total) }}</span>
-            <div class="toolbar-spacer" />
-            <template v-if="clip">
-              <button class="icon-button" :aria-label="t('前移')" :title="t('前移')" @click="move(-1)"><ChevronLeft :size="15" /></button>
-              <button class="icon-button" :aria-label="t('后移')" :title="t('后移')" @click="move(1)"><ChevronRight :size="15" /></button>
-              <button class="icon-button" :aria-label="t('移出时间线')" :title="t('移出时间线')" @click="remove(clip.uid)"><Trash2 :size="14" /></button>
-            </template>
-          </div>
-        </template>
       </template>
 
       <!-- 多轨编辑 -->
@@ -871,17 +1006,17 @@ onBeforeUnmount(() => offProgress?.());
 .mt { flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 18px; display: flex; flex-direction: column; gap: 10px; }
 .mt-error { margin: 0; color: var(--failed); font-size: var(--fs-caption); }
 .mt-note { margin: 0; color: var(--muted); font-size: var(--fs-caption); }
-.mt-rough { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 8px 10px; background: rgb(var(--text-rgb) / 0.03); }
+.mt-rough { border: 0; border-radius: var(--radius-lg); padding: 8px 10px; background: rgb(var(--text-rgb) / 0.03); }
 .mt-rough-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .mt-rough-head small { color: var(--muted); font-size: var(--fs-micro); }
 .mt-rough-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .mt-textarea { width: 100%; min-height: 54px; resize: vertical; box-sizing: border-box; margin-top: 6px; }
-.mt-input { min-height: 28px; padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-caption); }
+.mt-input { min-height: 28px; padding: 3px 8px; border: 0; border-radius: var(--radius-md); background: var(--sunken); color: var(--text); font-size: var(--fs-caption); }
 .mt-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .mt-field { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--muted); }
-.mt-field input { width: 84px; min-height: 26px; padding: 2px 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-caption); }
+.mt-field input { width: 84px; min-height: 26px; padding: 2px 6px; border: 0; border-radius: var(--radius-sm); background: var(--sunken); color: var(--text); font-size: var(--fs-caption); }
 .mt-hint { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; border-radius: var(--radius-md); background: rgb(var(--warning-rgb) / 0.12); color: var(--text); font-size: var(--fs-caption); }
-.mt-tracks { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.mt-tracks { border: 0; background: rgb(var(--text-rgb) / 0.035); border-radius: var(--radius-lg); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
 .mt-ruler { display: flex; justify-content: space-between; color: var(--muted); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .mt-track { display: flex; flex-direction: column; gap: 4px; }
 .mt-track-head { display: flex; align-items: center; gap: 6px; }
@@ -896,24 +1031,134 @@ onBeforeUnmount(() => offProgress?.());
 .mt-empty { position: absolute; left: 8px; top: 8px; margin: 0; color: var(--muted); font-size: var(--fs-micro); }
 .mt-sub-add { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .mt-sub-add .mt-input { flex: 1 1 220px; }
-.mt-mini { min-height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--fs-micro); cursor: pointer; }
+.mt-mini { min-height: 22px; padding: 0 8px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--fs-micro); cursor: pointer; }
 .mt-mini:hover { color: var(--text); }
 .mt-mini[aria-pressed="true"] { color: var(--text); border-color: var(--text); }
-.mt-editor { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.mt-editor { border: 0; background: rgb(var(--text-rgb) / 0.035); border-radius: var(--radius-lg); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 .mt-editor-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .mt-editor-head small { color: var(--muted); font-size: var(--fs-micro); }
 .mt-editor-grid { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mt-preview { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mt-preview-video { width: 180px; max-height: 110px; border-radius: var(--radius-md); background: #000; }
 .mt-candidate { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
-.mt-issues-box { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 8px 10px; }
+.mt-issues-box { border: 0; background: rgb(var(--text-rgb) / 0.035); border-radius: var(--radius-lg); padding: 8px 10px; }
 .mt-issues-box h4 { margin: 0 0 4px; font-size: var(--fs-caption); font-weight: var(--fw-medium); }
 .mt-issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-micro); color: var(--muted); }
 .mt-issues li[data-severity="error"] { color: var(--failed); }
-.mt-plan, .mt-job { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 8px 10px; }
+.mt-plan, .mt-job { border: 0; background: rgb(var(--text-rgb) / 0.035); border-radius: var(--radius-lg); padding: 8px 10px; }
 .mt-plan h4, .mt-job h4 { margin: 0 0 4px; font-size: var(--fs-caption); font-weight: var(--fw-medium); }
 .mt-plan-rows { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: var(--fs-caption); color: var(--muted); }
 .mt-plan-rows b { color: var(--text); font-weight: var(--fw-medium); }
 .mt-inputs { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-micro); color: var(--muted); }
 .mt-inputs li { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.video-proto .split-side { display: none !important; }
+.video-proto .split-main { margin-left: 0 !important; padding: 0 !important; }
+.vd-proto-toolbar { height: 52px; min-height: 52px; margin: 0; padding: 0 16px; }
+.vd-title { font-size: 15px; font-weight: var(--fw-medium); }
+.vd-meta { color: var(--muted); font-size: var(--fs-micro); margin-left: 8px; }
+.vd-agent { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-caption); }
+.vd-proto { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px; gap: 12px; }
+.vd-top { display: grid; grid-template-columns: 260px minmax(0, 1fr) 260px; gap: 12px; min-height: 250px; }
+.vd-bin { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; }
+.vd-bin-cap { grid-column: span 2; color: var(--muted); font-size: var(--fs-micro); }
+.vd-bin-clip { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.04); }
+.vd-bin-thumb { height: 52px; display: grid; place-items: center; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.08); color: var(--muted); }
+.vd-bin-name { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vd-prev { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.vd-screen { aspect-ratio: 16 / 9; background: #111; border-radius: var(--radius-md); overflow: hidden; display: grid; place-items: center; }
+.vd-screen video { width: 100%; height: 100%; object-fit: contain; }
+.vd-screen-empty { color: #aaa; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: var(--fs-micro); }
+.vd-prev-bar { display: flex; align-items: center; gap: 8px; }
+.vd-vbtn { width: 28px; height: 28px; border-radius: 50%; background: rgb(var(--text-rgb) / 0.08); }
+.vd-play { }
+.vd-time { color: var(--muted); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.vd-props { border-left: 0.5px solid var(--line); padding-left: 12px; display: flex; flex-direction: column; gap: 10px; }
+.vd-kv { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 4px 8px; font-size: var(--fs-caption); margin: 0; }
+.vd-kv dt { color: var(--muted); }
+.vd-kv dd { margin: 0; }
+.vd-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-micro); color: var(--muted); }
+.vd-danger { height: 26px; border-radius: var(--radius-pill); color: var(--danger, #d33); background: rgb(var(--text-rgb) / 0.05); font-size: var(--fs-micro); }
+.vd-hint { color: var(--muted); font-size: var(--fs-micro); }
+.vd-timeline-proto { border-top: 0.5px solid var(--line); padding-top: 8px; position: relative; }
+.vd-tl-bar { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; }
+.vd-split { height: 26px; padding: 0 10px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-micro); }
+.vd-ruler { position: relative; height: 20px; margin-left: 84px; -webkit-user-select: none; user-select: none; }
+.vd-ruler span { position: absolute; transform: translateX(-50%); color: var(--muted); font-size: 9px; }
+.vd-tracks { position: relative; display: flex; flex-direction: column; }
+.vd-track { display: flex; align-items: stretch; height: 40px; border-top: 0.5px solid var(--line); }
+.vd-track-name { width: 84px; flex: none; display: flex; align-items: center; color: var(--muted); font-size: var(--fs-micro); }
+.vd-lane { position: relative; flex: 1; }
+.vd-clipbar { position: absolute; top: 6px; height: 28px; border-radius: 5px; background: rgb(var(--text-rgb) / 0.25); color: var(--content); font-size: 10px; padding: 0 6px; overflow: hidden; white-space: nowrap; display: flex; align-items: center; }
+.vd-clipbar.on { box-shadow: 0 0 0 2px var(--text); }
+.vd-playhead { position: absolute; top: 20px; bottom: 0; width: 1.5px; background: var(--text); pointer-events: none; }
+
+.vd-proto { padding: 0 !important; gap: 0 !important; }
+.vd-top { grid-template-columns: 220px minmax(0, 1fr) 240px !important; gap: 0 !important; height: 476px; min-height: 476px; }
+.vd-bin { padding: 8px 10px; }
+.vd-prev { padding: 57px 90px 0; }
+.vd-screen { width: 100%; }
+.vd-props { padding: 14px; border-left: 0.5px solid var(--line); }
+.vd-timeline-proto { flex: 1; padding: 0 !important; border-top: 0.5px solid var(--line); }
+.vd-tl-bar { height: 38px; padding: 0 12px !important; }
+.vd-ruler { margin-left: 84px !important; }
+.vd-proto-toolbar [data-video-mode], .vd-proto-toolbar .vd-select { display: none !important; }
+.vd-proto-toolbar { gap: 8px !important; }
+.vd-agent { width: 108px; justify-content: center; }
+.vd-export { width: 50px !important; min-width: 50px; justify-content: center; }
+
+.vd-proto-toolbar { align-items: center !important; }
+.vd-proto-toolbar .toolbar-spacer { flex: 1 1 auto; }
+.vd-agent { height: 30px; }
+.vd-export { height: 30px !important; }
+.vd-bin { padding: 10px !important; align-content: start; }
+.vd-bin-clip { padding: 4px !important; gap: 3px !important; }
+.vd-bin-thumb { height: 32px !important; }
+.vd-timeline-proto { margin-top: 2px; min-height: 230px; }
+.vd-clipbar { height: 34px !important; top: 4px !important; }
+.vd-playhead { top: 58px !important; height: 168px; }
+.vd-main { overflow-x: hidden; }
+
+.vd-agent { order: 5; }
+.vd-export { order: 6; }
+.vd-playhead { top: 0 !important; }
+@container (max-width: 1100px) {
+  .vd-top { grid-template-columns: 180px minmax(0, 1fr) 200px !important; }
+  .vd-meta { display: none; }
+  .vd-agent { display: none; }
+}
+
+@container (max-width: 1100px) {
+  .vd-proto-toolbar { gap: 4px; padding: 0 8px; }
+  .vd-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vd-proto-toolbar .vd-meta, .vd-agent { display: none !important; }
+  .vd-proto { max-width: 100%; overflow: hidden; }
+}
+
+.vd-proto-toolbar { padding-left: 92px !important; }
+.vd-main { overflow: hidden !important; }
+
+.vd-proto-toolbar { box-sizing: border-box; width: 100%; }
+
+.vd-proto { min-height: 0 !important; }
+.vd-top { flex: 1 1 auto; height: auto !important; min-height: 0 !important; }
+.vd-timeline-proto { flex: none !important; height: 230px; min-height: 230px; }
+
+.vd-proto { min-height: 0 !important; }
+.vd-top { flex: none !important; height: 478px !important; max-height: calc(100% - 230px); min-height: 0 !important; }
+.vd-timeline-proto { flex: none !important; height: 230px; min-height: 230px; }
+
+.vd-proto { min-height: 0 !important; }
+.vd-top { flex: none !important; height: 476px !important; min-height: 476px !important; max-height: none !important; }
+.vd-timeline-proto { flex: none !important; height: 230px; min-height: 230px; margin-top: 2px !important; }
+
+.vd-proto-toolbar .notes-title { display: none !important; }
+.vd-export { white-space: nowrap; padding: 0 !important; }
+.vd-export svg { display: none; }
+.vd-screen { position: relative; background: rgb(var(--text-rgb) / 0.06); }
+.vd-screen-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--muted); font-size: var(--fs-micro); background: rgb(var(--text-rgb) / 0.03); }
+.vd-bin-thumb { gap: 2px; color: var(--muted); }
+.vd-bin-thumb small { font-size: 9px; }
+
+.vd-screen-fallback { z-index: 2; }
 </style>

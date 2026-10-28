@@ -1,0 +1,28 @@
+import { app, BrowserWindow } from "electron";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const { executeCanvasDesktopInput } = require("../electron/canvas-desktop-input.cjs");
+app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "oa-folder-")));
+const fixture = path.resolve("artifacts/canvas-tapnow-compare-20261027/folder-fixture");
+fs.mkdirSync(fixture, { recursive: true });
+if (!fs.existsSync(path.join(fixture, "sample.png"))) fs.copyFileSync(path.resolve("artifacts/canvas-tapnow-compare-20261027/electron-capture.png"), path.join(fixture, "sample.png"));
+setTimeout(() => { console.error("folder-test:timeout"); app.exit(2); }, 120_000).unref();
+app.whenReady().then(async () => {
+  const win = new BrowserWindow({ width: 480, height: 320, title: "OpenArc 文件夹授权测试", webPreferences: { sandbox: true } });
+  await win.loadURL("http://127.0.0.1:5173/artifacts/canvas-tapnow-compare-20261027/openarc-preview.html");
+  const chosen = await executeCanvasDesktopInput("canvas/folder/choose", { defaultPath: fixture }, win.webContents);
+  console.log("folder-test:choose", JSON.stringify(chosen));
+  if (!chosen.ok) throw new Error(chosen.error || "未授权");
+  if (chosen.grant.name !== "folder-fixture") throw new Error("必须选择专用 folder-fixture 测试目录");
+  const files = await executeCanvasDesktopInput("canvas/folder/files", { grantId: chosen.grant.id }, win.webContents);
+  if (!files.ok || !files.files.length) throw new Error("授权目录读取失败");
+  const read = await executeCanvasDesktopInput("canvas/folder/read", { grantId: chosen.grant.id, file: files.files[0].relative }, win.webContents);
+  if (!read.ok || !read.dataUrl.startsWith("data:" + read.mime)) throw new Error("媒体读取失败");
+  const removed = await executeCanvasDesktopInput("canvas/folder/remove", { grantId: chosen.grant.id }, win.webContents);
+  const invalid = await executeCanvasDesktopInput("canvas/folder/files", { grantId: chosen.grant.id }, win.webContents);
+  if (!removed.ok || invalid.ok || invalid.error !== "FOLDER_GRANT_INVALID") throw new Error("撤销授权失败");
+  console.log(JSON.stringify({ ok: true, files: files.files.length, bytes: read.dataUrl.length, revoke: invalid.error })); app.exit(0);
+}).catch((error) => { console.error(error?.stack || error); app.exit(1); });

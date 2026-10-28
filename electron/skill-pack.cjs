@@ -770,10 +770,14 @@ function registerSkillPackRoutes(pack, buffer) {
   return skillImport.importSkillPackage(archive, { idPrefix, packId: pack.id, packName: pack.name }).skills;
 }
 
-function importRegisteredSkillPack(buffer, sourceName) {
+function importRegisteredSkillPack(buffer, sourceName, options = {}) {
   const pack = importSkillPack(buffer, sourceName);
   try {
-    registerSkillPackRoutes(pack, buffer);
+    const registered = registerSkillPackRoutes(pack, buffer);
+    if (options.enabled === false) {
+      const store = resolveSkillStore();
+      for (const skill of registered) store.setSkillEnabled(skill.id, false);
+    }
     const workspace = registerAgentWorkspace(pack, sourceRoot(pack.id));
     if (workspace) Object.assign(pack, workspace);
     else pack.kind = "skill-collection";

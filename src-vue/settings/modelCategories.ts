@@ -3,12 +3,11 @@
  *
  * 能力事实分层（如实，不为凑四类而编能力）：
  *   · 模型域真实能力枚举（electron/model-domain.cjs:8 CAPABILITIES）：
- *       chat / tool-calling / vision-input / image-generation / video-generation / embedding
- *     —— **没有音频能力**。
+ *       chat / tool-calling / vision-input / image-generation / video-generation /
+ *       audio-generation / 3d-generation / embedding。
  *   · 因此：文本模型 = chat（tool-calling / vision-input 归入文本组并逐项标注）；
- *           图像模型 = image-generation；视频模型 = video-generation；
- *           音频模型 = 模型域没有对应能力，默认恒为空并写明原因，
- *                      只有协议域明确声明 audio.*（如 audio.tts）时才归入。
+ *           图像模型 = image-generation；视频模型 = video-generation；音频模型 = audio-generation；
+ *           协议域明确声明 audio.*（如 audio.tts）时也归入音频组。
  *   · 推断不出四类能力的模型一律进「未识别」，不硬塞进任何一组。
  *
  * 分类依据优先用既有推断：
@@ -19,7 +18,7 @@
 
 export type RemoteGroupId = "text" | "image" | "video" | "audio" | "unknown";
 
-export const MODEL_CAPABILITIES = ["chat", "tool-calling", "vision-input", "image-generation", "video-generation", "embedding"] as const;
+export const MODEL_CAPABILITIES = ["chat", "tool-calling", "vision-input", "image-generation", "video-generation", "audio-generation", "3d-generation", "embedding"] as const;
 
 export const CAPABILITY_LABEL: Record<string, string> = {
   chat: "文本对话",
@@ -27,6 +26,8 @@ export const CAPABILITY_LABEL: Record<string, string> = {
   "vision-input": "图片输入",
   "image-generation": "生图",
   "video-generation": "视频生成",
+  "audio-generation": "音频生成",
+  "3d-generation": "3D 生成",
   embedding: "向量",
 };
 
@@ -36,6 +37,8 @@ export const CAPABILITY_SHORT: Record<string, string> = {
   "vision-input": "看图",
   "image-generation": "生图",
   "video-generation": "视频",
+  "audio-generation": "音频",
+  "3d-generation": "3D",
   embedding: "向量",
 };
 
@@ -71,10 +74,8 @@ export const REMOTE_GROUP_META: Record<RemoteGroupId, { label: string; note: str
   video: { label: "视频模型", note: "模型域能力含 video-generation。", emptyText: "上游清单里没有视频模型" },
   audio: {
     label: "音频模型",
-    note:
-      "模型域当前没有音频能力枚举（chat / tool-calling / vision-input / image-generation / video-generation / embedding）；" +
-      "只有协议域明确声明 audio.*（如 audio.tts）的模型才会归入本组。/v1/models 拉取结果不含协议声明，因此这里通常为空。",
-    emptyText: "模型域当前没有音频能力枚举；协议域也没有声明 audio.*",
+    note: "模型域能力含 audio-generation；协议域明确声明 audio.*（如 audio.tts）时也归入本组。",
+    emptyText: "上游清单里没有音频模型",
   },
   unknown: {
     label: "未识别",
@@ -92,6 +93,7 @@ export function guessCapabilitiesFromId(id: unknown): string[] {
   const s = String(id == null ? "" : id).toLowerCase();
   if (/(image|dall-?e|flux|seedream|stable-?diffusion|sdxl|midjourney|imagen|cogview|wanx|kolors|gpt-image)/.test(s)) return ["image-generation"];
   if (/(video|seedance|kling|veo|sora|hailuo|wan2|cogvideo|vidu)/.test(s)) return ["video-generation"];
+  if (/(suno|lyria|flowmusic|mureka|udio|music|(^|[-_/])tts|text-to-speech|sound-?effect)/.test(s) && !/(whisper|transcri|audio-preview|realtime)/.test(s)) return ["audio-generation"];
   if (/(embed|rerank|whisper|tts|speech|audio|moderation)/.test(s)) return [];
   const caps = ["chat"];
   if (/(vl|vision|4o|4\.1|gpt-5|gemini|claude|qwen-?vl|glm-4v|o3|o4)/.test(s)) caps.push("vision-input");
@@ -151,6 +153,9 @@ export function classifyRemoteModel(input: RemoteModelItem): ClassifiedRemoteMod
     group = "text";
     const extra = capabilities.filter((c) => c !== "chat");
     reasons.push("模型域能力含 chat" + (extra.length ? "（同时含 " + extra.join("、") + "）" : ""));
+  } else if (capabilities.includes("audio-generation")) {
+    group = "audio";
+    reasons.push("模型域能力含 audio-generation");
   } else if (audioIntents.length) {
     group = "audio";
     reasons.push("协议域声明了 " + audioIntents.join("、"));

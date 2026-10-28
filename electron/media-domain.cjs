@@ -76,6 +76,10 @@ const MEDIA_ERROR_CODES = Object.freeze([
 const MEDIA_COMMANDS = Object.freeze({
   // ---- 项目 / 素材（media-store.cjs） ----
   "media/project/ensure": { risk: "manage", credential: false, summary: "创建或更新视频项目（所有权校验，不写他人项目）" },
+  "media/draft/get": { risk: "read", credential: false, summary: "读取当前账号的视频草稿（timeline/sources/quick 与版本）" },
+  "media/draft/latest": { risk: "read", credential: false, summary: "读取当前账号最近更新的视频草稿用于启动恢复" },
+  "media/draft/save": { risk: "manage", credential: false, summary: "按 expectedVersion 保存当前账号的视频草稿" },
+  "media/draft/import-legacy": { risk: "manage", credential: false, summary: "显式导入旧版本机视频草稿，已有草稿不覆盖" },
   "media/asset/save": { risk: "manage", credential: false, summary: "保存媒体素材到 <userData>/dxos/media/assets 并记录探测元数据" },
   "media/asset/list": { risk: "read", credential: false, summary: "列出项目素材（不含磁盘绝对路径）" },
   "media/asset/delete": { risk: "destructive", credential: false, summary: "删除素材并清理落盘文件（有进行中渲染时拒绝）" },

@@ -34,16 +34,24 @@ function isBlockedArtifactAddress(address) {
   const zoneStripped = host.split("%")[0];
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(zoneStripped);
   if (mapped) return isBlockedArtifactAddress(mapped[1]);
+  const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(zoneStripped);
+  if (mappedHex) {
+    const high = parseInt(mappedHex[1], 16);
+    const low = parseInt(mappedHex[2], 16);
+    return isBlockedArtifactAddress([(high >>> 8) & 255, high & 255, (low >>> 8) & 255, low & 255].join("."));
+  }
   const family = isIP(zoneStripped);
   if (family === 4) {
-    const [a, b] = zoneStripped.split(".").map(Number);
+    const [a, b, c] = zoneStripped.split(".").map(Number);
     if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
     if (a === 169 && b === 254) return true;
     if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;
-    if (a === 198 && (b === 18 || b === 19)) return true;
     if (a === 192 && b === 0) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 192 && b === 88 && c === 99) return true;
+    if (a === 198 && (b === 18 || b === 19 || b === 51)) return true;
+    if (a === 203 && b === 0 && c === 113) return true;
     if (a >= 224) return true;
     return false;
   }
@@ -52,6 +60,7 @@ function isBlockedArtifactAddress(address) {
     if (zoneStripped.startsWith("fe80:")) return true;
     if (/^f[cd][0-9a-f]{2}:/.test(zoneStripped)) return true;
     if (zoneStripped.startsWith("ff")) return true;
+    if (zoneStripped.startsWith("2001:db8:")) return true;
     return false;
   }
   return false;
@@ -83,13 +92,13 @@ function selectPinnedProtocolAddress(_url, addresses) {
   return addresses[0];
 }
 
-async function pinnedAddress(url) {
+async function pinnedAddress(url, lookup = dnsLookup) {
   const hostname = normalizedHostname(url.hostname);
   const family = isIP(hostname);
-  const addresses = family ? [{ address: hostname, family }] : await dnsLookup(hostname, { all: true, verbatim: true });
-  const selected = selectPinnedProtocolAddress(url, addresses);
-  if (isBlockedArtifactAddress(selected.address)) throw new Error("协议产物解析到本机或私网地址，已拒绝（SSRF 防护）");
-  return selected;
+  const addresses = family ? [{ address: hostname, family }] : await lookup(hostname, { all: true, verbatim: true });
+  if (!Array.isArray(addresses) || !addresses.length) throw new Error("协议产物 URL 无法解析");
+  for (const entry of addresses) if (isBlockedArtifactAddress(entry.address)) throw new Error("协议产物解析到本机或私网地址，已拒绝（SSRF 防护）");
+  return selectPinnedProtocolAddress(url, addresses);
 }
 
 function createPinnedLookup(address) {
@@ -102,12 +111,14 @@ function createPinnedLookup(address) {
   });
 }
 
-function requestPinned(url, address, maxBytes, timeoutMs, extraHeaders = {}) {
+function requestPinned(url, address, maxBytes, timeoutMs, extraHeaders = {}, options = {}) {
   return new Promise((resolve, reject) => {
     const lookup = createPinnedLookup(address);
     const requestFn = url.protocol === "https:" ? httpsRequest : httpRequest;
+    const signal = options.signal;
     const request = requestFn(url, {
       method: "GET", lookup, ...(url.protocol === "https:" ? { servername: url.hostname } : {}),
+      ...(options.connect ? { createConnection: options.connect } : {}),
       headers: { Accept: "image/*, video/*, audio/*, application/octet-stream", ...extraHeaders },
     }, (response) => {
       const declared = Number(response.headers["content-length"] || 0);
@@ -126,13 +137,72 @@ function requestPinned(url, address, maxBytes, timeoutMs, extraHeaders = {}) {
         }
         chunks.push(chunk);
       });
-      response.on("end", () => resolve({ status: response.statusCode || 0, headers: response.headers, data: Buffer.concat(chunks) }));
-      response.on("error", reject);
+      response.on("end", () => { if (signal) signal.removeEventListener("abort", onAbort); resolve({ status: response.statusCode || 0, headers: response.headers, data: Buffer.concat(chunks) }); });
+      response.on("error", (error) => { if (signal) signal.removeEventListener("abort", onAbort); reject(error); });
     });
+    const onAbort = () => {
+      const error = new Error("下载已取消");
+      error.name = "AbortError";
+      request.destroy(error);
+    };
+    if (signal) {
+      if (signal.aborted) { onAbort(); return; }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
     request.setTimeout(timeoutMs, () => request.destroy(new Error("协议产物下载超时")));
-    request.on("error", reject);
+    request.on("error", (error) => { if (signal) signal.removeEventListener("abort", onAbort); reject(error); });
     request.end();
   });
+}
+
+async function requestViaFetch(url, fetchImpl, maxBytes, timeoutMs, extraHeaders = {}, options = {}) {
+  const controller = new AbortController();
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(new Error("协议产物下载超时")); }, timeoutMs);
+  });
+  const operation = async () => {
+    const signal = options.signal;
+    const onAbort = () => controller.abort(signal && signal.reason);
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    }
+    try {
+      const response = await fetchImpl(url.toString(), { method: "GET", headers: extraHeaders, redirect: "manual", signal: controller.signal });
+      const declared = Number(response.headers && typeof response.headers.get === "function" ? response.headers.get("content-length") : 0);
+      if (declared > maxBytes) {
+        if (response.body && typeof response.body.cancel === "function") await response.body.cancel().catch(() => {});
+        throw new Error("协议产物超过大小限制 " + maxBytes + " 字节");
+      }
+      if (!response.body || typeof response.body.getReader !== "function") return { status: response.status, headers: response.headers, data: Buffer.alloc(0) };
+      const reader = response.body.getReader();
+      const chunks = [];
+      let bytes = 0;
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        const chunk = Buffer.from(next.value);
+        bytes += chunk.byteLength;
+        if (bytes > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw new Error("协议产物超过大小限制 " + maxBytes + " 字节");
+        }
+        chunks.push(chunk);
+      }
+      return { status: response.status, headers: response.headers, data: Buffer.concat(chunks) };
+    } finally {
+      if (signal) signal.removeEventListener("abort", onAbort);
+    }
+  };
+  try { return await Promise.race([operation(), timeout]); }
+  finally { clearTimeout(timer); }
+}
+
+function responseHeader(headers, name) {
+  if (headers && typeof headers.get === "function") return headers.get(name);
+  const value = headers && headers[name];
+  return Array.isArray(value) ? value[0] : value;
 }
 
 async function downloadArtifact(raw, options = {}, trustedProvider) {
@@ -140,16 +210,19 @@ async function downloadArtifact(raw, options = {}, trustedProvider) {
   const timeoutMs = Math.max(1000, Math.min(Number(options.timeoutMs) || 180000, 10 * 60000));
   let url = validateProtocolArtifactUrl(raw);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const address = await pinnedAddress(url);
-    const response = await requestPinned(url, address, maxBytes, timeoutMs, trustedProvider && trustedProvider.origin === url.origin ? trustedProvider.headers : {});
+    const address = await pinnedAddress(url, typeof options.lookup === "function" ? options.lookup : dnsLookup);
+    const headers = trustedProvider && trustedProvider.origin === url.origin ? trustedProvider.headers : {};
+    const response = typeof options.fetchImpl === "function"
+      ? await requestViaFetch(url, options.fetchImpl, maxBytes, timeoutMs, headers, options)
+      : await requestPinned(url, address, maxBytes, timeoutMs, headers, { signal: options.signal, connect: options.connect });
     if (REDIRECTS.has(response.status)) {
-      const location = Array.isArray(response.headers.location) ? response.headers.location[0] : response.headers.location;
+      const location = responseHeader(response.headers, "location");
       if (!location || redirects === MAX_REDIRECTS) throw new Error("协议产物重定向过多或缺少 Location");
       url = validateProtocolArtifactUrl(new URL(location, url).toString());
       continue;
     }
     if (response.status < 200 || response.status >= 300) throw new Error("协议产物下载失败 HTTP " + response.status);
-    const contentType = Array.isArray(response.headers["content-type"]) ? response.headers["content-type"][0] : response.headers["content-type"];
+    const contentType = responseHeader(response.headers, "content-type");
     return { data: response.data, mime: String(contentType || "application/octet-stream").split(";")[0], sourceUrl: url.toString() };
   }
   throw new Error("协议产物下载失败");

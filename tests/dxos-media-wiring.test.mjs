@@ -99,7 +99,7 @@ function openBundle(dir, options = {}) {
 // ① 装配契约（源码级）
 // ---------------------------------------------------------------------------
 test("装配契约（源码）：main.cjs 用真实依赖装配 media bundle，viteBuild 如实 null、无写死 null 的注入面", () => {
-  const main = fs.readFileSync(path.join(process.cwd(), "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(process.cwd(), "electron", "runtime-composition.cjs"), "utf8");
 
   // 真实依赖装配件必须被 main.cjs 调用（不新造第二套）。
   assert.ok(main.includes("createMediaProviderStore"), "main.cjs 必须复用 createMediaProviderStore（B2 provider-protocol）");

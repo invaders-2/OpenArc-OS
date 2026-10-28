@@ -1,8 +1,8 @@
 import { defineStore } from "pinia";
-import domain from "../../electron/window-domain.cjs";
-import manager from "../../electron/window-manager.cjs";
-import folderTrashLib from "../../electron/folder-trash.cjs";
-import type { WindowCommand, WindowStateModel } from "../../electron/window-domain.cjs";
+import * as domain from "../../electron/window-domain.ts";
+import * as manager from "../../electron/window-manager.ts";
+import * as folderTrashLib from "../../electron/folder-trash.ts";
+import type { WindowCommand, WindowStateModel } from "../../electron/window-domain.ts";
 import {
   activateTabCommand,
   autoMergeCommands,
@@ -115,7 +115,7 @@ const APP_SIZE: Record<string, [number, number]> = {
   files: [940, 590], "resource-library": [1080, 680], browser: [1060, 690], canvas: [1140, 730], chat: [1000, 680],
   projects: [1060, 680], skills: [1060, 690], "mcp-center": [1020, 660], market: [1060, 710], automation: [1000, 660],
   organization: [1060, 680], settings: [940, 660], calendar: [1000, 680], weather: [780, 640], music: [940, 620],
-  photos: [980, 640], notes: [940, 640], video: [1200, 760], dev: [1200, 740], declare: [860, 600], drama: [1180, 760], protocols: [1120, 720], trash: [880, 580],
+  photos: [1020, 680], notes: [940, 640], video: [1200, 760], dev: [1200, 740], declare: [860, 600], drama: [1120, 720], protocols: [1120, 720], trash: [880, 580],
   integrations: [1160, 720],
   home: [940, 640],
 };
@@ -205,6 +205,12 @@ export const useShellStore = defineStore("shell", {
      * 画布页点"打开 OpenArc 总 API 设置"时 +1；画布页本身尚未迁移，这里先保留接线点。
      */
     modelSettingsRequest: 0,
+    /**
+     * 外部入口（市场「立即体验」）要打开的指定画布：画布窗口读到它后用现有加载路径切过去，
+     * 打开完回调 clearCanvasTarget()。null = 没有待打开的画布。
+     */
+    canvasTarget: null as string | null,
+    canvasSkillDraft: null as { seq: number; text: string; skill: string } | null,
 
     controlCenterOpen: false,
     searchOpen: false,
@@ -233,7 +239,7 @@ export const useShellStore = defineStore("shell", {
     focusMode: localStorage.getItem("oa-focus-mode") === "true",
 
     /**
-     * **窗口状态的唯一权威是 electron/window-domain.cjs**（与 React 同一条线）：
+     * **窗口状态的唯一权威是 electron/window-domain.ts**（与 React 同一条线）：
      * 这里只持有它的模型，改状态一律派发 window-manager 的命令。
      * 渲染层不再有第二份窗口 state，因此"AI 绕过命令层直接改 state"没有落点。
      */
@@ -351,7 +357,7 @@ export const useShellStore = defineStore("shell", {
     },
   },
   actions: {
-    /** 唯一的窗口状态写入口：与 React 共用 electron/window-manager.cjs 的 reduce。 */
+    /** 唯一的窗口状态写入口：与 React 共用 electron/window-manager.ts 的 reduce。 */
     dispatch(command: WindowCommand) {
       const next = manager.reduce(this.model, command);
       if (next !== this.model) this.model = next;
@@ -436,6 +442,7 @@ export const useShellStore = defineStore("shell", {
     },
     clearNotices() {
       this.notices.splice(0);
+      this.toasts.splice(0);
     },
     setFocusMode(next: boolean) {
       this.focusMode = next;
@@ -538,6 +545,24 @@ export const useShellStore = defineStore("shell", {
       const next = !this.appsOpen;
       this.closeAllOverlays();
       this.appsOpen = next;
+    },
+    /**
+     * 打开「指定画布」：先记住目标，再聚焦/打开 AI Studio 窗口。
+     * 画布窗口读到 canvasTarget 后用现有加载路径切到那张画布，再 clearCanvasTarget()。
+     * （市场建完画布只调 activateApp 只会聚焦已有窗口，用户看着像没反应。）
+     */
+    openCanvas(canvasId: string) {
+      const id = String(canvasId || "").trim();
+      if (!id) return;
+      this.canvasTarget = id;
+      this.activateApp("canvas");
+    },
+    clearCanvasTarget() {
+      this.canvasTarget = null;
+    },
+    openCanvasWithSkill(canvasId: string, skill: string) {
+      this.canvasSkillDraft = { seq: (this.canvasSkillDraft?.seq || 0) + 1, text: skill, skill };
+      this.openCanvas(canvasId);
     },
     activateApp(appId: string) {
       // 应用中心不再是窗口，而是程序坞上方的应用程序弹窗

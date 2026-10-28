@@ -63,7 +63,7 @@ test("本地清单：读取 catalog.json，列出有效 App 与技能包，非�
   assert.equal(res.value.apps.length, 1);
   assert.equal(res.value.apps[0].id, "com.example.editor");
   assert.equal(res.value.apps[0].featured, true);
-  assert.deepEqual(res.value.rejected, { apps: 1, skillPacks: 0 });
+  assert.deepEqual(res.value.rejected, { apps: 1, skillPacks: 0, templates: 0, templateDocs: 0, appSources: 0, appPackages: 0 });
   assert.equal(res.value.skillPacks.length, 2);
   const docs = res.value.skillPacks.find((item) => item.id === "pack.docs");
   assert.equal(docs.entry, "skills/docs");
@@ -154,31 +154,39 @@ test("命令面：未认证拒绝、未白名单命令拒绝、未知 App 与非
 
 // ── ⑥ 源码级：没有云市场 ──────────────────────────────────────────────────
 // ── ⑦ B7f：随包清单是"有效但空"的状态 ────────────────────────────────────
-test("随包清单：resources/market/catalog.json 有效且为空，不是 MARKET_CATALOG_MISSING", async () => {
+// 数据契约：templates 由 6 条扩到 24 条（覆盖 5 个业务分类）；条数断言只是跟着契约走，不是放松断言。
+test("随包清单：resources/market/catalog.json 有效（task-21 起带 5 技能包 / 24 模板），不是 MARKET_CATALOG_MISSING", async () => {
   const bundle = createMarketBundle({ appDir: ROOT });
   assert.equal(bundle.resolveCatalogDir(), path.join(ROOT, "resources", "market"), "必须优先读随包目录");
   const status = bundle.catalogStatus();
   assert.equal(status.present, true);
   assert.equal(status.valid, true);
-  assert.equal(status.appCount, 0);
-  assert.equal(status.skillPackCount, 0);
+  assert.equal(status.appCount, 8, "8 条真实应用条目（task-28）");
+  assert.equal(status.skillPackCount, 5, "5 条官方技能包（与 skill/list 同 id）");
+  assert.equal(status.templateCount, 24, "24 条画布模板（6 条起步 + 18 条扩充）");
   assert.equal(status.reason, null);
 
   const res = await bundle.execute("market/catalog", {}, { sessionRef: "s1" });
   assert.equal(res.ok, true, JSON.stringify(res));
-  assert.deepEqual(res.value.apps, [], "不许编造示例 App");
-  assert.deepEqual(res.value.skillPacks, []);
+  assert.equal(res.value.apps.length, 8, "8 条应用条目（id 取自应用注册表）");
+  assert.equal(res.value.skillPacks.length, 5);
+  assert.equal(res.value.templates.length, 24);
+  assert.equal(res.value.railPages.length, 2);
+  assert.equal(res.value.rejected.templates, 0);
 
   const health = await bundle.execute("market/health", {}, { sessionRef: "s1" });
   assert.equal(health.ok, true);
   assert.equal(health.value.present, true);
   assert.equal(health.value.valid, true);
+  assert.equal(health.value.templateCount, 24);
 
   const file = JSON.parse(fs.readFileSync(path.join(ROOT, "resources", "market", "catalog.json"), "utf8"));
   assert.equal(file.version, 1, "必须声明 schema 版本");
-  assert.equal(Array.isArray(file.apps) && file.apps.length, 0);
-  assert.equal(Array.isArray(file.skillPacks) && file.skillPacks.length, 0);
+  assert.equal(Array.isArray(file.apps) && file.apps.length, 8);
+  assert.equal(Array.isArray(file.skillPacks) && file.skillPacks.length, 5);
+  assert.equal(Array.isArray(file.templates) && file.templates.length, 24);
   assert.ok(file.fields && typeof file.fields === "object" && Object.keys(file.fields).length > 0, "必须有字段说明");
+  assert.ok(file.templateItemFields && typeof file.templateItemFields === "object", "必须声明模板字段说明");
   assert.ok(fs.existsSync(path.join(ROOT, "resources", "market", "README.md")), "必须有投放说明");
 });
 

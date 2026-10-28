@@ -5,7 +5,7 @@
 "use strict";
 
 const ENDPOINT_SCOPE = Object.freeze({ REMOTE_HTTPS: "REMOTE_HTTPS", LOCALHOST: "LOCALHOST", LAN_EXPLICIT: "LAN_EXPLICIT", REMOTE_HTTP_EXPLICIT: "REMOTE_HTTP_EXPLICIT" });
-const CAPABILITIES = Object.freeze(["chat", "tool-calling", "vision-input", "image-generation", "video-generation", "embedding"]);
+const CAPABILITIES = Object.freeze(["chat", "tool-calling", "vision-input", "image-generation", "video-generation", "audio-generation", "3d-generation", "embedding"]);
 const MODEL_ACTIONS = Object.freeze({ VIEW: "model.view", USE: "model.use", MANAGE: "model.manage", TEST: "model.test" });
 const MODEL_ACTIONS_ALL = Object.freeze(Object.values(MODEL_ACTIONS));
 const ERROR_CODE = Object.freeze({
@@ -127,6 +127,15 @@ const CAPABILITY_ALIASES = Object.freeze({
   "llm.video": "video-generation",
   "video.generation": "video-generation",
   "video.generate": "video-generation",
+  "audio": "audio-generation",
+  "llm.audio": "audio-generation",
+  "audio.generation": "audio-generation",
+  "audio.generate": "audio-generation",
+  "3d": "3d-generation",
+  "three-d": "3d-generation",
+  "3d.generation": "3d-generation",
+  "3d.generate": "3d-generation",
+  "model3d": "3d-generation",
   "llm.embedding": "embedding",
   "embeddings": "embedding",
 });

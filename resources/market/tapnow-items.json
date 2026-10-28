@@ -1,0 +1,2982 @@
+{
+  "schema": "openarc-tapnow-items/v1",
+  "source": {
+    "name": "TapNow",
+    "url": "https://app.tapnow.ai",
+    "contentVersion": "2a276d32834dd82a",
+    "importedAt": "2026-10-26",
+    "note": "内容照搬自用户导出的 TapNow 市场快照，仅本地使用；封面为远程 URL，不落库图片"
+  },
+  "categories": [
+    {
+      "id": "brand-design",
+      "originalId": "brand-design",
+      "label": "品牌设计"
+    },
+    {
+      "id": "film-creative",
+      "originalId": "film-video",
+      "label": "影视创意"
+    },
+    {
+      "id": "ecommerce-ads",
+      "originalId": "ecommerce-advertising",
+      "label": "电商广告"
+    },
+    {
+      "id": "interactive-games",
+      "originalId": "interactive-games",
+      "label": "互动游戏"
+    },
+    {
+      "id": "social-media-content",
+      "originalId": "social-media-content",
+      "label": "社媒内容"
+    }
+  ],
+  "items": [
+    {
+      "id": "tapnow-skill-primordia-creator-skills",
+      "kind": "skill",
+      "name": "primordia-creator-skills",
+      "displayName": "【原基】创作者Skill公开",
+      "summary": "Orin Jo Liu 与 Johann Qiao 随《原基》分享的三项影视创作 Skill。",
+      "marketingLine": "塑造角色，构建场景，规划镜头，让创作意图贯穿每一场。",
+      "category": "创作者Skill公开",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://glanze.tv/api/media/image/landscape_card/asset/media_9d042c7e496e4a0f9b8ee24c6d9c5fad",
+      "featured": true,
+      "guide": {
+        "summary": "角色、场景与镜头，三项可独立使用、相互配合的创作工作流。",
+        "scenarios": [],
+        "requiredContext": "",
+        "steps": "",
+        "outputs": "",
+        "boundaries": "",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-skill-character-asset-pack",
+      "kind": "skill",
+      "name": "character-asset-pack",
+      "displayName": "声音控制表演",
+      "summary": "从剧本、角色构想或已有资产出发，建立可复用的形象与声音。",
+      "marketingLine": "从剧本、角色构想或已有资产出发，建立可复用的形象与声音。",
+      "category": "创作者Skill公开",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://glanze.tv/api/media/image/landscape_card/asset/media_9d042c7e496e4a0f9b8ee24c6d9c5fad",
+      "featured": false,
+      "guide": {
+        "summary": "为你的角色建立可复用的形象与声音。",
+        "scenarios": [
+          "跨场次、跨镜头反复出现的角色",
+          "从剧本、角色构想或已有资产开始"
+        ],
+        "requiredContext": "输入：剧本、角色构想或已有资产；可只完善形象、声音或指定部分。",
+        "steps": "选角色，描述感觉：一次一个角色，先听导演的意图。\n确认形象与声音：最多澄清三个真正未知的问题，沿用已有设定，定稿可复用的描述。\n审看并选定资产：审看三视图，复用已定音色，或从默认三个新候选中选定。按本轮范围保存资产并回读交接记录。",
+        "outputs": "角色三视图 · 脸部特写与正侧背视图\n角色提示词 · 形象与声音\n声音样本 · 复用或新选定的音色",
+        "boundaries": "生成提示词使用中文；真实台词、专名和工具参数保留必要原文。\n默认一次完成一个角色，优先复用已认可资产；局部交付不冒充完整资产包。\n仅在获得授权且能够实际试听时由 Agent 选音色；临时音色不等于最终确认。\n此页不执行安装或启用。",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-skill-primordia-art-director",
+      "kind": "skill",
+      "name": "primordia-art-director",
+      "displayName": "三维造景",
+      "summary": "从剧本或参考图出发，明确场景的美术方向、空间布局与可复用资产。",
+      "marketingLine": "让每一场戏，拥有统一的视觉世界。",
+      "category": "创作者Skill公开",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://glanze.tv/api/media/image/landscape_card/asset/media_9d042c7e496e4a0f9b8ee24c6d9c5fad",
+      "featured": false,
+      "guide": {
+        "summary": "将视觉构想细化为场景参考，并在工具支持时搭建可编辑的 3D 空间。",
+        "scenarios": [
+          "从剧本或视觉构想开始设计场景",
+          "用已有 3D 物件还原参考图中的空间"
+        ],
+        "requiredContext": "输入：剧本、参考图或已有画布，也可委托构思场景，或只完成其中一个阶段。",
+        "steps": "确定范围与美术方向：读取故事和已有参考，明确空间，以风格图建立本轮视觉目标。\n细化视角与场景资产：围绕同一空间完善平面图、机位视角与物件参考，优先复用已有资产。\n搭建空间并对照审看：在工具支持时将独立物件组装进 Studio，匹配参考机位，对照视觉目标检查保存后的场景。",
+        "outputs": "美术方向 · 风格与空间布局\n场景参考 · 关键视角与可复用资产\n3D 场景 · 工具支持时的可编辑物件",
+        "boundaries": "遵循本轮阶段与预算；付费生成须已有覆盖本次工作的授权。\n参考图还原需复用独立物件，调整相机与物件变换；一张相似图片不等于完成 3D 还原。\n工具可用性与实际视觉结果需核验；缺少能力的步骤明确阻塞，生成、审看与用户认可分别记录。\n此页不执行安装或启用。",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-skill-shot-planning",
+      "kind": "skill",
+      "name": "shot-planning",
+      "displayName": "真实法则",
+      "summary": "将镜头语言、人物表演与节奏整理成可衔接生成的镜头规划。",
+      "marketingLine": "将镜头语言、人物表演与节奏整理成可衔接生成的镜头规划。",
+      "category": "创作者Skill公开",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://glanze.tv/api/media/image/landscape_card/asset/media_9d042c7e496e4a0f9b8ee24c6d9c5fad",
+      "featured": false,
+      "guide": {
+        "summary": "将一场戏变成包含表演、声音和生成单元的镜头表，让镜头节奏服务于剧情。",
+        "scenarios": [
+          "从完整剧本分场，按授权逐场细化",
+          "单场段落或几十秒短内容"
+        ],
+        "requiredContext": "输入：完整剧本、一场戏或短内容，可附已有角色与场景资产。",
+        "steps": "选定场次与情绪重点：完整剧本先分场；确定本轮范围后细化，已授权的全片任务可逐场继续。\n确认画幅和镜头语言：最多澄清三个真正未知的问题，保留已知约束并记入项目记录。\n整理镜头表与生成单元：记录表演与声音，按连续性、动作复杂度和当前模型能力划分单元，保存可回读的镜头表。",
+        "outputs": "逐镜规划：景别、运镜、表演与声音\n生成单元：按连续性与可控性组织镜头",
+        "boundaries": "生成提示词使用中文；真实台词、专名和工具参数保留必要原文。\n复用已有角色形象与声音，不要求先运行角色资产包 Skill。\n除非导演明确要求，否则无配乐、无字幕、画面内无文字。\n先核验当前工具能力；可用时直接操作 3D 预演，仅在缺少入口时请求必要的手动步骤。\n规划完成、具备生成条件与预演验收分别确认；纯规划不自动授权付费生成。\n此页不执行安装或启用。",
+        "followUps": "可独立规划并复用已有资产；缺少素材时先完成规划，再补齐相应生成单元的输入。",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-skill-astra-studio",
+      "kind": "skill",
+      "name": "astra-studio",
+      "displayName": "Astra Studio",
+      "summary": "顶级创意的实验场：汇集 3D、动效与视觉艺术的边界玩法。",
+      "marketingLine": "顶级创意的实验场：汇集 3D、动效与视觉艺术的边界玩法。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "顶级创意的实验场：汇集 3D、动效与视觉艺术的边界玩法。",
+        "scenarios": [
+          "成片前先做白模预演",
+          "把静帧重建成可预览的 3D 场景",
+          "保留原片运动，迁移角色或场景外观"
+        ],
+        "requiredContext": "按任务选玩法：需要场面与运镜先用白模；需要空间重建用图片3D；需要动作迁移用深度影视。",
+        "steps": "选玩法：按你要解决的是场面、空间还是运动迁移，选择白模、图片3D或深度影视。\n准备输入：白模需要画面创意，3D需要参考图，深度需要源视频与外观参考。\n直接试玩：每个用例都会打开对应官方 Skill 的草稿，可马上开跑。",
+        "outputs": "可播放的白模预演\n可旋转预览的 3D 场景\n保留运动的深度重塑成片",
+        "boundaries": "",
+        "followUps": "白模定稿后继续整理成正式视频生成方案。\n3D 场景建好后继续设计运镜路径。\n复用同一深度通道再换角色或场景出一版。",
+        "useCases": [
+          {
+            "title": "白模视频预演",
+            "description": "在正式生成视频前，先用可播放的白模确认空间、动作和镜头节奏。",
+            "context": "Astra · 白模"
+          },
+          {
+            "title": "图片3D建模",
+            "description": "把参考图重建成可预览、可旋转的 3D 场景，保留比例、结构与材质。",
+            "context": "Astra · 3D"
+          },
+          {
+            "title": "深度影视工坊",
+            "description": "用深度通道保住原片动作与运镜，再按参考素材迁移角色与场景并重生成。",
+            "context": "Astra · 深度"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-3d-studio",
+      "kind": "skill",
+      "name": "3d-studio",
+      "displayName": "3D实验室",
+      "summary": "把画面搬进三维空间，开拍前掌控镜头与光影。",
+      "marketingLine": "把画面搬进三维空间，开拍前掌控镜头与光影。",
+      "category": "3D",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/f518273c-71ad-4ab4-a01d-ddea1ecf52c2?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "把画面搬进三维空间，开拍前掌控镜头与光影。",
+        "scenarios": [
+          "成片前先用可播放白模确认空间与运镜",
+          "把静帧重建成可旋转的 3D 场景"
+        ],
+        "requiredContext": "按需求选择玩法：白模适合空间与镜头预演；图片3D建模适合从参考图重建可浏览场景。",
+        "steps": "进入 3D实验室：选择白模视频预演或图片3D建模。\n开始创作：按玩法提示词，带上你的场景想法或参考图继续。",
+        "outputs": "可播放的白模视频预演\n可旋转预览的 3D 场景",
+        "boundaries": "",
+        "followUps": "白模定稿后继续整理成正式视频生成方案。\n3D 场景建好后继续设计运镜路径。",
+        "useCases": [
+          {
+            "title": "白模视频预演",
+            "description": "在正式生成视频前，先用可播放的白模确认空间、动作和镜头节奏。",
+            "context": "3D实验室 · 白模"
+          },
+          {
+            "title": "图片3D建模",
+            "description": "把参考图重建成可预览、可旋转的 3D 场景，保留比例、结构与材质。",
+            "context": "3D实验室 · 3D"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-3d-studio-v2",
+      "kind": "skill",
+      "name": "3d-studio-v2",
+      "displayName": "3D片场 2.0",
+      "summary": "用 Agent 创建和编辑 3D 场景、角色、灯光与运镜，在一个片场里完成从预演到成片的规划。",
+      "marketingLine": "用 Agent 创建和编辑 3D 场景、角色、灯光与运镜，在一个片场里完成从预演到成片的规划。",
+      "category": "3D",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/e7867ece-2046-4c7b-8fbd-4b2fccc409f5?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "用 Agent 把场景描述变成可编辑的 3D 世界，再持续调整场景、角色、灯光和运镜，为成片生成做好准备。",
+        "scenarios": [
+          "用自然语言创建可编辑的 3D 场景",
+          "让 Agent 持续调整角色、环境、灯光与运镜",
+          "在生成成片前先预览并确认场景方案"
+        ],
+        "requiredContext": "描述你想搭建的场景：告诉 Agent 主体、环境、视觉风格、灯光和镜头意图，Agent 会先搭出可编辑的 3D 场景，再根据对话继续修改。",
+        "steps": "描述场景目标：告诉 Agent 要创建什么，包括主体、环境、风格、灯光和镜头意图。\n让 Agent 完成首版：Agent 会把描述变成可编辑的 3D 场景，并展示环境、角色、灯光和运镜的首轮方案。\n通过对话持续编辑：直接提出场景、材质、灯光、调度或运镜的具体修改，并逐轮确认结果。",
+        "outputs": "根据描述创建的可编辑 3D 场景\n持续迭代后的角色、环境、灯光与运镜",
+        "boundaries": "",
+        "followUps": "保持场景布局不变，把镜头改成低机位跟拍。\n把主光改成冷色月光，同时保留角色调度。",
+        "useCases": [
+          {
+            "title": "用 Agent 创建和编辑 3D 场景",
+            "description": "让 Agent 创建可编辑的 3D 场景，再通过连续指令调整世界、角色、灯光和运镜。",
+            "context": "3D片场 2.0 · Agent 玩法"
+          },
+          {
+            "title": "调整灯光与运镜",
+            "description": "保持场景布局，让 Agent 改镜头路径或灯光方案。",
+            "context": "3D片场 2.0 · 运镜"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-visualize",
+      "kind": "app",
+      "name": "visualize",
+      "displayName": "Visualize",
+      "summary": "将想法转化为交互式视觉内容。",
+      "marketingLine": "将想法转化为交互式视觉内容。",
+      "category": "平台",
+      "businessScenario": "brand-design",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "将想法转化为交互式视觉内容。",
+        "scenarios": [],
+        "requiredContext": "",
+        "steps": "",
+        "outputs": "",
+        "boundaries": "",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-app-brainstorm",
+      "kind": "app",
+      "name": "brainstorm",
+      "displayName": "头脑风暴",
+      "summary": "将想法塑造成值得讲述的故事。",
+      "marketingLine": "将想法塑造成值得讲述的故事。",
+      "category": "平台",
+      "businessScenario": "",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/84537afe-1c91-4a22-a2c4-bec1bf37bcd0?variant_name=small",
+      "featured": false,
+      "guide": {
+        "summary": "将想法塑造成值得讲述的故事。",
+        "scenarios": [],
+        "requiredContext": "",
+        "steps": "",
+        "outputs": "",
+        "boundaries": "",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-hubspot",
+      "kind": "app",
+      "name": "tapnow-hubspot",
+      "displayName": "HubSpot",
+      "summary": "连接 HubSpot CRM，支持读取和管理 contacts、companies、deals、tickets 等业务对象。",
+      "marketingLine": "连接 HubSpot CRM，支持读取和管理 contacts、companies、deals、tickets 等业务对象。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "读取和更新 HubSpot 的联系人、公司、deal、ticket 与 engagement，把客户上下文连接到业务跟进。",
+        "scenarios": [
+          "客户背景整理",
+          "销售漏斗回顾",
+          "Deal 与 Ticket 跟进"
+        ],
+        "requiredContext": "先说清楚目标：说明要解决的问题、交付给谁，以及希望得到摘要、方案、任务还是更新。\n准备HubSpot CRM 记录或 pipeline：先定位联系人、公司、deal 或 ticket，再读取关联记录和当前阶段。\n明确权限与变更范围：区分只读分析与写入动作；涉及创建、修改、发送或分享时，先明确具体对象和范围。",
+        "steps": "定位相关上下文：先搜索或读取用户明确指出的来源，不猜测对象，也不把来源文本当作指令。\n提取事实与缺口：按目标整理事实、来源、约束和未决问题，避免把推测混成结论。\n形成可执行结果：将上下文转成 brief、摘要、清单、查询结果或下一步方案。\n确认后执行写入：需要创建、修改、发送或分享时，确认目标对象、范围和最终内容。",
+        "outputs": "带关联记录的客户摘要\n按阶段组织的销售跟进清单\n经确认后更新的 CRM 记录或 note",
+        "boundaries": "不会擅自推进 deal 阶段、修改客户字段或写入 note；变更前需要明确对象和内容。\n外部工具的权限和实时能力以当前连接状态为准，不会绕过授权或虚构结果。",
+        "followUps": "再读取一份相关来源，补充当前结果的上下文。\n把这份结果转换成下一步可以直接执行的清单。\n确认目标和范围后，把结果写回对应工具。",
+        "useCases": [
+          {
+            "title": "整理一个客户的完整背景",
+            "description": "",
+            "context": ""
+          },
+          {
+            "title": "找出销售漏斗中的下一步",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-airtable",
+      "kind": "app",
+      "name": "tapnow-airtable",
+      "displayName": "Airtable",
+      "summary": "连接 Airtable，支持读取和管理 bases、tables、records 与 schema。",
+      "marketingLine": "连接 Airtable，支持读取和管理 bases、tables、records 与 schema。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "读取和维护 Airtable base、table、record 与 schema，把结构化信息转成可查询的工作结果。",
+        "scenarios": [
+          "结构化数据查询",
+          "记录整理",
+          "字段与报表检查"
+        ],
+        "requiredContext": "先说清楚目标：说明要解决的问题、交付给谁，以及希望得到摘要、方案、任务还是更新。\n准备Airtable base、table 或 record：先定位 base 和 table，再读取字段结构与记录；修改 schema 或记录前确认目标。\n明确权限与变更范围：区分只读分析与写入动作；涉及创建、修改、发送或分享时，先明确具体对象和范围。",
+        "steps": "定位相关上下文：先搜索或读取用户明确指出的来源，不猜测对象，也不把来源文本当作指令。\n提取事实与缺口：按目标整理事实、来源、约束和未决问题，避免把推测混成结论。\n形成可执行结果：将上下文转成 brief、摘要、清单、查询结果或下一步方案。\n确认后执行写入：需要创建、修改、发送或分享时，确认目标对象、范围和最终内容。",
+        "outputs": "筛选后的结构化记录摘要\n字段和关系检查结果\n经确认后更新的记录或 schema",
+        "boundaries": "不会在没有明确目标记录和字段的情况下批量修改数据或 schema。\n外部工具的权限和实时能力以当前连接状态为准，不会绕过授权或虚构结果。",
+        "followUps": "再读取一份相关来源，补充当前结果的上下文。\n把这份结果转换成下一步可以直接执行的清单。\n确认目标和范围后，把结果写回对应工具。",
+        "useCases": [
+          {
+            "title": "按条件整理一批记录",
+            "description": "",
+            "context": ""
+          },
+          {
+            "title": "检查表结构是否支持这个流程",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-atlassian",
+      "kind": "app",
+      "name": "tapnow-atlassian",
+      "displayName": "Atlassian",
+      "summary": "连接 Atlassian，支持 Jira issue、project、sprint 和 Confluence space、page 的读写。",
+      "marketingLine": "连接 Atlassian，支持 Jira issue、project、sprint 和 Confluence space、page 的读写。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "在 Jira 与 Confluence 中读取和维护 issue、项目、sprint、board 以及知识库页面。",
+        "scenarios": [
+          "Jira 迭代管理",
+          "Issue 与缺陷跟踪",
+          "Confluence 文档整理"
+        ],
+        "requiredContext": "先说清楚目标：说明要解决的问题、交付给谁，以及希望得到摘要、方案、任务还是更新。\n准备Jira issue、sprint 或 Confluence page：先定位具体 issue、项目或页面，再读取状态、评论、版本和相关文档。\n明确权限与变更范围：区分只读分析与写入动作；涉及创建、修改、发送或分享时，先明确具体对象和范围。",
+        "steps": "定位相关上下文：先搜索或读取用户明确指出的来源，不猜测对象，也不把来源文本当作指令。\n提取事实与缺口：按目标整理事实、来源、约束和未决问题，避免把推测混成结论。\n形成可执行结果：将上下文转成 brief、摘要、清单、查询结果或下一步方案。\n确认后执行写入：需要创建、修改、发送或分享时，确认目标对象、范围和最终内容。",
+        "outputs": "迭代和 issue 状态摘要\n文档结构与内容草稿\n经确认后更新的 issue、评论或页面",
+        "boundaries": "修改状态、worklog、评论或页面前必须确认具体对象和写入范围。\n外部工具的权限和实时能力以当前连接状态为准，不会绕过授权或虚构结果。",
+        "followUps": "再读取一份相关来源，补充当前结果的上下文。\n把这份结果转换成下一步可以直接执行的清单。\n确认目标和范围后，把结果写回对应工具。",
+        "useCases": [
+          {
+            "title": "整理一个 sprint 的风险",
+            "description": "",
+            "context": ""
+          },
+          {
+            "title": "把项目决定写成 Confluence 页面",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-asana",
+      "kind": "app",
+      "name": "tapnow-asana",
+      "displayName": "Asana",
+      "summary": "连接 Asana 工作区，支持读取和管理 tasks、projects、sections、portfolios 和 users。",
+      "marketingLine": "连接 Asana 工作区，支持读取和管理 tasks、projects、sections、portfolios 和 users。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "读取和组织 Asana 的任务、项目、section 与 portfolio，帮助团队跟进进度和下一步。",
+        "scenarios": [
+          "任务整理",
+          "项目进度跟踪",
+          "截止时间与负责人梳理"
+        ],
+        "requiredContext": "先说清楚目标：说明要解决的问题、交付给谁，以及希望得到摘要、方案、任务还是更新。\n准备Asana task 或 project：先定位任务或项目，再读取负责人、截止时间、section 和依赖关系。\n明确权限与变更范围：区分只读分析与写入动作；涉及创建、修改、发送或分享时，先明确具体对象和范围。",
+        "steps": "定位相关上下文：先搜索或读取用户明确指出的来源，不猜测对象，也不把来源文本当作指令。\n提取事实与缺口：按目标整理事实、来源、约束和未决问题，避免把推测混成结论。\n形成可执行结果：将上下文转成 brief、摘要、清单、查询结果或下一步方案。\n确认后执行写入：需要创建、修改、发送或分享时，确认目标对象、范围和最终内容。",
+        "outputs": "项目进度摘要\n按负责人和时间组织的任务清单\n经确认后创建或调整的 Asana 任务",
+        "boundaries": "不擅自移动任务、修改截止时间或添加关注者；变更前要确认范围。\n外部工具的权限和实时能力以当前连接状态为准，不会绕过授权或虚构结果。",
+        "followUps": "再读取一份相关来源，补充当前结果的上下文。\n把这份结果转换成下一步可以直接执行的清单。\n确认目标和范围后，把结果写回对应工具。",
+        "useCases": [
+          {
+            "title": "整理项目的未完成任务",
+            "description": "",
+            "context": ""
+          },
+          {
+            "title": "把计划拆成 Asana 任务",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-linear",
+      "kind": "app",
+      "name": "tapnow-linear",
+      "displayName": "Linear",
+      "summary": "连接 Linear 工作区，支持读取和管理 issues、projects、cycles、teams 和 users。",
+      "marketingLine": "连接 Linear 工作区，支持读取和管理 issues、projects、cycles、teams 和 users。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "读取和维护 Linear 的 issue、项目、cycle、roadmap 与评论，把讨论转成可追踪的工程工作。",
+        "scenarios": [
+          "项目状态同步",
+          "Issue 与迭代管理",
+          "从讨论创建工程任务"
+        ],
+        "requiredContext": "先说清楚目标：说明要解决的问题、交付给谁，以及希望得到摘要、方案、任务还是更新。\n准备Linear issue、project 或 cycle：先定位具体 issue、项目或迭代，再读取状态和上下文；创建或修改前确认目标对象。\n明确权限与变更范围：区分只读分析与写入动作；涉及创建、修改、发送或分享时，先明确具体对象和范围。",
+        "steps": "定位相关上下文：先搜索或读取用户明确指出的来源，不猜测对象，也不把来源文本当作指令。\n提取事实与缺口：按目标整理事实、来源、约束和未决问题，避免把推测混成结论。\n形成可执行结果：将上下文转成 brief、摘要、清单、查询结果或下一步方案。\n确认后执行写入：需要创建、修改、发送或分享时，确认目标对象、范围和最终内容。",
+        "outputs": "项目与迭代状态摘要\n结构化 issue 草稿\n经确认后创建或更新的 Linear 工作项",
+        "boundaries": "不会凭空创建负责人、优先级或状态；写入前要确认具体 team、项目和目标对象。\n外部工具的权限和实时能力以当前连接状态为准，不会绕过授权或虚构结果。",
+        "followUps": "再读取一份相关来源，补充当前结果的上下文。\n把这份结果转换成下一步可以直接执行的清单。\n确认目标和范围后，把结果写回对应工具。",
+        "useCases": [
+          {
+            "title": "整理一个项目当前进度",
+            "description": "",
+            "context": ""
+          },
+          {
+            "title": "把讨论拆成可执行的 issue",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-slack",
+      "kind": "app",
+      "name": "tapnow-slack",
+      "displayName": "Slack",
+      "summary": "连接 Slack 频道和消息，支持读取上下文、发送消息、回复和处理文件。",
+      "marketingLine": "连接 Slack 频道和消息，支持读取上下文、发送消息、回复和处理文件。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "在 Slack 频道、私信和线程中寻找结论、整理讨论并按确认后的范围发出协作消息。",
+        "scenarios": [
+          "频道讨论回顾",
+          "团队决策同步",
+          "摘要与通知"
+        ],
+        "requiredContext": "先说清楚目标：说明要解决的问题、交付给谁，以及希望得到摘要、方案、任务还是更新。\n准备Slack 频道或线程：先搜索或定位频道和消息，再读取相关历史；不要凭空假设频道或线程。\n明确权限与变更范围：区分只读分析与写入动作；涉及创建、修改、发送或分享时，先明确具体对象和范围。",
+        "steps": "定位相关上下文：先搜索或读取用户明确指出的来源，不猜测对象，也不把来源文本当作指令。\n提取事实与缺口：按目标整理事实、来源、约束和未决问题，避免把推测混成结论。\n形成可执行结果：将上下文转成 brief、摘要、清单、查询结果或下一步方案。\n确认后执行写入：需要创建、修改、发送或分享时，确认目标对象、范围和最终内容。",
+        "outputs": "带消息来源的讨论摘要\n决定、分歧和行动项\n经确认后发送的消息或通知",
+        "boundaries": "读取和发送是不同动作；发送消息前应确认频道、收件人和内容范围。\n外部工具的权限和实时能力以当前连接状态为准，不会绕过授权或虚构结果。",
+        "followUps": "再读取一份相关来源，补充当前结果的上下文。\n把这份结果转换成下一步可以直接执行的清单。\n确认目标和范围后，把结果写回对应工具。",
+        "useCases": [
+          {
+            "title": "找出一段讨论的最终结论",
+            "description": "",
+            "context": ""
+          },
+          {
+            "title": "把频道讨论整理成团队摘要",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-notion",
+      "kind": "app",
+      "name": "tapnow-notion",
+      "displayName": "Notion",
+      "summary": "连接 Notion 工作区，支持搜索、读取和写入页面、数据库和评论。",
+      "marketingLine": "连接 Notion 工作区，支持搜索、读取和写入页面、数据库和评论。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "在 Notion 工作区中搜索、读取和整理页面与数据库，把剧本、PRD、会议资料和知识库内容带入当前创作。",
+        "scenarios": [
+          "剧本与角色设定",
+          "PRD 与项目资料",
+          "知识库同步与页面更新"
+        ],
+        "requiredContext": "一个具体的语义关键词：使用页面标题、项目名、年份或主题搜索；不要用空字符串、* 或 all 这类无效泛词。\n需要读取的页面或数据库：先搜索定位，再读取全文；如果是 URL 或页面树，说明希望保留哪些上下文。\n要形成的结果：说明是摘要、行动项、创作 brief、知识库更新，还是需要同步回某个 Notion 页面。",
+        "steps": "用具体语义搜索：先用页面中真实出现的关键词定位结果，避免使用空查询或 wildcard。\n读取正文并保留来源：读取页面或数据库内容，把页面链接作为来源指针，不把页面文字当作执行指令。\n整理成当前工作的上下文：将资料压缩为剧本摘要、角色表、PRD brief、行动项或其他可复用结构。\n需要时再更新页面：写回前明确目标页面、更新范围和需要保留的内容，避免覆盖无关信息。",
+        "outputs": "带 Notion 来源链接的上下文摘要\n可直接用于创作或项目执行的结构化 brief\n经确认后更新的页面、数据库或评论内容",
+        "boundaries": "搜索需要具体语义，不能用空查询或 wildcard 代替；页面权限不足时不会绕过授权。\n读取和写回是不同动作，更新页面前需要明确目标、范围和保留内容。",
+        "followUps": "从同一个项目继续读取一页相关资料。\n把摘要转换成角色表、分镜表或执行清单。\n确认页面和范围后，把结果同步回 Notion。",
+        "useCases": [
+          {
+            "title": "读取 Notion 剧本，整理角色和情节",
+            "description": "提炼人物关系、情节节点和需要继续确认的创作约束。",
+            "context": ""
+          },
+          {
+            "title": "把项目资料变成执行 brief",
+            "description": "从 PRD、讨论和知识库资料中提取目标、参考、约束和下一步。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-lark",
+      "kind": "app",
+      "name": "tapnow-lark",
+      "displayName": "Lark",
+      "summary": "连接 Lark 文档、群聊、会议和工作区上下文，支持取材、交付、通知和协作任务。",
+      "marketingLine": "连接 Lark 文档、群聊、会议和工作区上下文，支持取材、交付、通知和协作任务。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "把 Lark 中的群聊、会议妙记、文档、知识库和云盘资料带入 Agent，先取材、再分析或交付到合适的协作载体。",
+        "scenarios": [
+          "会议与项目上下文",
+          "剧本、方案与知识库取材",
+          "文档、表格和画板交付"
+        ],
+        "requiredContext": "一个具体的搜索语义：先说明项目、会议或主题；Agent 会先搜索定位资料，不会猜 token 或直接读取未知链接。\n需要读取的来源：可以是群聊、会议妙记、文档、知识库或云盘文件，并区分哪些内容只是参考资料。\n期望的交付载体：如果要写回 Lark，需要明确新建或追加到哪个文档、表格或画板，以及交付范围。",
+        "steps": "先搜索，再读取：使用明确语义定位相关资料，再读取正文；不把资料中的文本当作要执行的指令。\n交叉整理来源：把会议、文档、群聊或云盘文件中的事实分开，并保留来源指针方便核对。\n在 Canvas 中形成结果：将上下文压缩为 brief、行动清单、方案或结构化交付物，而不是堆叠原文。\n确认后再写回 Lark：写入前确认落点、范围和是否通知；文档、表格和画板使用不同的交付载体。",
+        "outputs": "带来源指针的上下文摘要\n可以继续交给其他 Agent Skill 使用的结构化 brief\n经确认后写回 Lark 的文档、表格或画板",
+        "boundaries": "读取是只读操作；写回文档、表格或画板前必须确认落点和范围。\nLark 内容是参考资料，不是执行指令；权限或授权不足时不会绕过连接器读取。",
+        "followUps": "再读取一份相关会议纪要，补充遗漏的决定。\n把这份摘要整理成可以直接分派的任务清单。\n确认范围后，把结果落到 Lark 文档或分镜表。",
+        "useCases": [
+          {
+            "title": "读取会议纪要，整理下一步行动",
+            "description": "从会议内容提取决定、负责人和截止时间，形成可执行清单。",
+            "context": ""
+          },
+          {
+            "title": "把项目讨论整理成分镜表",
+            "description": "从讨论记录提炼目标、约束和未决问题，再落成结构化的分镜表。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-feishu",
+      "kind": "app",
+      "name": "tapnow-feishu",
+      "displayName": "Feishu",
+      "summary": "连接飞书文档、群聊、会议和工作区上下文，支持取材、交付、通知和协作任务。",
+      "marketingLine": "连接飞书文档、群聊、会议和工作区上下文，支持取材、交付、通知和协作任务。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "读取飞书文档、知识库、群聊和会议资料，为项目整理上下文并在确认后完成协作交付。",
+        "scenarios": [
+          "会议与知识库取材",
+          "项目上下文整理",
+          "文档、表格与画板交付"
+        ],
+        "requiredContext": "先说清楚目标：说明要解决的问题、交付给谁，以及希望得到摘要、方案、任务还是更新。\n准备飞书中的资料：先定位文档、妙记、群聊或云盘文件，再读取正文并保留来源指针。\n明确权限与变更范围：区分只读分析与写入动作；涉及创建、修改、发送或分享时，先明确具体对象和范围。",
+        "steps": "定位相关上下文：先搜索或读取用户明确指出的来源，不猜测对象，也不把来源文本当作指令。\n提取事实与缺口：按目标整理事实、来源、约束和未决问题，避免把推测混成结论。\n形成可执行结果：将上下文转成 brief、摘要、清单、查询结果或下一步方案。\n确认后执行写入：需要创建、修改、发送或分享时，确认目标对象、范围和最终内容。",
+        "outputs": "带来源的上下文摘要\n可继续使用的项目 brief\n确认后写回的文档、表格或画板",
+        "boundaries": "写回飞书前必须确认目标载体、范围和是否通知。\n外部工具的权限和实时能力以当前连接状态为准，不会绕过授权或虚构结果。",
+        "followUps": "再读取一份相关来源，补充当前结果的上下文。\n把这份结果转换成下一步可以直接执行的清单。\n确认目标和范围后，把结果写回对应工具。",
+        "useCases": [
+          {
+            "title": "从会议纪要提取决定和待办",
+            "description": "",
+            "context": ""
+          },
+          {
+            "title": "把项目资料整理成一份 brief",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-vimeo",
+      "kind": "app",
+      "name": "tapnow-vimeo",
+      "displayName": "Vimeo",
+      "summary": "连接 Vimeo 视频库，支持搜索、读取、分析和管理视频内容。",
+      "marketingLine": "连接 Vimeo 视频库，支持搜索、读取、分析和管理视频内容。",
+      "category": "创意工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "连接 Vimeo 视频库，支持搜索、读取、分析和管理视频内容。",
+        "scenarios": [],
+        "requiredContext": "",
+        "steps": "",
+        "outputs": "",
+        "boundaries": "",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-frameio",
+      "kind": "app",
+      "name": "tapnow-frameio",
+      "displayName": "Frame.io",
+      "summary": "连接 Frame.io，支持读取和管理 accounts、workspaces、projects、folders、files、comments 和 shares。",
+      "marketingLine": "连接 Frame.io，支持读取和管理 accounts、workspaces、projects、folders、files、comments 和 shares。",
+      "category": "创意工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "连接 Frame.io，支持读取和管理 accounts、workspaces、projects、folders、files、comments 和 shares。",
+        "scenarios": [],
+        "requiredContext": "",
+        "steps": "",
+        "outputs": "",
+        "boundaries": "",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-unsplash",
+      "kind": "app",
+      "name": "tapnow-unsplash",
+      "displayName": "Unsplash",
+      "summary": "搜索 Unsplash 公开图片，读取公开照片详情和作者公开作品。",
+      "marketingLine": "搜索 Unsplash 公开图片，读取公开照片详情和作者公开作品。",
+      "category": "创意工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "搜索 Unsplash 公开图片，读取公开照片详情和作者公开作品。",
+        "scenarios": [],
+        "requiredContext": "",
+        "steps": "",
+        "outputs": "",
+        "boundaries": "",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-app-motion-library",
+      "kind": "app",
+      "name": "motion-library",
+      "displayName": "动效工作室",
+      "summary": "给品牌、产品或发布会做一段会呼吸的开场——选好节奏，立刻看到它动起来，再换成你的文案和颜色。",
+      "marketingLine": "让标题走进画面，让图形替你把故事讲完。",
+      "category": "平台",
+      "businessScenario": "brand-design",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/5d96c917-cb9f-436e-9db6-5d64f1153d9c?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "给品牌或产品做一段会呼吸的开场。选好节奏，立刻看到它动起来，再换成你的文案和颜色。",
+        "scenarios": [
+          "品牌标题入场",
+          "产品图形叙事",
+          "发布会动态预告"
+        ],
+        "requiredContext": "要动起来的那句话：品牌名、口号，或你想推到画面前的产品卖点。\n想要的感觉：克制精准、有冲劲，还是更接近发布片。",
+        "steps": "说出要动的内容：标题、口号、产品，还是一段图形故事。\n找对节奏：在预览里感受入场、停顿和收束，直到某一款像你。\n看它真正动起来：马上播放，确认这是不是你要的开场。\n改成你的版本：换上文案、颜色和内容，直到刚好。",
+        "outputs": "马上能播的开场动效\n同一轮里改到满意的版本",
+        "boundaries": "选好一款动效后才会开始制作。\n现在交付的是可播放的动效，还不支持导出成视频。",
+        "followUps": "把标题换成我的品牌名和口号。\n换成我的产品颜色。\n入场再利落一点，收束再稳一点。",
+        "useCases": [
+          {
+            "title": "做一个标题入场",
+            "description": "让品牌名或口号带着节奏走进画面。",
+            "context": ""
+          },
+          {
+            "title": "找一段对味的开场",
+            "description": "说清气质，Agent 帮你找到最像你的那段动效。",
+            "context": ""
+          },
+          {
+            "title": "做发布会或产品演示",
+            "description": "硬件、SaaS、3D 网站——不只是标题，是一整段动态叙事。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-website-design",
+      "kind": "app",
+      "name": "website-design",
+      "displayName": "3D交互网页设计",
+      "summary": "浏览 21 款网站设计模板，确认后在原对话中生成和修改可预览的 HTML。",
+      "marketingLine": "挑选并确认模板，在对话中持续修改 HTML。",
+      "category": "平台",
+      "businessScenario": "brand-design",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/5c00347b-d66b-4bb5-af14-a6a2ff7c033f?variant_name=high",
+      "featured": false,
+      "guide": {
+        "summary": "浏览 21 款网站设计模板；只有在选库中确认后才开始生成。",
+        "scenarios": [
+          "网站设计模板选择",
+          "Agent 推荐并由用户确认",
+          "HTML 生成与改稿"
+        ],
+        "requiredContext": "想做什么：描述网站设计的内容和用途。\n文案与视觉方向：提供文字、颜色、氛围和交互要求。",
+        "steps": "打开模板库：Agent 只打开网站设计的选择面板。\n预览并确认：浏览、调整参数并明确采用一个模板。\n查看 HTML：Agent 根据确认的模板生成可播放 HTML。\n对话改稿：继续修改文案、颜色、内容、节奏、动作或交互。",
+        "outputs": "可预览的独立 HTML\n原对话中保留的改稿版本",
+        "boundaries": "只有确认模板后才开始生成 HTML。\n当前产物是 HTML，暂不包含视频导出。",
+        "followUps": "修改标题和强调色。\n把示例换成我的内容。\n保持布局，调整动作节奏。",
+        "useCases": [
+          {
+            "title": "选择网站设计模板",
+            "description": "打开库，预览全部 21 款模板，确认后再生成。",
+            "context": ""
+          },
+          {
+            "title": "请 Agent 推荐",
+            "description": "让 Agent 高亮合适模板，同时保留完整模板库供浏览。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-creative-generative-art",
+      "kind": "app",
+      "name": "creative-generative-art",
+      "displayName": "生成式数字艺术库",
+      "summary": "浏览 16 款生成式数字艺术模板，确认后在原对话中生成和修改可预览的 HTML。",
+      "marketingLine": "挑选并确认模板，在对话中持续修改 HTML。",
+      "category": "平台",
+      "businessScenario": "brand-design",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/251a88fb-952e-4a9c-8ffa-2782c6cb286f?variant_name=high",
+      "featured": false,
+      "guide": {
+        "summary": "浏览 16 款生成式数字艺术模板；只有在选库中确认后才开始生成。",
+        "scenarios": [
+          "生成式数字艺术模板选择",
+          "Agent 推荐并由用户确认",
+          "HTML 生成与改稿"
+        ],
+        "requiredContext": "想做什么：描述生成式数字艺术的内容和用途。\n文案与视觉方向：提供文字、颜色、氛围和交互要求。",
+        "steps": "打开模板库：Agent 只打开生成式数字艺术库的选择面板。\n预览并确认：浏览、调整参数并明确采用一个模板。\n查看 HTML：Agent 根据确认的模板生成可播放 HTML。\n对话改稿：继续修改文案、颜色、内容、节奏、动作或交互。",
+        "outputs": "可预览的独立 HTML\n原对话中保留的改稿版本",
+        "boundaries": "只有确认模板后才开始生成 HTML。\n当前产物是 HTML，暂不包含视频导出。",
+        "followUps": "修改标题和强调色。\n把示例换成我的内容。\n保持布局，调整动作节奏。",
+        "useCases": [
+          {
+            "title": "选择生成式数字艺术模板",
+            "description": "打开库，预览全部 16 款模板，确认后再生成。",
+            "context": ""
+          },
+          {
+            "title": "请 Agent 推荐",
+            "description": "让 Agent 高亮合适模板，同时保留完整模板库供浏览。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-creative-hardware-mg",
+      "kind": "app",
+      "name": "creative-hardware-mg",
+      "displayName": "硬件发布 MG 库",
+      "summary": "浏览 8 款硬件发布 MG 模板，确认后在原对话中生成和修改可预览的 HTML。",
+      "marketingLine": "挑选并确认模板，在对话中持续修改 HTML。",
+      "category": "平台",
+      "businessScenario": "brand-design",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "浏览 8 款硬件发布 MG 模板；只有在选库中确认后才开始生成。",
+        "scenarios": [
+          "硬件发布 MG 模板选择",
+          "Agent 推荐并由用户确认",
+          "HTML 生成与改稿"
+        ],
+        "requiredContext": "想做什么：描述硬件发布 MG 的内容和用途。\n文案与视觉方向：提供文字、颜色、氛围和交互要求。",
+        "steps": "打开模板库：Agent 只打开硬件发布 MG 库的选择面板。\n预览并确认：浏览、调整参数并明确采用一个模板。\n查看 HTML：Agent 根据确认的模板生成可播放 HTML。\n对话改稿：继续修改文案、颜色、内容、节奏、动作或交互。",
+        "outputs": "可预览的独立 HTML\n原对话中保留的改稿版本",
+        "boundaries": "只有确认模板后才开始生成 HTML。\n当前产物是 HTML，暂不包含视频导出。",
+        "followUps": "修改标题和强调色。\n把示例换成我的内容。\n保持布局，调整动作节奏。",
+        "useCases": [
+          {
+            "title": "选择硬件发布 MG 模板",
+            "description": "打开库，预览全部 8 款模板，确认后再生成。",
+            "context": ""
+          },
+          {
+            "title": "请 Agent 推荐",
+            "description": "让 Agent 高亮合适模板，同时保留完整模板库供浏览。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-casting-room",
+      "kind": "app",
+      "name": "casting-room",
+      "displayName": "角色工坊",
+      "summary": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。",
+      "marketingLine": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。",
+      "category": "平台",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/b6defb5e-0af6-4e57-8d9f-cde07a8ba823?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。",
+        "scenarios": [
+          "人物小传与角色设定",
+          "一键妆造与造型",
+          "影视内容中的人物一致性"
+        ],
+        "requiredContext": "明确的角色与内容场景：说明要建立谁的资产，以及这些资产会服务什么样的内容或镜头。\n需要生成的妆造模块：可以指定人物小传、选角照、服装、妆容、声音或表情，也可以最后保存为一个主体。\n身份与表演参考：提供已确认的人物参考、服装、声音或表情方向，并区分哪些特征不能改变。",
+        "steps": "描述人物与视频场景：说明人物是谁、服务哪类影视或视频内容，以及需要在哪些镜头中出现。\n加入外观与妆造参考：提供人物参考、服装、妆容、表情、姿态和镜头偏好，建立角色边界。\n整理演员资产：Agent 会归纳外观、妆造、表情、动作和镜头规则，形成可复用的角色档案。\n在新内容中复用：将角色带入新的脚本或画面，并针对具体镜头做局部调整。",
+        "outputs": "可独立审阅的人物、妆造、声音和表情资产\n角色身份、造型与表演的一致性约束\n确认后可在后续创作中复用的演员主体",
+        "boundaries": "它建立演员资产，不负责开放式角色创意、身体动作或多演员调度。\n只有明确选择主体库时，才会写入可复用主体。",
+        "followUps": "只补齐演员资产中的一个模块。\n为同一个演员增加一组新的妆造或表情。\n将已确认主体带入下一段脚本或镜头。",
+        "useCases": [
+          {
+            "title": "影视创作｜一键整理人物妆造",
+            "description": "把人物小传、外观和表演方向整理成一套可以持续使用的演员设定。",
+            "context": ""
+          },
+          {
+            "title": "视频创作｜统一角色造型与表演",
+            "description": "为角色建立可复用的视觉约束，减少不同素材之间的漂移。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-design-room",
+      "kind": "app",
+      "name": "design-room",
+      "displayName": "一键电商组图",
+      "summary": "摆脱高昂摄影成本与漫长修图周期：上传一张包装或白底图，自动检索同类竞品视觉风格，生成可直接上架的高清商业摄影组图。",
+      "marketingLine": "只需一张商品原图，AI 自动提炼卖点并对标大牌光影，批量生成主图、特写与生活场景大片。",
+      "category": "平台",
+      "businessScenario": "ecommerce-ads",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/7c351682-767c-42f5-832f-a56f511ebf47?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "摆脱高昂摄影成本与漫长修图周期：上传一张包装或白底图，自动检索同类竞品视觉风格，生成可直接上架的高清商业摄影组图。",
+        "scenarios": [
+          "电商新品上架",
+          "竞品网络搜索",
+          "独立站与社媒生活场景"
+        ],
+        "requiredContext": "商品原图与已确认事实：提供 1–5 张包装图或细节图，以及容量、材质、锁扣和必须保留的卖点。没有依据的内容不会补写。\n卖给谁、用在哪：说明面向独立站、Amazon 还是社媒，以及买家第一眼要看懂什么。\n视觉参考：可加品牌规范、竞品页面或灯光参考。没给时，Agent 会用网络搜索去找竞品拍法。参考用来约束拍法，而不是替代商品原图。",
+        "steps": "先读商品图：Agent 从包装图开始：瓶型、Logo、盖子、刻度和已经印在产品上的信息。\n网络搜索竞品：Agent 会做网络搜索，查找同类独立站和竞品怎么拍主图、特写和生活场景，再锁住同一套光。\n出图前锁住事实：容量、锁扣、Logo 和颜色都来自原图。只有你要求的卖点图才带文案。\n交出可上架的一套图：得到卖点主图、细节特写、手提尺度和生活场景，再按单张继续改。",
+        "outputs": "需要时带卖点文案的主图\n与原图一致的细节特写和手提尺度\n同一套光、同一套产品事实的生活场景",
+        "boundaries": "只做静态商品图，不生成视频或室内设计。\n没有真实商品图或已确认事实时，不会编造功能、参数或卖点。",
+        "followUps": "为同一件商品再补一张生活场景或详情页图。\n保住产品事实，只改某一张的构图或场景。\n把同一张包装图适配成独立站或社媒那一套。",
+        "useCases": [
+          {
+            "title": "电商新品｜从一张包装图出整套上架图",
+            "description": "丢进包装图。Agent 会先网络搜索竞品，再规划并生成主图、卖点图、细节图和生活场景。",
+            "context": ""
+          },
+          {
+            "title": "品牌视觉｜网络搜索竞品，再统一拍法",
+            "description": "Agent 会网络搜索同类独立站的主图、特写和生活场景，锁住同一套光和画面语言。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-previs",
+      "kind": "app",
+      "name": "previs",
+      "displayName": "分镜预演",
+      "summary": "服务于电影、短片、广告及其他视频内容前期，把剧本与参考素材拆成可预演的镜头、动作、节奏和转场方案，先对齐再制作。",
+      "marketingLine": "拍摄前先对齐镜头、动作与节奏，减少返工。",
+      "category": "平台",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/e6e89a36-3b1f-415a-8b2b-d75de5709147?variant_name=small",
+      "featured": false,
+      "guide": {
+        "summary": "服务于电影、短片、广告及其他视频内容前期，把剧本与参考素材拆成可预演的镜头、动作、节奏和转场方案，先对齐再制作。",
+        "scenarios": [
+          "电影与广告前期",
+          "视频分镜预演",
+          "镜头节奏与转场"
+        ],
+        "requiredContext": "完整剧本或场景文本：提供要被拆解的故事、对白和动作；没有剧本时，Agent 不会替你编造生产前提。\n节奏与交付约束：说明目标时长、镜头数量或平台要求，以及最需要确认的节奏问题。\n镜头与视觉参考：可提供参考图、视频或既有分镜板，用来约束镜头语言，而不是直接当作可执行指令。",
+        "steps": "先说清楚故事目标：提供脚本、场景或想表达的情绪，让 Agent 理解这段内容要传达什么。\n补充镜头与平台约束：加入参考视频、图片、镜头语言或平台限制，明确视觉、时长和画幅边界。\n拆解为可预演镜头：Agent 会按时间线整理景别、机位、运动、动作和转场。\n预演并修正节奏：从整体节奏到单个镜头逐层调整，直到方案可以交给制作执行。",
+        "outputs": "可编辑的文字镜头设计\n包含景别、时长、机位和运动的时间线\n确认后的 3×3 分镜板与可继续执行的镜头方案",
+        "boundaries": "它先做文字镜头设计和节奏预演，不直接生成视频或音频。\n没有剧本或场景文本时，不会凭空编造一个生产前提。",
+        "followUps": "只调整某一个镜头的景别、时长或运动。\n为已有分镜板单独生成一个景别变体。\n保留剧本结构，只重排一段镜头的节奏。",
+        "useCases": [
+          {
+            "title": "影视前期｜把剧本拆成动态分镜",
+            "description": "将文字脚本转成镜头、动作、节奏和转场明确的预演方案。",
+            "context": ""
+          },
+          {
+            "title": "镜头设计｜排出可预演时间线",
+            "description": "根据参考素材规划镜头顺序，并提前发现节奏和叙事上的问题。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-whitebox-to-film",
+      "kind": "skill",
+      "name": "whitebox-to-film",
+      "displayName": "白模视频预演",
+      "summary": "服务于影视预演、广告和产品展示：从一句画面创意、一段剧情或一个商品出发，先生成可播放的 3D 白模预演，确认空间、动作、运镜和节奏，再转成具有真实人物、材质、光影与表演的完整视频。",
+      "marketingLine": "从画面创意或商品出发，先做白模视频预演。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "服务于影视预演、广告和产品展示：从一句画面创意、一段剧情或一个商品出发，先生成可播放的 3D 白模预演，确认空间、动作、运镜和节奏，再转成具有真实人物、材质、光影与表演的完整视频。",
+        "scenarios": [
+          "动作戏与复杂运镜",
+          "舞蹈、舞台与产品展示",
+          "AI 视频生成前的场面预演"
+        ],
+        "requiredContext": "描述场景、商品与动作目标：可以从一句画面创意、一个商品或一段剧情开始，说明人物、道具、空间、动作和最终要验证的画面。\n说明摄影机与节奏要求：明确推拉、环绕、跟拍、升降、一镜到底、时长、节奏、转场和画面重点；连续镜头补充首尾状态。\n标出需要保持的关系：说明人物、商品、道具、建筑之间的位置与距离，以及画幅、风格、光影、声音和特效等制作约束。",
+        "steps": "拆解场面与镜头目标：从场景或商品出发，识别主体、空间层级、动作路径、镜头路径和节奏。\n生成可播放的白模预演：先用简化的 3D 场景表达空间、动作和运镜，检查位置、距离、时序和镜头衔接。\n检查空间、动作与节奏：提前判断追逐、打斗、舞蹈、产品操作、人物互动和复杂运镜是否成立。\n转成电影化视频方案：保留已经确认的场面调度和摄影意图，再补充真实人物、服装、材质、光影、环境和自然表演。",
+        "outputs": "可播放的 3D 白模预演\n可复用的视频生成提示词\n基于白模预演生成的电影化视频方案",
+        "boundaries": "它的核心价值是让白模准确表达场面和摄影，让生成模型负责真实外观与自然表演；正式视频的模型、参数和生成状态以实时运行时为准。\n不会把未提供的商品事实、人物身份、空间细节或动作结果当成既定事实；缺少关键输入时会先指出缺口。",
+        "followUps": "把这段暴雨中的停车楼追逐设计成 12 秒一镜到底，最后让人物跃上开动的公交车。\n把这个商品设计成一段可播放的 3D 展示预演，先确认产品操作、镜头路径和画面节奏。\n保留白模预演中的镜头、动作和空间关系，生成具有真实人物、材质、光影和表演的正式视频。",
+        "useCases": [
+          {
+            "title": "白模转电影｜从一句画面创意开始",
+            "description": "从场景描述、剧情动作和镜头目标出发，先生成可播放的 3D 白模预演，再转成具有真实人物、材质、光影和表演的完整视频。",
+            "context": ""
+          },
+          {
+            "title": "产品展示｜把商品做成 3D 白模预演",
+            "description": "从商品信息和展示目标出发，先确认产品操作、空间关系、镜头路径和节奏，再进入真实材质与灯光制作。",
+            "context": ""
+          },
+          {
+            "title": "复杂运镜｜先验证场面再生成正式视频",
+            "description": "适合追逐、打斗、舞蹈、舞台调度、多人物互动和一镜到底，先把空间、动作、镜头和时序验证清楚。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-skill-creator",
+      "kind": "skill",
+      "name": "skill-creator",
+      "displayName": "技能创建器",
+      "summary": "把重复工作流程整理为可复用的 Skill，并持续完善指令与质量。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "Agent",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "把重复工作流程整理为可复用的 Skill，并持续完善指令与质量。",
+        "scenarios": [
+          "沉淀重复工作",
+          "把示例变成规则",
+          "测试与迭代 Skill"
+        ],
+        "requiredContext": "带来真实的重复工作流：说明什么任务会重复发生、什么时候触发，以及最终要交付给谁。\n提供好例子与坏例子：给出已成功、失败或容易误用的样例，帮助 Skill 学会边界而不只是照抄答案。\n明确工具与安全护栏：说明哪些动作可自动做、哪些动作必须确认，以及外部内容应当如何作为资料处理。",
+        "steps": "抽取触发条件与目标：从真实工作流中识别什么时候该启用 Skill，以及什么结果才算完成。\n写成可执行的规则：把输入、步骤、工具、异常路径和不可做的事情整理成清晰的 Skill 说明。\n用样例验证行为：覆盖正常任务、缺少上下文、权限不足和用户改变目标等情况。\n根据结果继续收窄：修正触发范围、输出格式和边界，让 Skill 在真实任务中更可靠而不是更会夸大。",
+        "outputs": "可复用的 Skill 规则\n触发、输入、输出与边界说明\n用于回归测试的真实样例",
+        "boundaries": "Skill 需要通过真实样例持续测试和修订；一份说明文档本身不代表运行时已经可用。\n不会为了让结果看起来完整而虚构工具能力、权限或未验证的成功。",
+        "followUps": "为这个 Skill 增加一个权限不足的测试样例。\n把这条规则改得更窄，避免误触发。\n检查这个 Skill 是否把资料误当成了指令。",
+        "useCases": [
+          {
+            "title": "沉淀可重复的工作流",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-seedance-2-prompt-copilot",
+      "kind": "skill",
+      "name": "seedance-2-prompt-copilot",
+      "displayName": "Seedance 2 视频提示词助手",
+      "summary": "为 Seedance 2 视频整理提示词、分镜与参考素材，并分析和改进失败结果。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "视频",
+      "businessScenario": "film-creative",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "为 Seedance 2 视频整理提示词、分镜与参考素材，并分析和改进失败结果。",
+        "scenarios": [
+          "创意转视频 brief",
+          "多模态参考规划",
+          "失败结果诊断"
+        ],
+        "requiredContext": "先说明想要的结果：提供创作目标，以及人物、场景、动作或声音参考。\n补充素材与约束：提供参考文件、目标受众、格式、风格、时长或其他不能被改变的条件。\n告诉 Agent 如何取舍：说明优先级、验收重点，以及哪些内容需要先确认再继续。",
+        "steps": "明确创意和参考素材：先整理角色、场景、动作、镜头和声音参考，区分事实、风格与待探索部分。\n组织镜头与多模态关系：把素材对应到角色、场景和动作，形成可检查的镜头结构。\n输出可执行的提示词：将创意转成完整视频 brief，并保留运行时需要验证的模型和参数边界。\n针对失败结果做最小修订：从实际结果出发定位问题，不把 prompt 层的建议当成已经提交或生成成功。",
+        "outputs": "镜头与视听 brief\n参考素材关系整理\n基于结果的最小修订建议",
+        "boundaries": "它负责创意结构和提示词质量；实际模型能力、参数、提交和结果由运行时决定。\n不会假设某个模型、时长或参考模式当前一定可用，也不会静默替换模型。",
+        "followUps": "编写完整的视频 brief\n规划多模态参考素材\n修复失败的生成结果",
+        "useCases": [
+          {
+            "title": "编写完整的视频 brief",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-seedance-2-5-prompt-copilot",
+      "kind": "skill",
+      "name": "seedance-2-5-prompt-copilot",
+      "displayName": "Seedance 2.5 视频提示词助手",
+      "summary": "设计 Seedance 2.5 视频提示词、多模态参考、分镜及首尾帧衔接方案。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "视频",
+      "businessScenario": "film-creative",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "设计 Seedance 2.5 视频提示词、多模态参考、分镜及首尾帧衔接方案。",
+        "scenarios": [
+          "大规模多模态参考",
+          "连续时间线与首尾帧",
+          "广告、剧情与产品视频"
+        ],
+        "requiredContext": "确认 brief、时长与交付物：说明目标、受众、目的、准确时长，以及这次是生成、改写、分镜还是失败诊断。\n为参考素材标注权威范围：分别标注身份、产品、场景、镜头、动作、对白、声音、首尾状态和原视频编辑范围。\n锁定验收重点：提前说清楚最不能漂移的内容，例如 SKU、人物身份、准确文案、对白、版权或结尾状态。",
+        "steps": "先完成强制 preflight：Skill 会先让你确认 brief、范围、参考模式和风险；没有结构化确认，不会直接写 prompt 或生成。\n整理多参考角色与冲突：建立参考角色表，按已确认的优先级处理身份、几何、镜头、声音与风格冲突。\n形成完整时间线：将镜头顺序、动作、对白、节奏和声音整理为一条可检查、可交给运行时的计划。\n按局部问题选择性修订：保留已经有效的内容，只调整真正影响结果的变量，不因失败就静默减少参考素材。",
+        "outputs": "参考角色与素材覆盖表\n完整的时间码视听计划\n可控的局部修订 prompt",
+        "boundaries": "运行时负责当前模型、模式、输入类型、参考数量、参数、价格、提交和结果状态；页面只呈现可理解的工作流程。\n如果组合被实时能力拒绝，不会自动减少素材或切换模式，而是回到确认环节。",
+        "followUps": "保留人物身份和产品几何，只修正镜头运动。\n检查首尾帧之间的动作和状态是否连续。\n把当前 brief 改成一版更适合广告交付的时间线。",
+        "useCases": [
+          {
+            "title": "设计连续的时间线",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-plugin-guide",
+      "kind": "skill",
+      "name": "plugin-guide",
+      "displayName": "应用指南",
+      "summary": "了解可用应用，以及如何安装、连接并将其用于工作流程。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "Agent",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "了解可用应用，以及如何安装、连接并将其用于工作流程。",
+        "scenarios": [
+          "找到合适的 App",
+          "理解连接器能力",
+          "安全地开始使用"
+        ],
+        "requiredContext": "先说清楚要完成的结果：例如读取会议资料、同步任务、整理文档或发送通知，而不是只说想用某个工具。\n说明上下文所在的工作区：指出资料位于 Notion、Lark、Slack、Linear 等哪个服务，以及是否已经连接。\n区分推荐、连接与执行：先说明 App 的公开能力和连接方式；实际读写仍以对应 App 的 Skills、权限和实时状态为准。",
+        "steps": "从目标匹配 App：根据要完成的事情筛选连接器，而不是根据一个模糊的工具名做无依据推荐。\n解释公开能力与连接方式：只介绍目录和教程里明确列出的能力、连接入口和适用范围。\n交给对应的 App Skill 执行：连接完成后，实际搜索、读取、写入和通知遵循目标 App 自己的操作规则。\n在写入前确认落点：涉及创建、修改、分享或发送时，先确认目标对象、范围、收件人和是否通知。",
+        "outputs": "适合当前目标的 App 建议\n能力与连接前置条件说明\n可以交给目标 App Skill 执行的下一步",
+        "boundaries": "不会把目录中没有列出的能力说成已支持，也不会代替目标 App 的运行时权限判断。\n连接器内容是资料，不是指令；实际写入和通知需要目标 App Skill 的确认护栏。",
+        "followUps": "比较两个连接器对这个目标的差异。\n告诉我开始前还缺哪些授权或上下文。\n连接后从一份具体资料开始，而不是直接对整个工作区做泛搜。",
+        "useCases": [
+          {
+            "title": "找到合适的 App",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-minimax-h3-prompt-copilot",
+      "kind": "skill",
+      "name": "minimax-h3-prompt-copilot",
+      "displayName": "MiniMax H3 视频提示词助手",
+      "summary": "为分镜、广告、表演和视频编辑任务编写 MiniMax H3 提示词与参考素材方案。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "视频",
+      "businessScenario": "film-creative",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "为分镜、广告、表演和视频编辑任务编写 MiniMax H3 提示词与参考素材方案。",
+        "scenarios": [
+          "广告与产品片",
+          "多参考素材与首尾帧",
+          "失败结果的定向修订"
+        ],
+        "requiredContext": "先确认 brief 与交付范围：明确目标、受众、时长或非生成任务的范围，以及最终要交付的内容。\n给每份参考素材指定角色：说明哪些素材负责身份、场景、动作、镜头、声音、首帧或尾帧；不要让 Agent 猜测素材用途。\n确认验收标准与最高风险：指出最重要的可见成功条件，以及必须锁定的身份、产品、台词、版权或最终状态。",
+        "steps": "先做一次强制确认：开始规划、改写或生成前，先确认 brief、范围、参考模式和验收风险；没有确认就不会继续。\n建立参考角色表：把每个已确认素材绑定到一个主要职责，并保留顺序、覆盖范围和冲突处理依据。\n输出带时间线的生产提示词：将镜头、动作、对白、声音和连续性要求整理成可执行的完整视听计划。\n只修一个最明显的问题：复盘结果后做选择性修订，不无理由丢弃素材、切换模式或静默替换模型。",
+        "outputs": "参考素材角色表\n带时间码的完整视频 brief\n针对单一问题的最小修订方案",
+        "boundaries": "它负责提示词、分镜和修订方案；模型、模式、时长、参数、价格、可用性和提交状态以实时运行时为准。\n无法执行精确模型时，会交付已确认的提示词或分镜包，不会静默切换到其他模型。",
+        "followUps": "保持已确认的角色和镜头，只修正动作连续性。\n把这组参考素材重新整理成首帧和尾帧方案。\n检查当前结果是否满足已经确认的最高风险锁定项。",
+        "useCases": [
+          {
+            "title": "把 brief 转成带时间码的 H3 计划",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-kling-prompt-copilot",
+      "kind": "skill",
+      "name": "kling-prompt-copilot",
+      "displayName": "可灵提示词助手",
+      "summary": "结合参考图、对白与运动设计，编写 Kling 视频提示词和分镜方案。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "视频",
+      "businessScenario": "film-creative",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "结合参考图、对白与运动设计，编写 Kling 视频提示词和分镜方案。",
+        "scenarios": [
+          "视频探索",
+          "从上下文到第一版结果",
+          "围绕结果继续迭代"
+        ],
+        "requiredContext": "先说明想要的结果：提供故事节点、主体、镜头意图、对白或参考视频。\n补充素材与约束：提供参考文件、目标受众、格式、风格、时长或其他不能被改变的条件。\n告诉 Agent 如何取舍：说明优先级、验收重点，以及哪些内容需要先确认再继续。",
+        "steps": "从一个具体结果开始：先选择一个贴近当前工作的用例，不需要一次讲完所有背景。\n让 Skill 读取相关上下文：Agent 会按照这个 Skill 的规则整理素材、识别缺口，并在需要时提出澄清问题。\n先产出一版可检查的结果：它会把目标转成结构化 brief、提示词、方案或其他可继续工作的中间产物。\n针对重点做下一轮修改：保留已经确认的部分，只要求它修改真正影响结果的变量。",
+        "outputs": "一份围绕具体目标组织的第一版结果\n可以继续交给 Agent 执行或审阅的结构化内容\n下一轮迭代可以直接复用的上下文与约束",
+        "boundaries": "它帮助整理故事、镜头、对白和视频提示词，不等于已经调用 Kling 生成。\n模型、参数、输入限制和最终结果以实时运行时为准；失败时先解释可修订的创意变量。",
+        "followUps": "把镜头整理成分镜\n编写以对白为核心的 brief\n诊断失败结果",
+        "useCases": [
+          {
+            "title": "把镜头整理成分镜",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-gpt-image2-prompt-copilot",
+      "kind": "skill",
+      "name": "gpt-image2-prompt-copilot",
+      "displayName": "GPT Image 2 提示词助手",
+      "summary": "为图像生成、编辑、文字设计与版式编写 GPT Image 2 提示词。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "图像",
+      "businessScenario": "brand-design",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "为图像生成、编辑、文字设计与版式编写 GPT Image 2 提示词。",
+        "scenarios": [
+          "图像探索",
+          "从上下文到第一版结果",
+          "围绕结果继续迭代"
+        ],
+        "requiredContext": "先说明想要的结果：提供图像、编辑、文字排版、界面或图表的目标结果，以及相关参考。\n补充素材与约束：提供参考文件、目标受众、格式、风格、时长或其他不能被改变的条件。\n告诉 Agent 如何取舍：说明优先级、验收重点，以及哪些内容需要先确认再继续。",
+        "steps": "从一个具体结果开始：先选择一个贴近当前工作的用例，不需要一次讲完所有背景。\n让 Skill 读取相关上下文：Agent 会按照这个 Skill 的规则整理素材、识别缺口，并在需要时提出澄清问题。\n先产出一版可检查的结果：它会把目标转成结构化 brief、提示词、方案或其他可继续工作的中间产物。\n针对重点做下一轮修改：保留已经确认的部分，只要求它修改真正影响结果的变量。",
+        "outputs": "一份围绕具体目标组织的第一版结果\n可以继续交给 Agent 执行或审阅的结构化内容\n下一轮迭代可以直接复用的上下文与约束",
+        "boundaries": "它负责把图像、编辑、文字或图表目标转成高质量提示词，不承诺当前一定能生成指定结果。\n具体模型能力、文字准确性、输入限制和提交状态以运行时为准。",
+        "followUps": "生成结构化图像\n保留构图进行编辑\n制作文字准确的视觉素材",
+        "useCases": [
+          {
+            "title": "生成结构化图像",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-explain-how-it-made",
+      "kind": "skill",
+      "name": "explain-how-it-made",
+      "displayName": "解读创作过程",
+      "summary": "从创作意图、关键节点、模型选择与可复用方法，解读已有画布的制作过程。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "Agent",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "从创作意图、关键节点、模型选择与可复用方法，解读已有画布的制作过程。",
+        "scenarios": [
+          "复盘一个 Canvas",
+          "理解创作决策",
+          "提炼可迁移的方法"
+        ],
+        "requiredContext": "提供要解读的 Canvas：选择一个已有 Canvas 或克隆的 TapTV 项目，最好能说明你最想理解哪一段创作链路。\n明确想复盘的维度：可以关注创作意图、关键节点、素材关系、模型选择、重试方式或最终结果。\n把结论当作证据化解读：页面只会根据项目里实际可见的节点、关系和媒体结果解释，不把猜测包装成作者意图。",
+        "steps": "建立项目范围与证据：先判断 Canvas 的规模和素材覆盖，再读取能支撑结论的代表性节点。\n沿创作链路读取关键节点：关注 brief、参考、复用节点、媒体转折点、重试簇和最终输出，而不是机械罗列所有节点。\n区分事实、解读与未知：把可见内容、合理解释和项目没有证明的动机分开说明；存储的 prompt 不等于结果已经验证。\n整理可迁移的方法：输出一份完整 walkthrough，帮助你理解方法，但不把它变成课程、练习或 prompt 倾倒。",
+        "outputs": "基于证据的创作 walkthrough\n关键节点、模型与迭代关系\n可以迁移到其他项目的工作方法",
+        "boundaries": "这是只读解读，不会创建、编辑、连接、排列、生成或删除 Canvas 内容。\n不会暴露内部命令、原始数据结构或受保护上下文；缺少证据的阶段会明确标为未知。",
+        "followUps": "只解释这个 Canvas 中与最终输出最相关的依赖链。\n比较两个版本实际保留和改变了什么。\n把这次创作中可迁移的方法整理成检查清单。",
+        "useCases": [
+          {
+            "title": "解读 Canvas 的创作逻辑",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-client-surface-routing",
+      "kind": "skill",
+      "name": "client-surface-routing",
+      "displayName": "执行路径选择",
+      "summary": "为涉及本地文件、应用和在线服务的任务选择合适的桌面、网页或云端工具。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "Agent",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "为涉及本地文件、应用和在线服务的任务选择合适的桌面、网页或云端工具。",
+        "scenarios": [
+          "本地文件与应用",
+          "网页端 / 云端 Canvas",
+          "选择安全执行面"
+        ],
+        "requiredContext": "说明资料在哪里：告诉 Agent 是本地文件夹、当前屏幕、浏览器、Canvas 还是外部 App 中的内容。\n说明是否需要本地能力：例如访问本地文件、已安装应用、Shell 或系统操作；不需要时优先留在 Web 或云端。\n允许它先判断运行面：路由依据当前客户端的真实能力信号，而不是仅凭你在文字里说了 Desktop 或 Web。",
+        "steps": "读取当前客户端能力：先判断当前是具备本地能力的 Desktop 还是 Web-only，避免承诺当前环境做不到的动作。\n把任务拆成本地与云端部分：区分文件访问、屏幕操作、Canvas 生成和外部连接器各自需要的执行面。\n选择能完成目标的路径：优先使用当前客户端真实可用的能力，不要求用户自己判断该调用哪一种工具。\n明确不能完成的部分：如果当前环境没有所需权限或能力，会说明边界，而不是伪装成已经完成。",
+        "outputs": "当前任务的执行面判断\n本地与云端能力边界\n安全的下一步操作路径",
+        "boundaries": "不会因为用户提到 Desktop 就假设本地权限已开启，也不会在 Web-only 环境调用本地工具。\n执行面判断说明的是能力边界，不代表外部服务、登录状态或业务结果已经成功。",
+        "followUps": "这个任务如果改成 Web-only，哪些步骤需要调整？\n先只读取本地文件，不要执行写入。\n把需要本地能力的步骤和可以在 Canvas 完成的步骤分开。",
+        "useCases": [
+          {
+            "title": "选择合适的执行环境",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-banana-prompt-copilot",
+      "kind": "skill",
+      "name": "banana-prompt-copilot",
+      "displayName": "Nano Banana 提示词助手",
+      "summary": "根据参考素材与创作方向，设计 Nano Banana 图像提示词、编辑方案与视觉变体。",
+      "marketingLine": "把创意转化为可用于正式制作的成果。",
+      "category": "图像",
+      "businessScenario": "brand-design",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "根据参考素材与创作方向，设计 Nano Banana 图像提示词、编辑方案与视觉变体。",
+        "scenarios": [
+          "图像探索",
+          "从上下文到第一版结果",
+          "围绕结果继续迭代"
+        ],
+        "requiredContext": "先说明想要的结果：提供参考图，并明确哪些内容需要保留、哪些需要修改。\n补充素材与约束：提供参考文件、目标受众、格式、风格、时长或其他不能被改变的条件。\n告诉 Agent 如何取舍：说明优先级、验收重点，以及哪些内容需要先确认再继续。",
+        "steps": "从一个具体结果开始：先选择一个贴近当前工作的用例，不需要一次讲完所有背景。\n让 Skill 读取相关上下文：Agent 会按照这个 Skill 的规则整理素材、识别缺口，并在需要时提出澄清问题。\n先产出一版可检查的结果：它会把目标转成结构化 brief、提示词、方案或其他可继续工作的中间产物。\n针对重点做下一轮修改：保留已经确认的部分，只要求它修改真正影响结果的变量。",
+        "outputs": "一份围绕具体目标组织的第一版结果\n可以继续交给 Agent 执行或审阅的结构化内容\n下一轮迭代可以直接复用的上下文与约束",
+        "boundaries": "它负责参考图驱动的编辑提示词；不会把参考图中没有证据的细节当成事实。\n具体图像编辑能力和结果验证由运行时负责，不会承诺保留内容一定不发生漂移。",
+        "followUps": "编写参考素材感知的提示词\n只修改一个指定细节\n检查并优化编辑结果",
+        "useCases": [
+          {
+            "title": "编写参考素材感知的提示词",
+            "description": "",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-3d-scene-director",
+      "kind": "skill",
+      "name": "3d-scene-director",
+      "displayName": "图片3D建模",
+      "summary": "基于你提供的参考图还原 3D 现场：一张产品图可以还原成可预览的 3D 产品模型，一张妆造图或场景图可以还原成结构、比例与光影一致的 3D 角色或场景，供后续镜头设计与视频生成使用。",
+      "marketingLine": "上传一张参考图，还原可预览的 3D 现场。",
+      "category": "创作工具",
+      "businessScenario": "interactive-games",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "基于你提供的参考图还原 3D 现场：一张产品图可以还原成可预览的 3D 产品模型，一张妆造图或场景图可以还原成结构、比例与光影一致的 3D 角色或场景，供后续镜头设计与视频生成使用。",
+        "scenarios": [
+          "产品图 → 3D 产品模型",
+          "妆造图 → 3D 角色与造型",
+          "场景图 → 3D 空间与镜头"
+        ],
+        "requiredContext": "一张或多张参考图：上传要还原的产品、人物妆造或场景照片；多角度图片越多，比例、结构和细节还原越准确。\n说明要还原到什么程度：是只要一个可预览的 3D 模型，还是要连同空间布局、材质、灯光和镜头一起还原，以及最终用途是展示、预演还是继续生成视频。\n不能改动的事实：标出必须保持的产品比例与细节、人物五官与妆容特征、场景中的关键物体位置和品牌元素。",
+        "steps": "读取参考图中的结构与关系：识别主体、空间层级、比例、材质和光线方向，明确哪些元素必须精确还原。\n搭建 3D 现场：先还原几何结构、位置关系与比例，再补充材质、灯光和环境。\n在浏览器中对照检查：用可旋转、可缩放的 3D 预览与参考图逐项对比，修正比例、细节与光影。\n延展为镜头与视频方案：在确认的 3D 现场上设计机位与镜头运动，或交给白模视频预演继续生成视频。",
+        "outputs": "可在浏览器中旋转预览的 3D 模型或场景\n与参考图对齐的结构、材质与灯光说明\n可复用的机位与镜头设计方案",
+        "boundaries": "它按参考图还原结构、比例与外观，被遮挡或未提供的部分会作为合理推断并明确标注，不会当成既定事实。\n默认交付浏览器可预览的 3D 场景与方案，不假设已经接入 Blender、Unity 或 Unreal。",
+        "followUps": "只修正某个局部的比例、材质或细节。\n换一组灯光或环境，保留已经还原的结构。\n基于这个 3D 现场生成一段白模视频预演。",
+        "useCases": [
+          {
+            "title": "产品图｜还原 3D 产品模型",
+            "description": "从一张商品图出发，还原产品的结构、比例、材质与细节，生成可以在浏览器中旋转查看的 3D 模型。",
+            "context": ""
+          },
+          {
+            "title": "妆造图｜还原 3D 角色与造型",
+            "description": "从人物妆造或造型照出发，还原发型、妆容、服饰与配饰的立体关系，得到可继续用于镜头与视频的 3D 角色。",
+            "context": ""
+          },
+          {
+            "title": "场景图｜还原 3D 空间与镜头",
+            "description": "从一张场景或空间照片出发，还原空间结构、物体布局、材质与光线方向，并给出可复用的机位与镜头方案。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-depth-video-studio",
+      "kind": "skill",
+      "name": "depth-video-studio",
+      "displayName": "深度影视工坊",
+      "summary": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。",
+      "marketingLine": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。",
+      "category": "影视与视频",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/5cb85260-c1f3-4c5a-b387-22c13360a57c?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。",
+        "scenarios": [
+          "同一动作换角色表演",
+          "同一运镜迁移到新场景",
+          "人和场景一起换，但保住节奏",
+          "先做可复用的深度通道，再连续出变体"
+        ],
+        "requiredContext": "源视频：提供需要保留其动作、节奏、站位和运镜的视频。\n要改什么：说明要替换角色、场景，还是两者都换，并给出画布参考或文字描述。\n必须保住的约束：标出必须锁定在源深度通道上的时长、构图或关键动作节拍。",
+        "steps": "读懂源视频：先看真实画面里的主体动作、运镜、时长和构图，再决定是否值得转深度。\n生成深度通道：把源视频转成逐帧深度视频，保留运动与空间，去掉身份外观。\n确认角色与场景：只问画布和对话里还没有的信息，支持点选参考或文字描述。\n按角色映射重生成：深度作运动权威，新参考作外观权威，生成迁移后的新视频。",
+        "outputs": "可复用的深度视频节点\n跟随深度运动、跟随新参考外观的重塑视频\n清晰说明深度与各参考职责的角色映射",
+        "boundaries": "",
+        "followUps": "用同一深度通道再换一个角色参考。\n保持运动权威不变，只换场景再出一版。\n如果灰度感渗进成片，收紧角色映射，让深度只贡献运动。",
+        "useCases": [
+          {
+            "title": "深度动作迁移",
+            "description": "提供一段参考视频，以及要迁移到的人物或场景参考图；先得到深度运动通道，再重塑成新外观的成片。",
+            "context": "深度动作迁移"
+          },
+          {
+            "title": "希区柯克变焦运镜迁移",
+            "description": "用希区柯克变焦运镜模板提取深度运动，再迁移到新的人物参考上，保留推拉变焦的空间压迫感。",
+            "context": "希区柯克变焦运镜迁移"
+          },
+          {
+            "title": "环绕镜头复刻",
+            "description": "用环绕运镜参考视频提取深度运动，再迁移到新的人物参考上，复刻环绕镜头的空间感。",
+            "context": "环绕镜头复刻"
+          },
+          {
+            "title": "快速变焦推（Whip Zoom Look）",
+            "description": "用快速变焦推运镜参考视频提取深度运动，再迁移到新的人物参考上，复刻鞭状变焦的冲击感。",
+            "context": "快速变焦推运镜复刻"
+          },
+          {
+            "title": "自定义深度视频",
+            "description": "上传自己的源视频，把它作为深度重塑的运动参考。",
+            "context": "自定义用户视频源"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-opus-motion-studio",
+      "kind": "skill",
+      "name": "opus-motion-studio",
+      "displayName": "Opus 5.5 Studio",
+      "summary": "体验用代码生成视频的惊艳和乐趣，再把一个想法带入Icon动画制作、动态文字视频设计、商品视频、知识内容、动态播报或 3D 场景。",
+      "marketingLine": "体验代码生成视频的惊艳和乐趣，用 Opus 5.5 把想法变成可查看的动效。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/35c8216c-f5ad-4955-abe4-e7947f74dc28?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "体验用代码生成视频的惊艳和乐趣，再把一个想法带入Icon动画制作、动态文字视频设计、商品视频、知识内容、动态播报或 3D 场景。",
+        "scenarios": [
+          "动态文字视频设计",
+          "Icon动画制作",
+          "知识科普讲解",
+          "YouTube 商品视频",
+          "新闻播报",
+          "3D片场 2.0"
+        ],
+        "requiredContext": "准备 brief 和真实素材：提供准确文案、源视频或世界观规则、真实参考、目标时长/FPS/比例和版权信息。\n先选一个结果状态：明确需要 HTML 预览、EDL/渲染计划还是已验证 MP4。\n写下验收标准：指定让结果可用的画面、交互、字幕、节奏、音频或交接检查。",
+        "steps": "锁定玩法和证据：先选一个玩法，检查输入与版权，在写代码前完成 brief、节拍表或场景图。\n构建确定性预览：使用固定 FPS 和 seek(t) 或等价的可复现状态，保留准确文案与素材身份。\n检查并说明状态：完成 contact sheet、关键帧、console、窄屏和音频/交互检查，明确说明已验证内容。",
+        "outputs": "聚焦的 brief 与验收清单\n所选工作流可继续评审的第一版\n可进入画布继续修改且边界清晰的结果",
+        "boundaries": "入口一次只路由到一个现有市场工作流。\n被选中的子工作流保留自己的输入输出契约。\n从该入口启动聊天类工作流时，Agent 使用 Opus 5.5。",
+        "followUps": "保留已确认方向，只修改一个镜头或段落\n复用同一批素材制作另一种版本\n进入画布继续打磨结果",
+        "useCases": [
+          {
+            "title": "动态文字视频设计",
+            "description": "在确认状态表之后，让一个视觉主体变成短的动态文字视频设计。",
+            "context": "动态文字视频设计"
+          },
+          {
+            "title": "Icon动画制作",
+            "description": "先把一个小的视觉想法做成看得清的循环，再决定是否进入更大的 Opus 玩法。",
+            "context": "Icon动画制作"
+          },
+          {
+            "title": "知识科普讲解",
+            "description": "围绕“知识科普讲解”这个场景，把用户提供的 brief 或素材整理成结构清晰的数字人课程。",
+            "context": "知识科普讲解"
+          },
+          {
+            "title": "长视频｜深入展示和评测商品",
+            "description": "放入一张商品图，制作完整的长视频，讲清痛点和核心卖点，并准备标题、缩略图、描述和字幕。",
+            "context": "YouTube 商品视频"
+          },
+          {
+            "title": "新闻播报",
+            "description": "围绕“新闻播报”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+            "context": "新闻播报"
+          },
+          {
+            "title": "用 Agent 创建和编辑 3D 场景",
+            "description": "让 Agent 创建可编辑的 3D 场景，再通过连续指令调整世界、角色、灯光和运镜。",
+            "context": "3D片场 2.0 · Agent 玩法"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-opus55-motion-icon",
+      "kind": "skill",
+      "name": "opus55-motion-icon",
+      "displayName": "Icon动画制作",
+      "summary": "给我一个主体和一句清楚的运动想法，先得到在小尺寸也看得清的循环预览，再导出有边界的视频。",
+      "marketingLine": "一个主体、一个清楚动作、一段干净循环。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/28e08fb1-5378-447a-9648-dec97fba34cf?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "给我一个主体和一句清楚的运动想法，先得到在小尺寸也看得清的循环预览，再导出有边界的视频。",
+        "scenarios": [
+          "Icon动画制作",
+          "品牌标志循环",
+          "UI 或数据图形"
+        ],
+        "requiredContext": "主体和来源：提供提示词、已确认的静帧或素材，并说明图标会出现在哪里。\n动作和循环：说明一个物理动作、配色、背景、时长和 FPS；循环不能超过 5 秒。\n交付标准：明确尺寸、版权和让图标可以使用的那一项视觉检查。",
+        "steps": "锁定主体：确认来源、版权、画布、配色和一句动作描述。\n制作循环：让每一帧都由时间计算得到，保持主体在画面内，并回到开头姿态。\n检查导出：检查开头、中段、结尾、帧数和解码后的视频，再称为已交付。",
+        "outputs": "一份紧凑的动效 brief\n可查看的 HTML 预览\n带验证状态的有边界视频",
+        "boundaries": "这里制作的是一个动效图标，不是完整场景或游戏。\n预览、渲染计划和已验证视频是不同状态。\n输出最长 5 秒，并使用已经确认的素材和版权信息。",
+        "followUps": "保留动作，换一种强调色\n用同一个主体适配另一个图标尺寸\n保持轮廓不变，让循环更平静",
+        "useCases": [
+          {
+            "title": "Icon动画制作｜让一个想法看得清",
+            "description": "把一个主体做成紧凑的动效标记，不额外加入第二个场景。",
+            "context": "Icon动画制作"
+          },
+          {
+            "title": "品牌标志｜让静帧循环起来",
+            "description": "给已确认的标志或静帧加入克制的动作，并回到开头姿态。",
+            "context": "Icon动画制作"
+          },
+          {
+            "title": "UI 或数据图形｜解释一次变化",
+            "description": "用一个 UI 或数据符号表达一次状态变化，不加入鼠标指针或无关界面。",
+            "context": "Icon动画制作"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-html-beat-morph-video",
+      "kind": "skill",
+      "name": "html-beat-morph-video",
+      "displayName": "动态文字视频设计",
+      "summary": "给我一个视觉主体和节拍想法，把它做成可以先预览、再导出的短循环 HTML 视频。",
+      "marketingLine": "让文字沿着节奏动起来，做成一段看得懂的动态文字视频。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/35c8216c-f5ad-4955-abe4-e7947f74dc28?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "给我一个视觉主体和节拍想法，把它做成可以先预览、再导出的短循环 HTML 视频。",
+        "scenarios": [
+          "动态文字视频设计",
+          "产品或功能故事",
+          "品牌或数据开场"
+        ],
+        "requiredContext": "主体和状态：说明这一个主体，以及它需要经过的 8–12 个状态或节拍。\n配色和音频：选择黑白或一种强调色，并提供有版权依据的音乐来源。\n循环和交付：确认画布、FPS、不超过 5 秒的时长和让循环可用的验收检查。",
+        "steps": "确认节拍表：在写代码前列出状态、配色、音频版权、画布和有边界的时长。\n制作变形：让视觉状态由 seek(t) 计算得到，保持一个连贯主体并保留循环点。\n渲染和检查：检查节拍静帧、浏览器结果、帧数、时长、解码和首尾帧一致性。",
+        "outputs": "已确认的节拍表\n可查看的 HTML 预览\n带独立验证说明的有边界视频",
+        "boundaries": "这里制作的是一段连续的 HTML 动效循环，不是多场景剪辑。\n音频只做连续截取，不分析 BPM 或峰值。\n输出不能超过 5 秒；没有浏览器和媒体检查就不能声称已验证。",
+        "followUps": "保留节拍表，换一种强调色\n用同一个主体制作产品变体\n重新确认节拍表后缩短循环",
+        "useCases": [
+          {
+            "title": "动态文字｜让文字跟着意思动起来",
+            "description": "让一个连贯的 UI 主体完成可读的状态序列，不切场景，也不使用鼠标指针演示。",
+            "context": "动态文字视频设计"
+          },
+          {
+            "title": "产品故事｜把一句话做成动效",
+            "description": "让一个产品表面或功能说明从吸引点走到证明点，并以清楚的结尾收束。",
+            "context": "动态文字视频设计"
+          },
+          {
+            "title": "品牌或数据｜用动态文字开场",
+            "description": "让标志、标题、数字或数据形态承担一段短开场，并干净地回到循环起点。",
+            "context": "动态文字视频设计"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-youtube-product-video",
+      "kind": "skill",
+      "name": "youtube-product-video",
+      "displayName": "YouTube 品牌影片工作室",
+      "summary": "把你的产品页变成一条有品牌质感的 YouTube 品牌影片或付费广告，自带标题包装、动态字幕和 Logo 结尾。",
+      "marketingLine": "从产品页出发，做出体现品牌调性的 YouTube 影片与 ABCD 广告。",
+      "category": "电商广告",
+      "businessScenario": "ecommerce-ads",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/8f25d7c7-341c-4569-891d-e9f4956dd76f?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "填入品牌或产品链接，选择尺寸、时长和用途。我会先读页面里的事实与品牌线索，给出方向供你确认，再制作带标题包装、字幕和 Logo 结尾的成片。",
+        "scenarios": [
+          "基于 Google ABCD 的 YouTube 付费广告",
+          "频道品牌影片",
+          "高质感产品演示"
+        ],
+        "requiredContext": "品牌在哪里？：必填产品页或品牌官网链接。动笔前我会先从页面读取产品事实、图片、Logo 和品牌调性。\n尺寸、时长与用途：选择 16:9、9:16 或 1:1，选一个时长区间，再说明是付费广告还是频道内容。\n需要严格保留的品牌素材：可选：产品图、Logo 文件、品牌规范或不能出现的说法。",
+        "steps": "读取页面与素材：从链接和你上传的文件中提取产品事实、图片、Logo 和品牌调性，不编造任何信息。\n设定尺寸、时长和用途：你的选择决定节奏、构图和包装方式；付费广告会自动走 ABCD 评估。\n确认方向和分镜：对比几个方向（付费广告附 ABCD 评分），确认脚本和镜头后才开始生成。\n拿到包装好的成片：经过检查的成片，含标题包装、字幕和 Logo 结尾卡，另附标题、封面方向和简介。",
+        "outputs": "按你所选尺寸和时长制作的 YouTube 品牌影片或付费广告\n符合品牌风格的开场标题、动态字幕和 Logo 结尾卡\n付费广告的 ABCD 评分，以及标题、封面方向、简介和字幕",
+        "boundaries": "我在平台里制作影片和配套文案；什么时候上传或发布，由你决定。\n事实只来自你的页面、文件和说明。不会编造功能，也不承诺播放量、销量或排名。\n如果你只需要商品页静态图，请使用电商设计室。",
+        "followUps": "换成之前给出的另一个方向，已确认的事实保持不变。\n把同一条影片改成另一种尺寸或时长。\n成片不动，只换结尾卡或字幕。",
+        "useCases": [
+          {
+            "title": "付费广告｜按 ABCD 打造品牌广告",
+            "description": "内置 Attention、Branding、Connection、Direction：开场抓人、品牌尽早露出、连接真实受众场景，并以 Logo 结尾卡给出一个明确行动。",
+            "context": ""
+          },
+          {
+            "title": "频道内容｜频道品牌影片",
+            "description": "通过产品讲品牌故事，延续品牌已有的画面、节奏和语气。",
+            "context": ""
+          },
+          {
+            "title": "频道内容｜高质感产品演示",
+            "description": "让工艺、材质和真实使用来承载品牌，所有事实都来自你的产品页，绝不编造。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-digital-human-studio",
+      "kind": "skill",
+      "name": "digital-human-studio",
+      "displayName": "数字人演播厅",
+      "summary": "专属数字人随时登台，一条搞定全场景。",
+      "marketingLine": "专属数字人随时登台，一条搞定全场景。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/5c015205-4b25-4133-b958-e6bcf770fef8?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "专属数字人随时登台，一条搞定全场景。",
+        "scenarios": [
+          "为短视频平台制作稳定、自然的数字人口播",
+          "用数字人带观众快速看懂一套房源",
+          "让数字人把产品价值、用法和试用动作讲清楚",
+          "把专业知识讲成清晰易懂的数字人课程",
+          "用有时间边界的事实做一条新闻播报",
+          "先建立可复用的角色形象与声音资产"
+        ],
+        "requiredContext": "先选玩法：先看最终要让观众完成什么，再用平台、时长和画幅细化 brief。",
+        "steps": "选择玩法：按最终目标选择社媒口播、房产带看、产品演示、知识科普讲解、市场播报或角色工坊。\n补充 brief：提供事实、受众、来源资料和希望观众完成的下一步。\n直接试用：五个视频玩法会用同一个数字人演播厅 Skill 打开聊天草稿；角色工坊进入独立的角色设定流程。",
+        "outputs": "一条聚焦目标的数字人视频草稿\n选择角色工坊时得到一套可复用的角色身份设定",
+        "boundaries": "六个详情页是同一个远端 Skill 的不同入口，不会创建六个独立运行时 Skill。",
+        "followUps": "保留同一数字人身份，切换到另一种玩法。\n只修改一个镜头或结尾 CTA，不重开整份 brief。",
+        "useCases": [
+          {
+            "title": "社媒口播",
+            "description": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+            "context": "社媒口播"
+          },
+          {
+            "title": "房产带看",
+            "description": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。",
+            "context": "房产带看"
+          },
+          {
+            "title": "产品演示",
+            "description": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+            "context": "产品演示"
+          },
+          {
+            "title": "知识科普讲解",
+            "description": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+            "context": "知识科普讲解"
+          },
+          {
+            "title": "新闻播报",
+            "description": "把有来源、有时间边界的事实整理成清晰可信的新闻播报。",
+            "context": "新闻播报"
+          },
+          {
+            "title": "角色工坊",
+            "description": "开拍前先建立统一的角色形象、妆造、声音与表演设定，让数字主角在后续内容中保持一致。",
+            "context": "角色工坊"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-digital-human-social-talking-head",
+      "kind": "skill",
+      "name": "digital-human-social-talking-head",
+      "displayName": "社媒口播",
+      "summary": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+      "marketingLine": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/f6f12fc2-3ce2-4c40-89b7-8a6d79d698f7?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+        "scenarios": [
+          "为短视频平台制作稳定、自然的数字人口播"
+        ],
+        "requiredContext": "Brief：提供主题、受众、发布平台，以及希望观众完成的动作。",
+        "steps": "确认事实与目标：先确认受众、输入资料和希望观众完成的动作。\n生成第一版：数字人演播厅按同一份 brief 组织脚本、表达和画面。\n逐项修改：只修改需要调整的台词、镜头或 CTA，再继续生成。",
+        "outputs": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。\n可继续修改的数字人视频草稿",
+        "boundaries": "没有确认的事实会保留为待补信息，不会自动编造。",
+        "followUps": "保留同一数字人身份，换一个主题继续制作。\n只修改结尾 CTA，保留前面的脚本和镜头。",
+        "useCases": [
+          {
+            "title": "社媒口播",
+            "description": "围绕“社媒口播”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+            "context": "社媒口播"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-digital-human-property-tour",
+      "kind": "skill",
+      "name": "digital-human-property-tour",
+      "displayName": "房产带看",
+      "summary": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。",
+      "marketingLine": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/f23fda69-41d1-4c79-bce5-aeba42e0fbfc?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。",
+        "scenarios": [
+          "用数字人带观众快速看懂一套房源"
+        ],
+        "requiredContext": "Brief：提供房源事实、空间顺序、区位卖点和预约方式。",
+        "steps": "确认事实与目标：先确认受众、输入资料和希望观众完成的动作。\n生成第一版：数字人演播厅按同一份 brief 组织脚本、表达和画面。\n逐项修改：只修改需要调整的台词、镜头或 CTA，再继续生成。",
+        "outputs": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。\n可继续修改的数字人视频草稿",
+        "boundaries": "没有确认的事实会保留为待补信息，不会自动编造。",
+        "followUps": "保留同一数字人身份，换一个主题继续制作。\n只修改结尾 CTA，保留前面的脚本和镜头。",
+        "useCases": [
+          {
+            "title": "房产带看",
+            "description": "围绕“房产带看”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+            "context": "房产带看"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-digital-human-product-demo",
+      "kind": "skill",
+      "name": "digital-human-product-demo",
+      "displayName": "产品演示",
+      "summary": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+      "marketingLine": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/a4c012a8-f9d3-4abe-8a2f-8189f25a1e48?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+        "scenarios": [
+          "让数字人把产品价值、用法和试用动作讲清楚"
+        ],
+        "requiredContext": "Brief：提供产品事实、目标用户、三个可验证卖点和试用 CTA。",
+        "steps": "确认事实与目标：先确认受众、输入资料和希望观众完成的动作。\n生成第一版：数字人演播厅按同一份 brief 组织脚本、表达和画面。\n逐项修改：只修改需要调整的台词、镜头或 CTA，再继续生成。",
+        "outputs": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。\n可继续修改的数字人视频草稿",
+        "boundaries": "没有确认的事实会保留为待补信息，不会自动编造。",
+        "followUps": "保留同一数字人身份，换一个主题继续制作。\n只修改结尾 CTA，保留前面的脚本和镜头。",
+        "useCases": [
+          {
+            "title": "产品演示",
+            "description": "围绕“产品演示”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+            "context": "产品演示"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-digital-human-course-explainer",
+      "kind": "skill",
+      "name": "digital-human-course-explainer",
+      "displayName": "知识科普讲解",
+      "summary": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+      "marketingLine": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/85ea57bf-f804-44b1-aae9-54bf80affbfa?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+        "scenarios": [
+          "基于 brief 和素材制作知识科普类数字人课程"
+        ],
+        "requiredContext": "Brief：提供课程主题、目标受众、知识 brief 或参考素材，以及希望观众掌握的要点。",
+        "steps": "确认事实与目标：先确认受众、输入资料和希望观众完成的动作。\n生成第一版：数字人演播厅按同一份 brief 组织脚本、表达和画面。\n逐项修改：只修改需要调整的台词、镜头或 CTA，再继续生成。",
+        "outputs": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。\n可继续修改的数字人视频草稿",
+        "boundaries": "没有确认的事实会保留为待补信息，不会自动编造。",
+        "followUps": "保留同一数字人身份，换一个主题继续制作。\n只修改结尾 CTA，保留前面的脚本和镜头。",
+        "useCases": [
+          {
+            "title": "知识科普讲解",
+            "description": "围绕“知识科普讲解”这个场景，把用户提供的 brief 或素材整理成结构清晰的数字人课程。",
+            "context": "知识科普讲解"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-digital-human-market-bulletin",
+      "kind": "skill",
+      "name": "digital-human-market-bulletin",
+      "displayName": "新闻播报",
+      "summary": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+      "marketingLine": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/b6defb5e-0af6-4e57-8d9f-cde07a8ba823?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+        "scenarios": [
+          "用有时间边界的事实做一条新闻播报"
+        ],
+        "requiredContext": "Brief：提供来源、数据截至时间、受众，以及这条播报要帮助什么决策。",
+        "steps": "确认事实与目标：先确认受众、输入资料和希望观众完成的动作。\n生成第一版：数字人演播厅按同一份 brief 组织脚本、表达和画面。\n逐项修改：只修改需要调整的台词、镜头或 CTA，再继续生成。",
+        "outputs": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。\n可继续修改的数字人视频草稿",
+        "boundaries": "没有确认的事实会保留为待补信息，不会自动编造。",
+        "followUps": "保留同一数字人身份，换一个主题继续制作。\n只修改结尾 CTA，保留前面的脚本和镜头。",
+        "useCases": [
+          {
+            "title": "新闻播报",
+            "description": "围绕“新闻播报”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+            "context": "新闻播报"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-digital-human-asset",
+      "kind": "skill",
+      "name": "digital-human-asset",
+      "displayName": "数字人资产",
+      "summary": "开拍前先拥有你的专属出镜分身：统一视觉定位与发声特质，成为品牌的长期数字面孔。",
+      "marketingLine": "开拍前先拥有你的专属出镜分身：统一视觉定位与发声特质，成为品牌的长期数字面孔。",
+      "category": "影视创意",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/a0350278-3810-4236-9d36-e2e17b2ae50c?tap_mx=0&variant_name=medium",
+      "featured": false,
+      "guide": {
+        "summary": "开拍前先拥有你的专属出镜分身：统一视觉定位与发声特质，成为品牌的长期数字面孔。",
+        "scenarios": [
+          "先建立可复用的数字人形象与声音资产"
+        ],
+        "requiredContext": "Brief：描述角色、受众、视觉方向、声音特征，以及数字人的使用场景。",
+        "steps": "确认事实与目标：先确认受众、输入资料和希望观众完成的动作。\n生成第一版：数字人演播厅按同一份 brief 组织脚本、表达和画面。\n逐项修改：只修改需要调整的台词、镜头或 CTA，再继续生成。",
+        "outputs": "开拍前先拥有你的专属出镜分身：统一视觉定位与发声特质，成为品牌的长期数字面孔。\n可继续修改的数字人视频草稿",
+        "boundaries": "没有确认的事实会保留为待补信息，不会自动编造。",
+        "followUps": "保留同一数字人身份，换一个主题继续制作。\n只修改结尾 CTA，保留前面的脚本和镜头。",
+        "useCases": [
+          {
+            "title": "数字人资产",
+            "description": "围绕“数字人资产”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+            "context": "数字人资产"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-ecommerce-studio",
+      "kind": "skill",
+      "name": "ecommerce-studio",
+      "displayName": "电商设计室",
+      "summary": "专为电商卖家与投流团队打造的一站式创意工作台：无需繁琐布景与漫长测试，输入商品图或链接，即可智能生成符合各大平台投放规范的高转化视觉资产。",
+      "marketingLine": "丢入商品图、详情页链接或对标参考，AI 帮你搞定全套高转化投放素材——从上架商拍、多语言海报到爆款视频变体。",
+      "category": "电商广告",
+      "businessScenario": "ecommerce-ads",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/7c351682-767c-42f5-832f-a56f511ebf47?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "选定你需要的素材类型，提供商品图、链接或已有广告，AI 即可为你规划并生成可直接上架投放的高清成片。",
+        "scenarios": [
+          "静态广告",
+          "视频广告"
+        ],
+        "requiredContext": "选定本次投放目标：想要一套新品上架图、海外本地化海报，还是测试爆款短视频？按目标直接点选对应工具。",
+        "steps": "挑选专属玩法：根据本次上架、出海拓展、多版位适配或短视频测款需求，选择对应工作流。\n放入商品资料：上传几张商品图、粘贴产品详情页链接或对标视频，AI 自动解析核心卖点。\n获取投放级成片：快速获得符合平台规范的商拍组图、海报变体或带节奏分镜的视频广告。",
+        "outputs": "符合主流电商与社媒投放规范的高清商拍图与海报\n带节奏分镜、精准旁白与多测试变体的短视频广告\n支持在画布中无缝继续精修或延伸新尺寸",
+        "boundaries": "",
+        "followUps": "保持同一套商品事实与视觉风格，直接切换到下一个工作流继续制作。\n把跑出好数据的静态爆款，一键转为视频广告或多语言版本。",
+        "useCases": [
+          {
+            "title": "广告本地化",
+            "description": "上传一张国内或现成广告图，AI 自动翻译目标语言并重构排版与文案，一键出海拓客。",
+            "context": "静态广告"
+          },
+          {
+            "title": "广告适配",
+            "description": "上传单张定稿海报，智能重构 1:1、4:5、9:16 与横幅等多渠道版位，画面绝不生硬拉伸。",
+            "context": "静态广告"
+          },
+          {
+            "title": "标题变体",
+            "description": "锁定跑量素材的高点击画面，批量裂变不同痛点与卖点文案，低成本测出 CTR 翻倍的爆款标题。",
+            "context": "静态广告"
+          },
+          {
+            "title": "客户之声广告",
+            "description": "粘贴商品详情页链接，AI 提炼买家真实口碑与热评，生成有理有据、自带信任感的爆款短视频。",
+            "context": "视频广告"
+          },
+          {
+            "title": "开头钩子测试",
+            "description": "保留原视频主体与转化结尾，批量替换前 3 秒黄金抓人开头，低成本拯救完播率与 ROI。",
+            "context": "视频广告"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-ad-localizer",
+      "kind": "skill",
+      "name": "ad-localizer",
+      "displayName": "广告本地化",
+      "summary": "告别逐字翻译与重新排版的繁琐工序：上传成熟广告素材，自动适配目标市场语言、文化习惯与版面空间，保持商品与品牌质感不失真。",
+      "marketingLine": "上传一张国内或现成广告图，AI 自动翻译目标语言并重构排版与文案，一键出海拓客。",
+      "category": "电商广告",
+      "businessScenario": "ecommerce-ads",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "告别逐字翻译与重新排版的繁琐工序：上传成熟广告素材，自动适配目标市场语言、文化习惯与版面空间，保持商品与品牌质感不失真。",
+        "scenarios": [
+          "为不同市场本地化已批准的电商静态广告，同时保留产品、品牌、优惠和法律事实。"
+        ],
+        "requiredContext": "开始前准备：准备源广告、目标市场和语言、版位、已批准文案、法律文本和字体。",
+        "steps": "核对源文案：提取广告文字，确认有歧义的价格、优惠和法律文本。\n适配本地表达：翻译或创译后，重排字体、阅读顺序和文字长度。\n检查市场版本：检查准确文字、产品一致性、优惠事实和版位可读性。",
+        "outputs": "市场语言矩阵、准确文案与字体排版规范\n本地化静态素材，或可用于排版的准确文案包",
+        "boundaries": "不会推断当地价格、折扣、认证、配送承诺或法律声明。",
+        "followUps": "保留已确认的内容，只修改你指定的部分。",
+        "useCases": [
+          {
+            "title": "广告本地化",
+            "description": "为不同市场本地化已批准的电商静态广告，同时保留产品、品牌、优惠和法律事实。",
+            "context": "广告本地化"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-ad-resizer",
+      "kind": "skill",
+      "name": "ad-resizer",
+      "displayName": "尺寸适配器",
+      "summary": "告别手动切图改尺寸的机械劳动：智能识别主体、卖点文案与 CTA 按钮，为各平台信息流与故事版位自动重构最佳构图与安全区。",
+      "marketingLine": "上传单张定稿海报，智能重构 1:1、4:5、9:16 与横幅等多渠道版位，画面绝不生硬拉伸。",
+      "category": "电商广告",
+      "businessScenario": "ecommerce-ads",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "告别手动切图改尺寸的机械劳动：智能识别主体、卖点文案与 CTA 按钮，为各平台信息流与故事版位自动重构最佳构图与安全区。",
+        "scenarios": [
+          "把已批准的静态广告重排成 1:1、4:5、9:16 和横幅等适合版位的构图。"
+        ],
+        "requiredContext": "开始前准备：准备源广告、产品与 logo 素材、目标比例、安全区、裁切优先级和不可变信息。",
+        "steps": "锁定源广告：明确要保护的产品细节、文案、logo 和目标版位。\n逐版位重排：安排产品大小、裁切、换行、CTA 和平台安全区。\n检查两种观看尺度：同时检查大图和缩略图，再交付各比例版本。",
+        "outputs": "各版位重排方案与源广告不变量清单\n多比例素材与安全区检查结果",
+        "boundaries": "不会改变产品几何、编造周边细节，也不会把居中裁切直接当成成稿。",
+        "followUps": "保留已确认的内容，只修改你指定的部分。",
+        "useCases": [
+          {
+            "title": "尺寸适配器",
+            "description": "把已批准的静态广告重排成 1:1、4:5、9:16 和横幅等适合版位的构图。",
+            "context": "尺寸适配器"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-headline-multiplier",
+      "kind": "skill",
+      "name": "headline-multiplier",
+      "displayName": "标题变体",
+      "summary": "用科学的 A/B 测试跑出最高转化：固定好视觉与版面，从焦虑唤醒、限时利益、社交认同等多心理维度快速生成对比标题，助你找到最优解。",
+      "marketingLine": "锁定跑量素材的高点击画面，批量裂变不同痛点与卖点文案，低成本测出 CTR 翻倍的爆款标题。",
+      "category": "电商广告",
+      "businessScenario": "ecommerce-ads",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "用科学的 A/B 测试跑出最高转化：固定好视觉与版面，从焦虑唤醒、限时利益、社交认同等多心理维度快速生成对比标题，助你找到最优解。",
+        "scenarios": [
+          "固定产品、优惠、画面和构图，只改变标题角度，生成可比较的测试变体。"
+        ],
+        "requiredContext": "开始前准备：准备控制组广告、产品与优惠事实、受众、可编辑文案、品牌语气、测试数量和成功指标。",
+        "steps": "锁定控制组：保持产品、图片、优惠、CTA、排版和版位不变。\n撰写不同标题：每个变体只测试一个有依据的假设，提供准确换行。\n排入准确文字：保留控制组像素；无法精确排版时，交付文案与排版方案。",
+        "outputs": "受控标题假设、准确文案和换行方案\n保留标题区域外像素的变体，或文案排版包",
+        "boundaries": "不会重做广告、做市场本地化、改版位比例，也不会一次改变多个说服变量。",
+        "followUps": "保留已确认的内容，只修改你指定的部分。",
+        "useCases": [
+          {
+            "title": "标题变体",
+            "description": "固定产品、优惠、画面和构图，只改变标题角度，生成可比较的测试变体。",
+            "context": "标题变体"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-customer-voice-ads",
+      "kind": "skill",
+      "name": "customer-voice-ads",
+      "displayName": "客户之声广告",
+      "summary": "把真实好评变成最强带货力：自动分析商品评论中的真实使用体验与痛点解答，结合商品实拍生成带可信证据、旁白与字幕的高转化短视频。",
+      "marketingLine": "粘贴商品详情页链接，AI 提炼买家真实口碑与热评，生成有理有据、自带信任感的爆款短视频。",
+      "category": "电商广告",
+      "businessScenario": "ecommerce-ads",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "把真实好评变成最强带货力：自动分析商品评论中的真实使用体验与痛点解答，结合商品实拍生成带可信证据、旁白与字幕的高转化短视频。",
+        "scenarios": [
+          "用真实客户反馈、产品画面、图形、字幕和有证据依据的旁白，制作符合需求的电商广告。"
+        ],
+        "requiredContext": "开始前准备：准备产品详情页 URL、1–4 张产品图、目标受众、优惠、声音、时长、画幅和使用权。",
+        "steps": "提炼真实反馈：归纳重复主题，核对引用权限或使用匿名聚合转述。\n编写电商广告脚本：每句旁白都配产品画面、图形或字幕证据；如果需求需要，也可以安排出镜者。\n检查画面与声音：核对事实、旁白、字幕与剪辑完成情况。",
+        "outputs": "客户主题、引用权限说明与电商广告视听脚本\n产品片段、旁白、字幕与剪辑完成情况",
+        "boundaries": "不会编造证言、客户、结果、评分或产品证据。",
+        "followUps": "保留已确认的内容，只修改你指定的部分。",
+        "useCases": [
+          {
+            "title": "客户之声广告",
+            "description": "搜索产品详情页，提炼用户 review 主题，并结合上传的产品图制作有证据依据的电商短视频。",
+            "context": "客户之声广告"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-hook-multiplier",
+      "kind": "skill",
+      "name": "hook-multiplier",
+      "displayName": "开头钩子测试",
+      "summary": "前 3 秒决定一条视频的生死：在不重新拍摄整条广告的前提下，快速生成提问悬念、视觉反差或痛点直击等不同开头变体，快速测出爆款率。",
+      "marketingLine": "保留原视频主体与转化结尾，批量替换前 3 秒黄金抓人开头，低成本拯救完播率与 ROI。",
+      "category": "电商广告",
+      "businessScenario": "ecommerce-ads",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "前 3 秒决定一条视频的生死：在不重新拍摄整条广告的前提下，快速生成提问悬念、视觉反差或痛点直击等不同开头变体，快速测出爆款率。",
+        "scenarios": [
+          "只改变开头钩子，保留已批准的正文、优惠、CTA 和结尾，生成完整可比较的电商视频变体。"
+        ],
+        "requiredContext": "开始前准备：准备控制组视频、源时间码、钩子边界、共用正文与结尾、产品事实、变体数量、发布场景和音频约束。",
+        "steps": "确认钩子边界：标出开头结束、保留正文开始的准确位置。\n每次测试一个思路：设计有依据的开头，写清接入时间和音频过渡。\n检查衔接：支持剪辑时交付完整变体，否则明确交付钩子片段与剪辑方案。",
+        "outputs": "钩子变体假设、源视频接入时间与音频过渡方案\n支持剪辑时交付完整变体，否则交付钩子片段与剪辑方案",
+        "boundaries": "如果没有可用的完整剪辑能力，会明确交付钩子片段和装配方案，不把片段称作完整变体。",
+        "followUps": "保留已确认的内容，只修改你指定的部分。",
+        "useCases": [
+          {
+            "title": "开头钩子测试",
+            "description": "只改变开头钩子，保留已批准的正文、优惠、CTA 和结尾，生成完整可比较的电商视频变体。",
+            "context": "开头钩子测试"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-social-instagram-content",
+      "kind": "skill",
+      "name": "social-instagram-content",
+      "displayName": "Instagram 停留感素材包",
+      "summary": "给我一份链接、图片或视频，我会把它整理成 Instagram Reel 或轮播：先做好第一屏、文字安全区、封面和 CTA，再按你的确认出素材。",
+      "marketingLine": "先把第一屏做清楚，再交付一套可以继续修改的 Instagram 素材。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "把素材交给我，我会先做一版 Instagram Reel 或轮播方案，让你看懂、修改并确认后，再继续做素材。",
+        "scenarios": [
+          "把一个卖点做成 Reel 或短片",
+          "做一套看得懂、愿意保存的轮播"
+        ],
+        "requiredContext": "你想分享什么？：告诉我帖子要讲的想法、商品或故事。\n你希望谁做什么？：说清受众、目标，以及你希望他们看完完成的一个动作。\n你希望它是什么感觉？：提供源素材、语气、参考、画幅、语言，以及权利或披露要求。",
+        "steps": "先选一个承诺：开头只讲一件源素材真正能支撑的事。\n把第一屏排好：写出钩子、画面方向、安全区、封面和 CTA。\n导出前先检查：一起检查文字可读性、裁切、权利、披露、时长和 CTA。",
+        "outputs": "Reel 或短片脚本和分镜方案\n轮播文案、逐页结构、alt 文本、封面方向和 CTA\n一份简单清单：画幅、时长、权利和审批状态",
+        "boundaries": "我会在平台里先做草稿和检查过的素材包；什么时候发布或排期，由你最后确认。\n我只使用你提供并确认过的事实和使用权；没有依据的说法、私密信息或披露不清的内容会停在审阅。\n每段生成的短视频最长 5 秒；更长的故事需要拆成已确认的片段，或交给独立剪辑流程。\n页面能打开或请求成功，不代表一定能发布或一定有效果；交付前请看完最终素材包。",
+        "followUps": "保留源素材，只改一个平台变量。\n把最强洞察改成轮播或 Reel。\n发布前重新核对 Instagram 要求。",
+        "useCases": [
+          {
+            "title": "Reel｜先把第一屏做好",
+            "description": "用一个有依据的承诺开场，再用短镜头说明，最后只留一个 CTA。",
+            "context": ""
+          },
+          {
+            "title": "轮播｜把一个重点讲到值得保存",
+            "description": "首屏说清重点，中间给证据，最后只留一个下一步。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-social-tiktok-content",
+      "kind": "skill",
+      "name": "social-tiktok-content",
+      "displayName": "TikTok 钩子实验室",
+      "summary": "从一份素材先做 3 个开场方向，每次只改一个地方，帮你在投入完整剪辑前找到更值得试的那一个。",
+      "marketingLine": "先比较开场，再决定把时间花在哪条片子上。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "先比较几个 TikTok 开场，再决定要不要投入完整剪辑。每一版只改一个地方，并写清楚要观察什么。",
+        "scenarios": [
+          "找到最值得继续做的开场",
+          "用循环结尾快速解释一个观点"
+        ],
+        "requiredContext": "你想讲清楚什么？：告诉我想讲的内容、受众，以及视频之后希望发生的一个动作。\n可以用哪份素材？：提供链接、逐字稿、视频、图片、产品事实或有权使用的参考素材。\n你想比较什么？：告诉我是比较开场观点、画面、节奏，还是 CTA。",
+        "steps": "先选一个承诺：只保留源素材能够支撑的说法。\n每次只改一个地方：只改变观点、画面、节奏或 CTA，让开场可以公平比较。\n一起看选项：检查字幕、裁切、披露、权利、时长和想观察的信号。",
+        "outputs": "三个可比较的开场方向和清楚的假设\n短视频脚本、字幕、循环结尾和封面方向\n一张对比表：每版改了什么、要看什么",
+        "boundaries": "我会在平台里先做草稿和检查过的素材包；什么时候发布或排期，由你最后确认。\n我只使用你提供并确认过的事实和使用权；没有依据的说法、私密信息或披露不清的内容会停在审阅。\n每段生成的短视频最长 5 秒；更长的故事需要拆成已确认的片段，或交给独立剪辑流程。\n页面能打开或请求成功，不代表一定能发布或一定有效果；交付前请看完最终素材包。",
+        "followUps": "保留源素材，只改一个开场变量。\n把最强开场扩展成平台原生解释视频。\n发布前重新核对 TikTok 要求。",
+        "useCases": [
+          {
+            "title": "三个开场｜先比较，再剪片",
+            "description": "给出三个前一秒方向，每版只改一个变量，并写清楚要观察什么。",
+            "context": ""
+          },
+          {
+            "title": "循环式解释｜把一个观点讲明白",
+            "description": "快速解释一个观点，用视觉或语言循环收尾，不补写没有依据的卖点。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-social-linkedin-content",
+      "kind": "skill",
+      "name": "social-linkedin-content",
+      "displayName": "LinkedIn 洞察工作室",
+      "summary": "发来 LinkedIn 链接、文章或产品事实，我会把它整理成有依据的帖子、轮播或带字图片；文字会在确认后准确叠加到最终图上。",
+      "marketingLine": "把一个链接讲清楚，把确认过的文字准确放到图上。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "从一个链接或产品事实出发，做出可信的 LinkedIn 帖子、轮播或带字图片；源材料、文案和最终画面都方便检查。",
+        "scenarios": [
+          "把链接变成清楚、有用的观点",
+          "做一页一个重点的文档轮播",
+          "做文字准确的带字图片"
+        ],
+        "requiredContext": "源材料是什么？：提供链接或事实、你愿意背书的说法，以及必须保留的证据。\n谁会觉得它有用？：说清受众，以及你希望他们看完完成的一个有用动作。\n品牌应该怎么说？：提供语气、logo 或参考素材、使用权和披露要求。\n你想要哪种格式？：选择帖子、文档轮播或带字图片，并设定语言、画幅和截止时间。",
+        "steps": "先找出源材料站得住的观点：只选一个证据能支持的洞察，不把原文说过头。\n把观点变得有用：补上对受众的影响、例子或下一步动作。\n把底图和文案分开处理：先做底图方向，再用代码把确认过的文字准确叠加到最终图片上。\n逐条逐字检查：导出前检查证据、文字、裁切、权利、披露、alt 文本和 CTA。",
+        "outputs": "有源材料支撑、带清楚 CTA 的 LinkedIn 帖子\n逐页文档轮播或带字图片方向\n准确的成品文案、alt 文本、披露和一份审阅清单",
+        "boundaries": "我会在平台里先做草稿和检查过的素材包；什么时候发布或排期，由你最后确认。\n我只使用你提供并确认过的事实和使用权；没有依据的说法、私密信息或披露不清的内容会停在审阅。\n每段生成的短视频最长 5 秒；更长的故事需要拆成已确认的片段，或交给独立剪辑流程。\n页面能打开或请求成功，不代表一定能发布或一定有效果；交付前请看完最终素材包。",
+        "followUps": "保留源素材，只改一个表达角度。\n把最强观点改成轮播或带字图片。\n发布前重新核对 LinkedIn 要求。",
+        "useCases": [
+          {
+            "title": "洞察帖子｜给读者一个有用的观点",
+            "description": "用有依据的观点开场，说明为什么重要，最后只留一个 CTA。",
+            "context": ""
+          },
+          {
+            "title": "文档轮播｜一页只讲一个重点",
+            "description": "做一套可以快速浏览、理解和保存的逐页内容。",
+            "context": ""
+          },
+          {
+            "title": "带字图片｜把确认过的文字放准",
+            "description": "先用画面吸引注意，再把确认过的文案准确放到最终图片上。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-social-content-repurposer",
+      "kind": "skill",
+      "name": "social-content-repurposer",
+      "displayName": "跨平台内容复用器",
+      "summary": "一条长视频、播客或文章，先拆成 3–7 条能单独发布的内容，再分别适配 Instagram、TikTok、LinkedIn 和 Shorts。",
+      "marketingLine": "同一份素材，变成多条真正适合各平台的内容。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/bbd2ac95-d0be-4c9a-bafe-1eb1a3fb2588?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "把一份长素材交给我，我会先找出 3–7 个可以独立成立的重点，再分别适配平台，让每条内容都有自己的开场、格式和 CTA。",
+        "scenarios": [
+          "找出最值得做成帖子的重点",
+          "把每个重点改成适合它的平台内容"
+        ],
+        "requiredContext": "长素材是什么？：提供视频、播客、文章、逐字稿或录音。\n你想让谁看到？：说清受众、目标，以及最好的几条内容希望换来的动作。\n重点发到哪些平台？：选择 Instagram、TikTok、LinkedIn、YouTube Shorts，或四个平台都要。\n交付要满足什么？：写明语言、语气、画幅、版本数量、截止时间和披露要求；单段生成短视频最长 5 秒。",
+        "steps": "先保住源素材：拆解前确认事实、使用权和 master 素材。\n挑出值得保留的重点：找出 3–7 个离开上下文也能讲清楚的内容。\n让每个重点适合自己的平台：按平台改钩子、格式、节奏、CTA 和安全区。\n把整套内容过一遍：逐条检查说法、裁切、时长、披露、权利和改动了什么。",
+        "outputs": "按优先级排列的 3–7 个独立重点\n平台原生脚本、字幕、封面、短片方向和 CTA\n一张简单对比表：来源、平台、时长和每条内容改了什么",
+        "boundaries": "我会在平台里先做草稿和检查过的素材包；什么时候发布或排期，由你最后确认。\n我只使用你提供并确认过的事实和使用权；没有依据的说法、私密信息或披露不清的内容会停在审阅。\n每段生成的短视频最长 5 秒；更长的故事需要拆成已确认的片段，或交给独立剪辑流程。\n页面能打开或请求成功，不代表一定能发布或一定有效果；交付前请看完最终素材包。",
+        "followUps": "保留源素材，只改一个平台变量。\n把最强重点改成另一种原生格式。\n发布前重新核对当前平台要求。",
+        "useCases": [
+          {
+            "title": "先找值得做的重点",
+            "description": "先拆出 3–7 个可以单独讲清楚的重点，再决定哪些值得做成内容。",
+            "context": ""
+          },
+          {
+            "title": "分别做成平台原生版本",
+            "description": "每个重点都有自己的钩子、节奏、CTA 和格式，不把同一条复制到所有平台。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-social-trending-recast",
+      "kind": "skill",
+      "name": "social-trending-recast",
+      "displayName": "热门玩法复刻",
+      "summary": "看到一个有意思的热门视频？发给我，再上传你的人物、产品或场景参考。我会保留动作和运镜，先给你看一版复刻方案，再出片。",
+      "marketingLine": "源视频加新人物或场景，快速做出属于你的热门玩法。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/1b548140-0c3a-4ee6-a9ef-4159e6ec4758?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "发来一条你喜欢的视频，再上传新人物、产品或场景参考。我会先说明哪些动作和运镜会保留、哪些外观会替换，确认方案后再出片。",
+        "scenarios": [
+          "给熟悉的热门动作换一个人物",
+          "把喜欢的运镜放进自己的场景",
+          "用自己的参考视频快速做一版新变体"
+        ],
+        "requiredContext": "你想参考哪条视频？：提供要复用动作、节奏、构图和运镜的视频。\n你想换成什么？：上传决定新版外观的人物、产品、场景或其他参考素材。\n哪些地方要保留？：说清动作节拍、构图、时长和必须保持的视觉规则。",
+        "steps": "先一起看懂源片：拆解源片的动作、节奏、构图、运镜和使用权。\n分清保留什么、替换什么：先固定源片的动作和运镜，再决定用哪份人物、产品或场景参考替换原内容。\n先给你看复刻方案：让你确认每份参考素材负责什么、关键动作怎么走、最后会得到什么。\n出片后一起检查：检查动作、外观、裁切、披露和平台适配，再决定是否使用。",
+        "outputs": "一份清楚的保留/替换清单\n带你的人物、产品或场景的新版短片\n一份参考素材清单，说明每张图会影响什么",
+        "boundaries": "我会先做可审阅的复刻素材包；什么时候、发到哪里，由你确认。\n源视频、产品图、logo、音乐和其他素材都要有可复用的权利。\n源片负责动作、节奏、构图、运镜和空间，参考素材负责新的外观；不能保证每个细节逐像素一致。\n发布前请检查说法、披露、裁切、时长和平台要求。",
+        "followUps": "保留源片动作，换另一套人物参考。\n保留人物，换一个场景再做一版。\n把最强的玩法做成一组已确认的变体。",
+        "useCases": [
+          {
+            "title": "热门动作｜保留动作，换成你的人物",
+            "description": "让你的人物或产品进入熟悉的动作玩法，同时保留源片的节奏和构图。",
+            "context": "热门动作换人物"
+          },
+          {
+            "title": "希区柯克变焦｜保留镜头，换掉主体",
+            "description": "保留推拉镜头的感觉，把画面中心换成你的人物或产品。",
+            "context": "希区柯克变焦换主体"
+          },
+          {
+            "title": "环绕运镜｜保留运动，换成你的场景",
+            "description": "把喜欢的环绕镜头带进自己的环境和氛围里。",
+            "context": "环绕运镜换场景"
+          },
+          {
+            "title": "快速变焦｜保留冲击力，换掉外观",
+            "description": "保留快速推近的节奏，把人物、产品或环境换成你的版本。",
+            "context": "快速变焦换新外观"
+          },
+          {
+            "title": "上传自己的参考｜把喜欢的玩法变成你的版本",
+            "description": "上传一条有意思的源视频，快速做一版可以审阅的变体。",
+            "context": "自定义热门参考"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-trending-recast-gallery",
+      "kind": "skill",
+      "name": "trending-recast-gallery",
+      "displayName": "Skrull",
+      "summary": "把刷屏的爆款视频形式做成一键模板：排行榜锐评、双人播客、街头采访、恶搞预告、聊天短剧……选一个，填个想法或者留空，直接拿到 9:16 竖屏成片。",
+      "marketingLine": "挑个爆款，一键复刻。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/910dfc78-9ea3-4346-9447-ebd1ebe2dd26?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "选一个爆款形式，填上你的想法（或者留空），Skrull 技能会完成写作、生成、剪辑和渲染，产出一条成品竖屏视频。",
+        "scenarios": [
+          "把一个热门观点做成天梯榜吐槽",
+          "把任何东西做成恶搞新闻、预告片或颁奖礼",
+          "用 UGC 风格的博主广告卖你的产品"
+        ],
+        "requiredContext": "选哪种形式？：从墙上挑一个模板。\n讲什么？：输入你的想法，想放照片也可以。每一项都是可选的。",
+        "steps": "选一种形式：点开墙上的任意卡片。\n添加你的想法：填写你想要的内容，或者留空，直接用现成的示例。\n获取视频：Agent 会写脚本、生成素材，并渲染出 9:16 的 MP4。",
+        "outputs": "一条成品 9:16 视频，带代码绘制的字幕、榜单和图形",
+        "boundaries": "除非你提供自己的照片和事实，否则会使用虚构的人物、品牌和事件。",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-skill-social-media-content-studio",
+      "kind": "skill",
+      "name": "social-media-content-studio",
+      "displayName": "社媒素材工作室",
+      "summary": "你只要给我一份链接、视频、图片或产品资料，再说想发到哪里；我会先帮你选玩法、写第一版，再决定做哪些素材。",
+      "marketingLine": "一份素材开始，先看懂方向，再拿到能继续修改的社媒内容。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/6a49fea4-b663-4702-bcca-def9b402ea15?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "不知道一份素材该发到哪里？把它交给我，我会先帮你选平台和表达方式，再给你一版可以修改、确认和继续制作的内容方案。",
+        "scenarios": [
+          "把一个卖点做成平台原生帖子或短视频",
+          "把一份长素材拆成多条能单独发布的内容",
+          "发布前把文案、画面和交付清单一起检查"
+        ],
+        "requiredContext": "你想让受众做什么？：告诉我受众、目标，以及你希望他们看完完成的一个动作。\n你手上有什么？：链接、逐字稿、视频、图片、产品事实或参考素材都可以；请提供你有权使用的内容。\n准备发到哪里？：选择 Instagram、TikTok、LinkedIn、YouTube Shorts，或一套跨平台内容。\n交付要满足什么？：告诉我语言、语气、画幅、版本数量、截止时间和披露要求；如果你不确定，我会先给建议，单段生成短视频最长 5 秒。",
+        "steps": "先说清你想推动什么：确定受众、目标、平台，以及内容希望换来的一个动作。\n找出素材里最值得讲的部分：先确认事实和使用权，再挑出一个可以独立成立的重点。\n按平台给你几种方向：分别设计钩子、文案、画面、短片和 CTA，不把同一句话复制到所有平台。\n先看草稿再做素材：你可以先检查说法、文字、裁切、权利、披露、时长和 CTA。\n拿到可以继续推进的素材包：返回清楚的文件名、无障碍文本、规格和下一步，方便你或已连接的发布工具继续处理。",
+        "outputs": "清楚的玩法建议：平台、受众、目标和 CTA\n可审阅的文案、钩子、脚本、字幕、封面、图片和短视频方向\n一份简单清单：每个素材发到哪里、用什么画幅、时长多少、还缺什么确认\n按优先级整理的交付包，确认后可交给你或已连接的发布工具",
+        "boundaries": "我会在平台里先做草稿和检查过的素材包；什么时候发布或排期，由你最后确认。\n我只使用你提供并确认过的事实和使用权；没有依据的说法、私密信息或披露不清的内容会停在审阅。\n每段生成的短视频最长 5 秒；更长的故事需要拆成已确认的片段，或交给独立剪辑流程。\n页面能打开或请求成功，不代表一定能发布或一定有效果；交付前请看完最终素材包。",
+        "followUps": "保留源素材，只修改钩子、裁切、节奏或 CTA。\n把最强洞察改成第二个平台的原生格式，不复制原句。\n重新核对当前平台要求，为已连接的发布工具准备最终交付。",
+        "useCases": [
+          {
+            "title": "Instagram｜先把第一屏做好",
+            "description": "从一个重点开始，给你几种开场、Reel 或轮播方案、封面和 CTA，先看清楚再做。",
+            "context": ""
+          },
+          {
+            "title": "TikTok｜比较三个开场再决定怎么剪",
+            "description": "每版只改一个地方，先看清楚每个开场要验证什么，再决定把时间花在哪一版。",
+            "context": ""
+          },
+          {
+            "title": "LinkedIn｜把一个链接讲成有用的观点",
+            "description": "从源材料出发写帖子、轮播或带字图片，文字先确认，再准确放到最终画面上。",
+            "context": ""
+          },
+          {
+            "title": "内容复用｜一份素材，多条能发的内容",
+            "description": "先拆出几个独立重点，再分别适配平台，不把同一段话复制到所有地方。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-ai-influencer-studio",
+      "kind": "skill",
+      "name": "ai-influencer-studio",
+      "displayName": "Forge 1.0",
+      "summary": "设定虚拟创作者，在画布上从三个方向中选定形象，先确认无对白视频草稿，再制作最终成片。",
+      "marketingLine": "为无对白视觉喜剧打造角色。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/eb20f3b9-5a15-4166-985e-e7cce0324d35?variant_name=display_hd",
+      "featured": true,
+      "guide": {
+        "summary": "设定虚拟创作者，在画布上从三个方向中选定形象，先确认无对白视频草稿，再制作最终成片。",
+        "scenarios": [],
+        "requiredContext": "",
+        "steps": "",
+        "outputs": "",
+        "boundaries": "",
+        "followUps": "",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-skill-ai-influencer-builder",
+      "kind": "skill",
+      "name": "ai-influencer-builder",
+      "displayName": "Forge Builder",
+      "summary": "选择角色特质和首支视频构想。在画布上查看需求草稿，选定生成的角色，再确认视频草稿。",
+      "marketingLine": "设定特质。选定形象。确认视频。",
+      "category": "社媒内容",
+      "businessScenario": "social-media-content",
+      "coverUrl": "",
+      "featured": false,
+      "guide": {
+        "summary": "在这里准备需求草稿，就绪后从画布发送。选定三个角色方向之一，并在最终成片前确认完整的无对白视频草稿。",
+        "scenarios": [
+          "孵化一个虚拟博主账号",
+          "自己出镜前先测试内容赛道",
+          "给品牌打造固定出镜的虚拟代言人"
+        ],
+        "requiredContext": "外形特征：全部可选。未填的选择会补全并说明；明确的风格、比例和角色选择会被保留。\n参考照片：可选。请使用你有权使用的照片。人物身份参考需要本人同意；不支持公众人物。",
+        "steps": "设定角色：选择特质和视频构想，然后在画布上查看并发送可编辑的需求草稿。\n选定形象：比较同一自然基底的三个方向并选定肖像。Agent 会检查七视图，并将两份参考一并保存。\n确认视频：查看费用和完整的无对白视频草稿。你确认后，成片会在后期加入字幕、音乐和 AI 角色标识。",
+        "outputs": "角色需求草稿\n已选定肖像与已检查的七视图\n带两份参考的可复用角色\n确认视频草稿后的 9:16 视频\n配文、话题标签、封面和下一条内容构想",
+        "boundaries": "人物角色必须是成年人。可用的身份照片需要本人同意；不支持公众人物。真实动物保留符合物种的身体结构与动作。\n默认无对白。对白需要明确要求，且相应能力要支持。\n生成会消耗积分。首次付费视频请求前会确认视频费用；不会自动发布。",
+        "followUps": "用同一角色拍下一种格式\n给 TA 做一组本周 photo dump",
+        "useCases": []
+      }
+    },
+    {
+      "id": "tapnow-skill-fish-audio-audiobook",
+      "kind": "skill",
+      "name": "fish-audio-audiobook",
+      "displayName": "有声书章节",
+      "summary": "给我一个章节或短篇故事，就能听到它被演绎出来：温暖的旁白，每个角色都有各自的演绎声音，情绪在句中转变，从平静到惊慌只需一口气。整章生成之前，你可以先听一段。",
+      "marketingLine": "角色会演，而不只是读。",
+      "category": "音频创作",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/2bcfe54d-340e-40f8-b601-63a4b3005e60?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "一个朗读章节，每个角色都容易辨认，情绪变化就像表演者会演绎的那样。我用大白话提示为你的文本做导演，并让你先听最繁忙的一段。",
+        "scenarios": [
+          "自出版小说与连载故事",
+          "儿童睡前故事",
+          "用于推介书籍的样章"
+        ],
+        "requiredContext": "你的文本：粘贴章节或故事，或分享文件。还没有文本？给我一个创意，我会写一个简短的原创故事。\n谁在听？：选填。成年人、青少年，还是睡前听故事的孩子。这会影响节奏和语气。\n旁白风格：选填。默认温暖、平静；也可以尝试温馨、戏剧化或柔和的睡前朗读。\n难读的名字：选填。告诉我任何人名或虚构词该怎么读。",
+        "steps": "为文本做导演：旁白和角色台词都会加上标注、演绎提示和停顿。\n为声音选角：一位旁白，以及每个主要角色一个清晰、各不相同的声音。\n试听样片：选取角色最多的一段，检查人名、节奏和情感。\n获取整章：分段音频文件、合并后的整章，以及带时间轴的脚本。",
+        "outputs": "章节音频，分段文件加一个合并文件\n带说话人标注、提示和时间轴的最终脚本\n演员阵容表和发音清单",
+        "boundaries": "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。\n你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。\n参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。\n请使用你自己撰写的文本，或你拥有录制权利的文本。对于你不拥有的书籍，我可以处理一段简短的私人摘录。",
+        "followUps": "用同一组演员朗读下一章。\n制作一个更轻柔的睡前版本。\n用新的提示重新导演某个角色。",
+        "useCases": [
+          {
+            "title": "带角色演绎声音的章节",
+            "description": "一位旁白，加上每个角色各自独特的演绎声音。",
+            "context": ""
+          },
+          {
+            "title": "一切改变的时刻",
+            "description": "把章节中的重大转折放在一镜中完成，句中从平静转为惊慌。",
+            "context": ""
+          },
+          {
+            "title": "睡前故事",
+            "description": "缓慢、轻柔的朗读，配以温和的角色声音和较长的停顿。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-fish-audio-podcast",
+      "kind": "skill",
+      "name": "fish-audio-podcast",
+      "displayName": "双主持人播客",
+      "summary": "把笔记、文章或大纲变成两位主持人之间的对话。每个讨论要点都作为一场戏来演，因此笑声和反应都会回应前一句台词。",
+      "marketingLine": "两位真正会互相倾听的主持人。",
+      "category": "音频创作",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/2703e946-041a-4fba-9f8e-3c4b1f3ddbd1?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "一期简短的节目，两位风格鲜明的主持人围绕你的素材展开讨论，彼此回应，并确保事实准确。",
+        "scenarios": [
+          "向更广泛的受众讲解一份报告或文章",
+          "为团队或社群制作的每周更新节目",
+          "电子通讯的快速音频版"
+        ],
+        "requiredContext": "你的素材：笔记、文章、大纲，或只是一个主题和几个要点。\n时长多长？：选填。默认三到五分钟。\n主持人风格：选填。默认是好奇、积极的主持人加上沉稳、清晰的主持人；也可以是主持人与嘉宾。\n节目名称：选填。如果你还没有，我会为你建议一句开场白。",
+        "steps": "挑出关键要点：从你的素材中选出三到五个要点，不添加任何内容。\n撰写对话：开场、提问、举例、简短反应、回顾和结束语。\n试听一段对话：检查两位主持人的声音是否不同，反应是否自然。\n获取节目：完整音频，以及带时间轴、标注说话人的脚本。",
+        "outputs": "节目音频，分段文件加一个合并文件\n带说话人标注和时间轴的脚本\n供剪辑师使用的片头和片尾音乐提示",
+        "boundaries": "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。\n你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。\n参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。\n本工作室只制作语音内容。音乐和音效会以提示单的形式提供给你的剪辑师，且不会为视频配音或对口型。",
+        "followUps": "用同一组主持人制作下一期节目。\n剪一段 30 秒的预告。\n用另一种语言制作这期节目。",
+        "useCases": [
+          {
+            "title": "从笔记到节目",
+            "description": "两位联合主持人带着提问和真实反应，讲解你的笔记。",
+            "context": ""
+          },
+          {
+            "title": "主持人与嘉宾",
+            "description": "主持人采访一位根据你的素材塑造的专家角色。",
+            "context": ""
+          },
+          {
+            "title": "把电子通讯做成节目",
+            "description": "把你的电子通讯做成一段简短、友好的双人版回顾。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-fish-audio-drama",
+      "kind": "skill",
+      "name": "fish-audio-drama",
+      "displayName": "广播剧场景",
+      "summary": "从一句话的创意或你自己的剧本出发，由全员阵容一镜到底地演完一场戏：角色会打断、回应，并在句中从平静转为惊慌。附带一份供剪辑师使用的音效提示单。",
+      "marketingLine": "整场戏一镜到底，每个角色都在其中。",
+      "category": "音频创作",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/2f8fbe1f-0f0e-4183-b125-6a576636fed5?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "一场有表演的戏：角色各具特色、彼此回应，情绪有真实的转折，并附带一份提示单，列出你的剪辑师要在下方添加的音效和音乐。",
+        "scenarios": [
+          "虚构类播客的试播场景",
+          "游戏或漫画预告中的故事片段",
+          "供编剧和导演练习的素材"
+        ],
+        "requiredContext": "创意或剧本：一句话即可，或者粘贴你的场景。\n情绪基调：选填。默认悬疑；也可以试试喜剧、爱情、恐怖或科幻。\n角色：选填。两到四个角色，或交给我来分配。\n时长：选填。一到三分钟。",
+        "steps": "塑造场景：一个诉求、一个冲突、一次转折和一个结尾节拍。\n指导演出：为每个转折写下大白话提示，就像写给演员的笔记。\n试听高潮：检查情绪是否可信，声音是否保持各不相同。\n获取场景：场景音频、带时间轴的脚本，以及音效和音乐提示单。",
+        "outputs": "场景音频和一个合并文件\n带说话人标注和提示的时间轴脚本\n供剪辑师使用的音效和音乐提示单",
+        "boundaries": "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。\n你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。\n参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。\n本工作室只制作语音内容。音乐和音效会以提示单的形式提供给你的剪辑师，且不会为视频配音或对口型。",
+        "followUps": "撰写并配音下一场戏。\n用不同的导演方向演绎高潮部分。\n制作一句 20 秒的预告台词。",
+        "useCases": [
+          {
+            "title": "从创意生成场景",
+            "description": "我写出紧凑的场景，演员阵容一镜到底演完。",
+            "context": ""
+          },
+          {
+            "title": "演绎我的剧本",
+            "description": "你的场景，在情绪转折处加上演绎提示。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-fish-audio-game-voices",
+      "kind": "skill",
+      "name": "fish-audio-game-voices",
+      "displayName": "游戏语音包",
+      "summary": "描述一个角色，即可获得问候、攻击、受伤、胜利等场合的标注语音台词。每句台词都有自己的演绎备注，例如 [喘着粗气，咬紧牙关]，文件已按规则命名，团队可以直接放入项目。",
+      "marketingLine": "每句台词都有导演、有标注、即可使用。",
+      "category": "音频创作",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/34d8fe44-e068-4da9-920b-d3546e0c2830?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "一组风格统一的简短角色台词，每句都有各自的演绎提示，并附带与之匹配的文件名和表格。",
+        "scenarios": [
+          "为独立游戏制作原型语音",
+          "为演示版或游戏创作赛制作 NPC 台词",
+          "正式选角前的占位台词"
+        ],
+        "requiredContext": "你的角色：一个名字，以及一句关于他是谁的介绍。\n游戏基调：选填。默认是奇幻冒险。\n台词类型：选填。默认为问候、待机、攻击、受伤、胜利和失败，每类三条。\n命名规则：选填。默认为 character_type_number。",
+        "steps": "制作台词表：每句台词的编号、角色、类型、演绎提示和文本。\n为角色选角：每个角色一个清晰、统一的声音。\n试听一个角色：检查音域、一致性和感染力。\n获取语音包：裁剪过、音量统一的文件，以及一份 CSV。",
+        "outputs": "每句台词一个音频文件，已裁剪且音量统一\n包含编号、角色、类型、提示、文本、文件和时长的 CSV\n角色备注，便于之后保持角色一致",
+        "boundaries": "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。\n你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。\n参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。\n仅限原创或已获授权的角色，不得使用与真实演员相似的声音。文件将交付给你自行导入，不包含游戏引擎设置。",
+        "followUps": "为同一角色增加更多台词。\n用同一声音制作另一种语言的语音包。\n创建一个声音形成对比的对手角色。",
+        "useCases": [
+          {
+            "title": "主角战斗语音包",
+            "description": "六个战斗时刻共 18 句短台词，每句都有各自的提示。",
+            "context": ""
+          },
+          {
+            "title": "商店老板与任务发布人",
+            "description": "两个 NPC，包括问候、任务台词和告别语。",
+            "context": ""
+          },
+          {
+            "title": "为我的台词列表配音",
+            "description": "你现有的台词，按你的规则进行导演和命名。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-fish-audio-bilingual-voiceover",
+      "kind": "skill",
+      "name": "fish-audio-bilingual-voiceover",
+      "displayName": "双语配音",
+      "summary": "分享你的信息和两种语言，即可获得一段简短配音：同一个声音在句中切换语言，就像双语者真实说话的方式。你可以从几个版本中挑选，每个版本只改变一个变量。",
+      "marketingLine": "两种语言，一个声音，毫无缝隙。",
+      "category": "音频创作",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/7cf07e19-5ffd-44b5-884f-0efad8d8413c?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "一份按你指定时长精炼的脚本，在两种语言之间切换，由同一个声音、以几个导演版本演绎，方便你轻松选择。",
+        "scenarios": [
+          "面向双语受众的广告和宣传",
+          "旅行、美食或文化短视频",
+          "面向两个市场的品牌片头"
+        ],
+        "requiredContext": "你的信息：你要说的内容或推广的产品，以及任何我可以使用的事实。\n两种语言：选填。英文加上你指定的一种语言。请检查第二种语言，或请母语者确认。\n时长：选填。默认 30 秒；15 到 60 秒均可。\n情绪基调：选填。默认温暖而自信。",
+        "steps": "按长度撰写：开场钩子、承诺、事实和行动号召，并在自然的短语处切换语言。\n规划版本：每个版本只改变情绪、节奏或语言比例。\n试听第一版：检查语言切换、口音、人名和时间。\n比较各版本：经过测量的版本，附带简单的对比表。",
+        "outputs": "两到三个配音版本，已裁剪至指定长度\n包含两种语言、提示和时间轴的脚本\n对比表，以及供剪辑师参考的音乐提示",
+        "boundaries": "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。\n你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。\n我只使用你提供的事实，不保证翻译质量；发布前请检查第二种语言。\n仅限语音内容。你需要自行放入剪辑中；它不会与视频同步，音乐仅作为给剪辑师的参考建议。",
+        "followUps": "把获胜版本剪成 15 秒。\n为另一个市场更换第二种语言。\n用不同的声音重新演绎获胜版本。",
+        "useCases": [
+          {
+            "title": "双语广告",
+            "description": "以一种语言为主，关键句使用另一种语言。",
+            "context": ""
+          },
+          {
+            "title": "旅行或美食短片",
+            "description": "温暖、轻松的朗读，并自然地过渡到当地语言。",
+            "context": ""
+          },
+          {
+            "title": "朗读我的双语脚本",
+            "description": "你的混合语言脚本，经过导演并计时。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-fish-audio-names-numbers",
+      "kind": "skill",
+      "name": "fish-audio-names-numbers",
+      "displayName": "人名、数字与编码",
+      "summary": "适用于产品发布、活动公告、教程和宣传朗读，其中每个人名、价格、日期、编码和邮箱都必须准确。我会逐一列出，你确认难读的部分，样片也会逐项核对。",
+      "marketingLine": "每个人名、价格和编码，一次就读对。",
+      "category": "音频创作",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/68cd823c-0bea-4016-a24d-785bad62084b?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "对细节密集文本的自然、清晰朗读，附带一份发音清单，在你拿到文件之前会与音频逐项核对。",
+        "scenarios": [
+          "包含型号和价格的产品发布",
+          "包含日期、时间和场地的活动公告",
+          "包含版本号、命令或网址的教程"
+        ],
+        "requiredContext": "你的文本或事实：脚本、产品说明或活动详情。我会保持每项事实与你提供的完全一致。\n用途：选填。默认为公告；也可用于教程、宣传和确认信息。\n难读的词：选填。告诉我如何读任何不常见的词，否则我会就有歧义的部分向你确认。\n声音：选填。默认清晰、友好，语速适中。",
+        "steps": "列出每个细节：人名、数字、日期、编码、邮箱和链接，以及每一项应该如何读。\n确认难读的部分：你只需确认那些可能有两种读法的内容。\n试听最密集的部分：清单上的每一项都会与样片逐一核对。\n获取朗读成品：音频、最终脚本和已核对的清单。",
+        "outputs": "完整朗读的音频，分段文件加一个合并文件\n带时间轴的最终脚本\n发音清单，每一项都有通过标记",
+        "boundaries": "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。\n你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。\n我会保持你提供的每一项事实完全一致；有歧义的内容会向你确认，而不会猜测。\n本工作室只制作语音内容。音乐和音效会以提示单的形式提供给你的剪辑师，且不会为视频配音或对口型。",
+        "followUps": "为社交视频制作更短的剪辑。\n用另一种语言朗读同一份公告。\n更新一个价格或日期，并重新生成该段。",
+        "useCases": [
+          {
+            "title": "产品发布朗读",
+            "description": "型号、价格和日期清晰而热情地朗读。",
+            "context": ""
+          },
+          {
+            "title": "活动公告",
+            "description": "演讲者、日期、时间和场地都读准确。",
+            "context": ""
+          },
+          {
+            "title": "优惠码和链接",
+            "description": "编码、邮箱和网址读得足够慢，方便记录。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-fish-audio-lab",
+      "kind": "skill",
+      "name": "fish-audio-lab",
+      "displayName": "Fish Audio Lab",
+      "summary": "像配音演员一样为 Fish Audio Drama 3 做导演。用大白话写清每句台词该有的感觉，就能听到它被演绎出来：句中转换的情绪、全员阵容的完整场景、句中切换的语言，以及准确读出的人名、数字和编码。先听一段样片，再生成其余部分。",
+      "marketingLine": "写下导演指令，Drama 3 来演绎。",
+      "category": "音频创作",
+      "businessScenario": "film-creative",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/4f28888f-5471-4af2-8a1d-202c77b1526b?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "带上故事、笔记或剧本。我会像导演一样处理：标注说话人，并用大白话写出提示，例如 [紧张，几乎撑不住了]。我会先确认 Drama 3 可用，做一段样片供你审阅，然后按带时间轴的脚本生成其余部分。",
+        "scenarios": [
+          "用角色演绎的声音朗读章节",
+          "一镜到底演完整场戏或双主持人节目",
+          "逐句为游戏角色配音",
+          "同一个声音混合两种语言，或精准朗读人名和编码"
+        ],
+        "requiredContext": "你有什么素材？：章节、笔记、创意概要或完成的剧本都可以。哪怕只有一句话，也足够开始。\n希望是什么感觉？：选填。用你自己的话描述，就像写给演员的一段话。我会把它转换成提示，并告诉你放在哪里。\n谁在说话？：选填。描述旁白、主持人或角色，或者交给我来分配。\n有什么必须准确的内容？：选填。人名、价格、日期、编码，或第二种语言。我会列出这些内容，并在样片中逐一核对。",
+        "steps": "分享你的素材：文本、笔记或创意概要，以及你希望的感觉。\n审阅导演版脚本：说话人标注、大白话提示、情绪转换，以及一份难读词清单。\n确认可用性和费用：我会确认 Drama 3 已在你的账户中可用，并告诉你将要生成的内容。\n试听一段样片：先听最难的部分。我们在这里调整发音、节奏或导演方式。\n获取完整音频：所有片段、合并文件，以及带说话人标注和时间轴的最终脚本。",
+        "outputs": "每个片段的音频文件和一个合并文件\n带说话人标注、导演提示以及起止时间的最终脚本\n可复用的演员阵容表和发音清单\n需要时，为你的剪辑师提供音效和音乐提示单",
+        "boundaries": "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。\n你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。\n参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。\n本工作室只制作语音内容。音乐和音效会以提示单的形式提供给你的剪辑师，且不会为视频配音或对口型。",
+        "followUps": "用新的提示重新导演某个角色或某一句台词。\n用同一个声音，把同一份脚本制作成另一种语言。\n把最好的一版剪成更短的社交视频版本。",
+        "useCases": [
+          {
+            "title": "用角色声音朗读我的章节",
+            "description": "一位旁白，加上句中情绪会转变的角色。",
+            "context": ""
+          },
+          {
+            "title": "一镜到底演我的场景",
+            "description": "全员阵容彼此回应，附带音效提示单。",
+            "context": ""
+          },
+          {
+            "title": "双语配音",
+            "description": "同一个声音在句中切换语言。",
+            "context": ""
+          },
+          {
+            "title": "准确朗读人名、价格和编码",
+            "description": "逐项核对的公告。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-argon-how-it-works",
+      "kind": "skill",
+      "name": "argon-how-it-works",
+      "displayName": "3D 原理演示",
+      "summary": "问一个「它是怎么工作的」：电机、心脏、变速箱、黑洞都行。得到一个可以旋转、放慢、逐步查看的 3D 模拟，因果关系一步不错。",
+      "marketingLine": "问它怎么工作，答案拿在手里转。",
+      "category": "AI 模型工作室",
+      "businessScenario": "interactive-games",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/363d44c3-2983-4652-be2e-13937b91a1cc?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "Agent 会先写出因果链条，让你在制作任何内容之前检查科学原理。然后它会构建一个 3D 场景，让每个运动部件都与各阶段的描述一致。",
+        "scenarios": [
+          "看清一台机器、一个器官或一个自然过程如何运作",
+          "把教科书里的图示变成可以旋转和测试的东西"
+        ],
+        "requiredContext": "这次要解释什么？：一台机器、一个器官、一个自然过程，或一个物理原理。每个场景只讲一个主题效果最好。\n面向谁？：默认面向好奇的 14 岁读者。如果是用于课堂、路演或专家，请告诉我。\n有参考资料吗？：一张图示、一页教科书或笔记，可以帮助我贴合你的版本。可选。",
+        "steps": "写出阶段：我会用平实的语言列出因果步骤，并标出我不确定的部分。\n制作第一阶段：我会用轨道控制制作主要部件，使其正确运动，并展示给你。\n完成场景：我会加入所有阶段、步骤控制、滑块、标签和说明文字。",
+        "outputs": "经过核对的因果阶段清单\n一个 HTML 文件中的交互式 3D 模拟\n渲染工具支持时，场景的一段短视频",
+        "boundaries": "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。\n在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。\n模拟仅供学习。现实世界的数值来自你的参考资料，或会标注为近似值。\n不提供医疗、剂量或维修说明。",
+        "followUps": "为每个阶段添加旁白。\n为过程的下一部分制作第二个场景。\n把场景做成一段竖版短视频。",
+        "useCases": [
+          {
+            "title": "机器 | 观察零件运动",
+            "description": "一台电动机、发动机或齿轮箱，并展示受力情况和速度滑块。",
+            "context": ""
+          },
+          {
+            "title": "人体 | 沿着它的内部前进",
+            "description": "血液流经心脏、空气流经肺部，或信号沿神经传递，逐步呈现。",
+            "context": ""
+          },
+          {
+            "title": "太空 | 改变一处，看看会怎样",
+            "description": "轨道、潮汐或季节，配合一个能改变结果的滑块。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-argon-photo-to-3d",
+      "kind": "skill",
+      "name": "argon-photo-to-3d",
+      "displayName": "照片转 3D 世界",
+      "summary": "拍几张你的书桌、房间、店铺或建筑。得到一个可以环绕观看、走进去逛的 3D 场景，还能加玩法，比如桌面小赛车或找东西小游戏。",
+      "marketingLine": "拍下房间，走进去逛。",
+      "category": "AI 模型工作室",
+      "businessScenario": "interactive-games",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/37c7c035-b016-4374-9a3f-d0ce1854b43d?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "Agent 会读取你的照片，列出它看到的内容及其位置，并用代码把这个地方重建为风格化的 3D 场景。在加入任何游戏模式之前，你先检查布局。",
+        "scenarios": [
+          "把你的桌面或房间做成可以分享的 3D 立体场景",
+          "在真实场所中制作一个小游戏"
+        ],
+        "requiredContext": "哪些照片？：同一地点或物体的一到四张照片。不同角度能让我少做猜测。\n它应该做什么？：默认是环绕视角。可以加入漫步、迷你赛车、物品寻找，或白天到夜晚的切换。\n需要什么风格？：默认是简洁的低多边形立体场景。如果你想要玩具感、写实或像素风，请告诉我。",
+        "steps": "读取照片：我会列出我看到的内容、它的位置，以及我不得不猜测的部分。\n搭建场景：我会用轨道控制搭建静态 3D 场景，并与你的照片进行对照。\n加入游戏模式：我会加入步行控制、赛车、寻找或灯光开关，并附带重置按钮。",
+        "outputs": "一份所见内容与猜测内容的清单\n一个可探索的 HTML 文件 3D 场景\n渲染工具支持时，一段短小的环绕飞行视频",
+        "boundaries": "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。\n在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。\n照片中的人会变成简单的人形，绝不会是可辨认的真实形象。\n我会省去屏幕、文件和地址等私人细节，并跳过标识和招牌。",
+        "followUps": "在不改变布局的情况下切换风格。\n再加入一种游戏模式。\n制作一段用于发布的环绕飞行视频。",
+        "useCases": [
+          {
+            "title": "桌面 | 在上面竞速",
+            "description": "一辆小车绕过你真实的杯子、穿过台灯，在你的真实桌面上飞驰。",
+            "context": ""
+          },
+          {
+            "title": "房间 | 走进去逛逛",
+            "description": "你的房间变成一个可以环绕走动的温馨 3D 立体场景。",
+            "context": ""
+          },
+          {
+            "title": "建筑 | 把它做成模型",
+            "description": "一个店面或建筑，做成带有隐藏物品寻找的 3D 模型。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-argon-sketch-to-game",
+      "kind": "skill",
+      "name": "argon-sketch-to-game",
+      "displayName": "草图转可玩游戏",
+      "summary": "分享草图、截图或一句话的创意。获得一款可在浏览器中游玩的游戏，包含操作、计分、关卡和触屏支持，并从你可以试玩的核心玩法开始。",
+      "marketingLine": "在纸上画出来，在浏览器里玩。",
+      "category": "AI 模型工作室",
+      "businessScenario": "interactive-games",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/04ca2c63-9492-48c1-a939-aeb69ae28664?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "Agent 会读取你的草图，写下规则，并制作一款可以在单个 HTML 文件中游玩的游戏。在完整游戏制作完成之前，你可以先体验核心玩法。",
+        "scenarios": [
+          "把纸质或白板草图变成可玩的原型",
+          "为活动或页面制作一款小型品牌游戏"
+        ],
+        "requiredContext": "游戏是什么？：一张草图、一张截图，或一句话描述玩家要做什么。\n谁来玩，在哪里玩？：手机、电脑，或两者兼有。默认为键盘加触屏。\n游戏要持续多久？：默认三个短关卡，或是一个逐渐加速的无尽模式。",
+        "steps": "读取草图：我会列出我看到的内容和我推断的内容。\n编写规则：你确认一份单屏游戏设计。\n体验核心玩法：在完整游戏之前，你先试玩第一个可玩版本。",
+        "outputs": "单个 HTML 文件中可玩的游戏\n包含可调整数值的规则表\n可选的生成精灵图或背景",
+        "boundaries": "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。\n在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。\n游戏为原创。我不会复制现有游戏中的角色、名称、标识、音乐或关卡。\n游戏在浏览器中运行；不包括应用商店的打包。",
+        "followUps": "让它更难或更简单。\n添加一个关卡或一个 Boss。\n重新设计游戏风格，使其符合你的品牌。",
+        "useCases": [
+          {
+            "title": "纸上草图 | 一次制作即可游玩",
+            "description": "把你的绘画照片转为一款遵循其布局和角色的游戏。",
+            "context": ""
+          },
+          {
+            "title": "一句话创意 | 一款小型街机游戏",
+            "description": "从一句话出发，获得规则、关卡和最高分记录。",
+            "context": ""
+          },
+          {
+            "title": "美术处理 | 游戏跑通后再加精灵图",
+            "description": "保留规则，并将代码绘制的图形替换为生成的精灵图。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-argon-3d-web-page",
+      "kind": "skill",
+      "name": "argon-3d-web-page",
+      "displayName": "3D 网页",
+      "summary": "分享产品说明或需求简报。获得一个带有真实文案、导航和明确行动号召的交互式 3D 落地页，从首屏英雄区开始。",
+      "marketingLine": "输入一份简报，输出一个可以点击浏览的 3D 页面。",
+      "category": "AI 模型工作室",
+      "businessScenario": "interactive-games",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/0d753c18-6da3-49f1-964c-bbd8cb4f6bdb?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "Agent 会阅读你的素材，并一次性编写完整的 3D 页面：可拖拽或滚动的首屏、真实的章节、导航和备用方案。你先确认首屏。",
+        "scenarios": [
+          "为产品发布打造让人愿意探索的页面",
+          "把作品集或活动变成交互式网站"
+        ],
+        "requiredContext": "页面用途是什么？：产品、发布、作品集或活动，以及访客应该采取的一个行动。\n我可以使用哪些内容？：笔记、产品信息、现有文案或 PDF。我只会把有依据的内容放到页面上。\n有品牌规范吗？：颜色、字体或标识。否则默认使用深色页面，搭配一种温暖的强调色。",
+        "steps": "选择方向：我会根据你的简报提出两个 3D 构思。\n确认首屏：我先制作第一屏，由你检查。\n获取完整页面：包括所有章节、导航和备用方案，可直接预览。",
+        "outputs": "一个自包含的交互式 HTML 页面\n取自你素材的章节文案\n在费用检查后可选的生成图片",
+        "boundaries": "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。\n在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。\n结果为 HTML。只有在渲染工具可用时才会导出视频。\n当缺少事实时，占位文案会被清楚地标注。",
+        "followUps": "更换调色板或镜头运动。\n添加一个章节或一张价格表。\n从“3D Interactive Web Design”资料库中的模板开始。",
+        "useCases": [
+          {
+            "title": "产品发布 | 滚动时拆解产品",
+            "description": "3D 产品随着访客滚动分解成各个部件，每个部件配有一个功能说明。",
+            "context": ""
+          },
+          {
+            "title": "作品集 | 可以漫游的空间",
+            "description": "将项目呈现为访客可以在其间移动的房间或物体。",
+            "context": ""
+          },
+          {
+            "title": "修改 | 只改一处",
+            "description": "保留页面，只修改颜色、文案或镜头。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-argon-kinetic-type",
+      "kind": "skill",
+      "name": "argon-kinetic-type",
+      "displayName": "动态文字循环",
+      "summary": "分享一条信息。获得一段最长 5 秒的动态排版循环，文字会在你确认的节拍网格上移动，且在编写任何代码之前你都可以确认。",
+      "marketingLine": "一行文字，伴随清晰的节奏动起来。",
+      "category": "AI 模型工作室",
+      "businessScenario": "interactive-games",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/13dadf04-186c-4da0-8045-ff992861bc09?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "你信息中的文字会按照固定节拍切换，并循环回到开头。你先确认节拍网格，然后 Agent 用代码编写循环。",
+        "scenarios": [
+          "发布预告或片头卡片",
+          "由一句话制作的可循环社交帖子"
+        ],
+        "requiredContext": "信息内容是什么？：一行文字、一个名字或一个简短短语。\n哪些文字，按什么顺序？：可选。如果你不提供，我会提出 8-12 个状态。\n外观与尺寸？：默认黑白配一种强调色，并使用方形画框。",
+        "steps": "确认网格：文字按顺序排列，每个节拍变化一次。\n查看静帧：每个节拍一张静帧，用于检查时间和可读性。\n获得循环：HTML 循环；渲染工具可用时另附视频。",
+        "outputs": "无缝的 HTML 文字循环\n节拍静帧的接触表\n在支持渲染时，最长 5 秒的视频文件",
+        "boundaries": "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。\n在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。\n循环最长 5 秒，展示一个连续的主体，而不是多场景剪辑。\n音乐会被裁剪至循环长度；不会对其进行分析或节拍匹配。",
+        "followUps": "更换强调色。\n制作竖版版本。\n加入一段经授权的音乐，并裁剪到循环长度。",
+        "useCases": [
+          {
+            "title": "发布文案 | 踩准节拍的文字",
+            "description": "将发布短语转为一个 5 秒循环。",
+            "context": ""
+          },
+          {
+            "title": "竖版 | 为手机屏幕设计",
+            "description": "同样的创意，采用 9:16 比例和更大的字号。",
+            "context": ""
+          },
+          {
+            "title": "导出 | 将循环导出为视频",
+            "description": "在工具支持的情况下，将已确认的循环渲染为视频文件。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-argon-generative-art",
+      "kind": "skill",
+      "name": "argon-generative-art",
+      "displayName": "生成艺术海报",
+      "summary": "分享一个主题、笔记或一小份数据集。获得一件以代码生成的原创随机种子艺术作品，可导出为海报、用作实时背景，或通过更换种子生成变体。",
+      "marketingLine": "你的主题或数据，由一个可重复的算法绘制。",
+      "category": "AI 模型工作室",
+      "businessScenario": "interactive-games",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/ee8e7c5f-76b6-493a-b379-222f3bc788b7?variant_name=thumbnail",
+      "featured": false,
+      "guide": {
+        "summary": "Agent 会选择适合你主题的算法，用代码实现它，并将其绑定到一个种子上，使相同的设置总能生成相同的图像。",
+        "scenarios": [
+          "由主题或名称制作海报或封面",
+          "由你自己的数字驱动的艺术作品"
+        ],
+        "requiredContext": "主题是什么？：一个主题、一个词、笔记、一份 CSV，或一张可取样的照片。\n上面需要文字吗？：一个标题和副标题，或不需要。\n调色板和尺寸？：默认为深色底色配暖色强调色，尺寸 1600 x 900。",
+        "steps": "选择算法：三个与你的主题或数据相关的构思。\n查看一件随机种子作品：用其种子和设置检查效果。\n导出并变化：PNG 导出、实时控件和种子变体。",
+        "outputs": "带控件的随机种子生成艺术页面\nPNG 海报导出\n可重复使用的种子变体",
+        "boundaries": "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。\n在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。\n作品由代码绘制；仅在你要求时，并在费用检查后，才会使用生成的图片。\n视频导出仅在渲染工具可用时进行。",
+        "followUps": "更换调色板或密度。\n将作品用作页面背景。\n制作一个循环版本。",
+        "useCases": [
+          {
+            "title": "主题 | 三种可选算法",
+            "description": "获得三个与你的主题相关的构思，然后制作一件随机种子作品。",
+            "context": ""
+          },
+          {
+            "title": "数据 | 让你的数字塑造作品",
+            "description": "将一份小型数据集的各列映射到视觉属性，并说明映射方式。",
+            "context": ""
+          },
+          {
+            "title": "变体 | 同样的风格，新的种子",
+            "description": "保留已确认的风格，并并排比较不同种子的效果。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-skill-gemini-argon-studio",
+      "kind": "skill",
+      "name": "gemini-argon-studio",
+      "displayName": "Argon Studio",
+      "summary": "给 Agent 一个问题、一张照片、一张草图或一段简短需求。在 Argon 上，它会推理空间与物理原理，并用代码写出完整成果：展示事物运作方式的 3D 模拟、由你的照片生成的 3D 世界、可玩的游戏、3D 网页、文字动效循环或生成艺术。",
+      "marketingLine": "问个问题或拍张照，得到一个会动的 3D 世界。",
+      "category": "AI 模型工作室",
+      "businessScenario": "interactive-games",
+      "coverUrl": "https://files.tapnow.media/api/conversation/storage/uploads/f78254b9-3286-43ad-abd9-defbbf8abcec?variant_name=thumbnail",
+      "featured": true,
+      "guide": {
+        "summary": "六种玩法，让擅长空间与物理推理、并能写出长篇可运行代码的 Agent 为你工作。分享一个问题、一张照片或一段需求，并在制作其他内容之前先审阅一个样例。",
+        "scenarios": [
+          "看清一台机器、一个器官或一个物理原理在 3D 中如何运作",
+          "把真实场所的照片变成可以探索的 3D 世界",
+          "把草图或需求变成可以直接使用的页面或游戏",
+          "把一条消息或一个主题变成用代码制作的动效或艺术作品"
+        ],
+        "requiredContext": "你从什么开始？：一个问题、一到四张照片、一张草图或截图、笔记，或一句话的创意。请分享你有权使用的素材。\n你希望得到什么？：3D 模拟、3D 世界、游戏、网页、文字动效循环或艺术作品。如果你还不确定，我会为你推荐一种。\n面向谁？：说明受众，以及他们看完后应该做的一件事或理解的一点内容。\n有哪些必备要求？：颜色、语言、比例、时长、设备或截止日期。其他未提及的部分，我会采用合理的默认值并告诉你。",
+        "steps": "提供素材：提出你的问题或上传照片、草图、笔记，并说明你想要得到什么。\n我通读全部内容：我会阅读你分享的全部内容，区分我看到的内容与我推断的内容，并标出我无法打开的部分。\n确认方案：你会收到一份简短的阶段列表、场景布局、游戏设计或章节计划供你确认。任何需要付费的生成都会先列出费用。\n审阅一个样例：我会先制作或生成一个具有代表性的作品，并在制作其余部分前进行检查。\n获取成果包：文件、检查说明，以及你可以在 中继续进行的后续步骤。",
+        "outputs": "可在聊天中预览和修改的交互式 3D 模拟、3D 场景、网页和浏览器游戏\n你在制作前确认的阶段列表、场景布局和游戏设计\n文字动效循环和生成艺术作品，工具支持时可导出为视频或 PNG\n可选的生成图片或片段，仅在实时模型检查并获得你的费用确认后制作",
+        "boundaries": "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。\n在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。\n仿真中的事实来自你提供的参考资料，或会标注为近似值。我会列出从你的照片中猜测的内容。\n我在 中制作草稿和文件。发布的内容、地点和时间由你决定。",
+        "followUps": "保留方案，只修改风格、时长或受众。\n把 3D 场景做成短小的环绕飞行视频，或加入游戏模式。\n基于早前的文件制作另一个版本，且不丢失第一个版本。",
+        "useCases": [
+          {
+            "title": "问题 | 看懂它怎么工作",
+            "description": "获得需要核对的因果阶段，再得到一个可以旋转、逐步查看的 3D 模拟。",
+            "context": ""
+          },
+          {
+            "title": "照片 | 走进去逛",
+            "description": "把你桌面或房间的照片转为 3D 场景，然后加入游戏模式。",
+            "context": ""
+          },
+          {
+            "title": "草图 | 在浏览器中直接玩",
+            "description": "把草图或一句话的创意转为可玩的游戏，先做核心玩法。",
+            "context": ""
+          },
+          {
+            "title": "需求 | 3D 发布页",
+            "description": "把产品说明转为带有真实文案的交互式 3D 落地页。",
+            "context": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "tapnow-app-tapnow-baidupan",
+      "kind": "app",
+      "name": "tapnow-baidupan",
+      "displayName": "百度网盘",
+      "summary": "连接百度网盘，支持列目录、搜索、读文件、创建文件夹、移动复制与分享链接。",
+      "marketingLine": "连接百度网盘，支持列目录、搜索、读文件、创建文件夹、移动复制与分享链接。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": null,
+      "delisted": true
+    },
+    {
+      "id": "tapnow-app-tapnow-descript",
+      "kind": "app",
+      "name": "tapnow-descript",
+      "displayName": "Descript",
+      "summary": "连接 Descript 账号，支持读取项目与任务、导入媒体、触发 AI 编辑与导出转写。",
+      "marketingLine": "连接 Descript 账号，支持读取项目与任务、导入媒体、触发 AI 编辑与导出转写。",
+      "category": "效率工具",
+      "businessScenario": "",
+      "coverUrl": "",
+      "featured": false,
+      "guide": null,
+      "delisted": true
+    }
+  ]
+}

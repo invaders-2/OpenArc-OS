@@ -13,8 +13,8 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import domain from "../electron/window-domain.cjs";
-import manager from "../electron/window-manager.cjs";
+import * as domain from "../electron/window-domain.ts";
+import * as manager from "../electron/window-manager.ts";
 
 const HOST = { width: 1440, height: 940 };
 

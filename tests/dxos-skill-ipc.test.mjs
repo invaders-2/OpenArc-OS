@@ -2,7 +2,7 @@
  * B4 · 技能域 IPC 集成测试（全离线：假 ipcMain / 假 webContents，无 Electron、无网络、无第三方依赖）。
  *
  * 覆盖本轮验收条目：
- *   ① 命令表 risk/credential（SKILL_COMMANDS 的 15 条必需命令）
+ *   ① 命令表 risk/credential（SKILL_COMMANDS 的 17 条必需命令）
  *   ② trusted(sender) fail closed：缺 isTrusted 或伪造 sender 一律拒绝
  *   ③ 未白名单命令被拒且无副作用（skills.json 不被创建）
  *   ④ skill:event 信封（P1 六字段）与 sequence 单调
@@ -130,11 +130,11 @@ function standardPackage() {
 }
 
 // ── ① 命令表 ─────────────────────────────────────────────────────────────
-test("命令表：15 条必需命令、risk/credential/summary 合法", () => {
+test("命令表：17 条必需命令、risk/credential/summary 合法", () => {
   const required = [
     "skill/list", "skill/get", "skill/enable", "skill/disable", "skill/save", "skill/delete",
     "skill/run", "skill/analyze",
-    "skill/pack/list", "skill/pack/install", "skill/pack/import", "skill/pack/export", "skill/pack/uninstall",
+    "skill/pack/list", "skill/pack/inspectOnline", "skill/pack/installStaged", "skill/pack/install", "skill/pack/import", "skill/pack/export", "skill/pack/uninstall",
     "skill/workspace/list", "skill/health",
   ];
   const commands = skillDomain.listSkillCommands();
@@ -236,6 +236,7 @@ test("返回值不含密钥与绝对路径（文本/字段名两种形态都被�
   const leakedPath = "/Users/wepingli/secret/leak.txt";
   const leakedKey = "sk-abcdef123456";
   skillStore.saveCustomSkill({
+    ownerUserId: "u-test",
     id: "leaky",
     name: "泄漏测试技能",
     description: "用于验证返回值脱敏",

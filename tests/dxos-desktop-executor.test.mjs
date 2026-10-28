@@ -221,7 +221,7 @@ test("createSystemMusicController：非 darwin 返回 null；darwin 固定脚本
 
 // ── main.cjs 接线契约 ──────────────────────────────────────────────────────
 test("main.cjs 接线：desktop 适配器注入 automation-service，替换 desktop:null", () => {
-  const main = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(ROOT, "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes('require("./desktop-executor.cjs")'), "main.cjs 必须装配 desktop-executor");
   assert.ok(main.includes("function createAutomationDesktopAdapter()"), "必须由受控系统 API 构造 desktop 适配器");
   assert.ok(main.includes("desktop: automationDesktop,"), "automation 装配必须注入真实 desktop 适配器");

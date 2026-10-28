@@ -281,6 +281,10 @@ const pulling = ref<string | null>(null);
 const remote = ref<Record<string, Remote[]>>({});
 const remoteFilter = ref<Record<string, string>>({});
 const picked = ref<Record<string, Record<string, string[]>>>({});
+/** 「拉取模型」弹窗里被取消勾选的已加入模型（= 本次要移除）；默认空，拉取不会自动勾/自动加。 */
+const dropped = ref<Record<string, Record<string, boolean>>>({});
+/** 「拉取模型」弹窗当前对应的服务商；null = 关闭。 */
+const remoteOpenFor = ref<string | null>(null);
 async function pullModels(providerId: string) {
   pulling.value = providerId;
   error.value = null;
@@ -292,7 +296,8 @@ async function pullModels(providerId: string) {
   }
   remote.value = { ...remote.value, [providerId]: r.items };
   picked.value = { ...picked.value, [providerId]: {} };
-  notice.value = tr("拉取到 {n} 个模型", { n: r.items.length });
+  dropped.value = { ...dropped.value, [providerId]: {} };
+  remoteOpenFor.value = providerId;
 }
 /** 拉取结果的能力来自 provider/models 的 suggestedCapabilities（后端 guessCapabilities 推断）；空能力不再默认成 chat。 */
 function togglePick(providerId: string, m: { id: string; capabilities?: string[] }) {
@@ -335,21 +340,72 @@ async function addOneModel(providerId: string, m: { id: string; capabilities?: s
   await load();
   await autoDefaultAfterRegister(providerId);
 }
-/** 批量「注册所选」：逐条真实落库，部分失败如实报数，不谎报全部成功。 */
-async function registerEntries(providerId: string, entries: { id: string; capabilities: string[] }[]) {
-  const succeeded: string[] = [];
+/** 已加入的行取消勾选＝本次移除。 */
+function toggleDrop(providerId: string, m: { id: string }) {
+  const cur = { ...(dropped.value[providerId] || {}) };
+  if (cur[m.id]) delete cur[m.id];
+  else cur[m.id] = true;
+  dropped.value = { ...dropped.value, [providerId]: cur };
+}
+function markUnregistered(providerId: string, ids: string[]) {
+  if (!ids.length) return;
+  const set = new Set(ids);
+  remote.value = { ...remote.value, [providerId]: (remote.value[providerId] || []).map((m) => (set.has(m.id) ? { ...m, registered: false } : m)) };
+}
+/**
+ * 移除模型：拉取清单只有远端模型名，先按 providerId + remoteModelId 找到本地配置再 model/delete。
+ * 逐条真实执行，找不到配置也如实记失败，不假装删掉了。
+ */
+async function removeModels(providerId: string, ids: string[]): Promise<{ removed: string[]; failed: string[]; firstError: string | null }> {
+  const removed: string[] = [];
+  const failed: string[] = [];
   let firstError: string | null = null;
-  for (const entry of entries) {
+  for (const id of ids) {
+    const target = models.value.find((m: any) => m.providerId === providerId && m.remoteModelId === id);
+    const r = target ? await cmd("model/delete", { configId: target.configId }) : { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
+    if (r.ok) removed.push(id);
+    else {
+      failed.push(id);
+      if (!firstError) firstError = r.error;
+    }
+  }
+  return { removed, failed, firstError };
+}
+/** 单个模型「移除」：列表里直接删，不再等保存。 */
+async function removeOneModel(providerId: string, m: { id: string }) {
+  const res = await removeModels(providerId, [m.id]);
+  if (res.firstError) error.value = res.firstError;
+  else notice.value = tr("已移除 {id}", { id: m.id });
+  if (res.removed.length) {
+    markUnregistered(providerId, res.removed);
+    const next = { ...(dropped.value[providerId] || {}) };
+    for (const id of res.removed) delete next[id];
+    dropped.value = { ...dropped.value, [providerId]: next };
+  }
+  await load();
+}
+/** 底部「添加 X / 移除 Y」一次提交：逐条真实落库，按结果如实报数，不谎报全部成功。 */
+async function applyCurate(providerId: string, plan: { adds: { id: string; capabilities: string[] }[]; removals: string[] }) {
+  const added: string[] = [];
+  let firstError: string | null = null;
+  for (const entry of plan.adds) {
     const r = await cmd("model/create", { providerId, remoteModelId: entry.id, displayName: entry.id, capabilities: [...(entry.capabilities || [])], scope: "PERSONAL" });
-    if (r.ok) succeeded.push(entry.id);
+    if (r.ok) added.push(entry.id);
     else if (!firstError) firstError = r.error;
   }
+  const removal = await removeModels(providerId, plan.removals);
+  if (!firstError && removal.firstError) firstError = removal.firstError;
+  const failed = plan.adds.length - added.length + removal.failed.length;
   if (firstError) error.value = firstError;
-  notice.value = succeeded.length === entries.length ? tr("已注册 {n} 个模型", { n: succeeded.length }) : tr("已注册 {ok} / {all} 个模型（其余失败）", { ok: succeeded.length, all: entries.length });
-  markRegistered(providerId, succeeded);
+  notice.value = failed
+    ? tr("已添加 {a} 个 / 已移除 {r} 个（失败 {f}）", { a: added.length, r: removal.removed.length, f: failed })
+    : tr("已添加 {a} 个 / 已移除 {r} 个", { a: added.length, r: removal.removed.length });
+  markRegistered(providerId, added);
+  markUnregistered(providerId, removal.removed);
   picked.value = { ...picked.value, [providerId]: {} };
+  dropped.value = { ...dropped.value, [providerId]: {} };
   await load();
-  await autoDefaultAfterRegister(providerId);
+  if (added.length) await autoDefaultAfterRegister(providerId);
 }
 function onRemoteFilter(value: string) {
   if (!current.value) return;
@@ -361,8 +417,21 @@ function onTogglePick(m: { id: string; capabilities?: string[] }) {
 function onAddOne(m: { id: string; capabilities?: string[] }) {
   if (current.value) void addOneModel(current.value.providerId, m);
 }
-function onRegister(entries: { id: string; capabilities: string[] }[]) {
-  if (current.value) void registerEntries(current.value.providerId, entries);
+function onToggleDrop(m: { id: string; capabilities?: string[] }) {
+  if (current.value) toggleDrop(current.value.providerId, m);
+}
+function onRemoveOne(m: { id: string; capabilities?: string[] }) {
+  if (current.value) void removeOneModel(current.value.providerId, m);
+}
+function onSave(plan: { adds: { id: string; capabilities: string[] }[]; removals: string[] }) {
+  if (current.value) void applyCurate(current.value.providerId, plan);
+}
+/** 批量勾选（全选本类 / 清空本类 / 清空已选）：纯逻辑一次算出新的 picked + dropped，这里整体替换，不逐行触发。 */
+function onSetPicks(state: { picked: Record<string, string[]>; dropped: Record<string, true> }) {
+  if (!current.value) return;
+  const providerId = current.value.providerId;
+  picked.value = { ...picked.value, [providerId]: state.picked };
+  dropped.value = { ...dropped.value, [providerId]: state.dropped };
 }
 const CAP_SHORT: Record<string, string> = { chat: "对话", "tool-calling": "工具", "vision-input": "看图", "image-generation": "生图", "video-generation": "视频", embedding: "向量" };
 
@@ -540,6 +609,12 @@ async function saveEgress() {
   egressNotice.value = tr(view.enabled ? "已保存：模型与协议请求将经代理转发" : "已保存：模型与协议请求直连");
 }
 onMounted(() => { void loadEgress(); });
+/* 操作提示是一次性的：显示几秒后自动消失，不常驻在页面顶上 */
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+watch(notice, (v) => {
+  if (noticeTimer) clearTimeout(noticeTimer);
+  if (v) noticeTimer = setTimeout(() => { notice.value = null; }, 3500);
+});
 </script>
 
 <template>
@@ -590,9 +665,9 @@ onMounted(() => { void loadEgress(); });
     </div>
 
     <DsDialog class="mp2-pdialog" :open="providerViewOpen" :title="current?.displayName || tr('服务商')" @close="providerViewOpen = false">
-            <!-- 右：服务商详情 -->
-      <div v-if="current" class="set-group mp2-detail mp2-dialog-detail" :key="current.providerId" :data-d4-01-provider-detail="current.providerId">
-        <div class="mp2-head">
+      <!-- 服务商详情：原型 A 的分组卡片（标签左、值/控件右），卡片无描边，行间分隔只在卡片内部 -->
+      <div v-if="current" class="mp2-pv" :key="current.providerId" :data-d4-01-provider-detail="current.providerId">
+        <div class="mp2-pv-head">
           <span
             class="mp2-logo"
             :class="{ 'mp2-logo-brand': providerLogo(current) }"
@@ -611,98 +686,71 @@ onMounted(() => { void loadEgress(); });
             <img v-else-if="providerLogo(current)" :src="providerLogo(current)!.url" :alt="providerLogo(current)!.label" />
             <template v-else>{{ mono(current.displayName) }}</template>
           </span>
-          <b class="mp2-title">{{ current.displayName }}</b>
-          <span class="ds-badge ds-badge--sm" :class="providerState(current).tone === 'ok' ? 'ds-badge--success' : providerState(current).tone === 'warn' ? 'ds-badge--warning' : 'ds-badge--neutral'" data-d4-01-provider-status>{{ tr(providerState(current).label) }}</span>
-          <span v-if="current.allowInsecureHttp" class="ds-badge ds-badge--sm ds-badge--warning" data-d4-01-provider-insecure-badge :title="tr('该站点使用明文 HTTP，凭据与内容可能被中间人读取')" :aria-label="tr('不安全 HTTP：该站点使用明文 HTTP，凭据与内容可能被中间人读取')">{{ tr("不安全 HTTP") }}</span>
+          <div class="mp2-pv-title">
+            <b>{{ current.displayName }}</b>
+            <small>
+              <span data-d4-01-provider-status>{{ tr(providerState(current).label) }}</span>
+              <span v-if="current.allowInsecureHttp" class="mp2-warn-text" data-d4-01-provider-insecure-badge :title="tr('该站点使用明文 HTTP，凭据与内容可能被中间人读取')"> · {{ tr("不安全 HTTP") }}</span>
+            </small>
+          </div>
+          <DsButton variant="secondary" size="sm" :data-d4-01-provider-edit="current.providerId" @click="openProviderEdit(current.providerId)">{{ tr("编辑") }}</DsButton>
+          <DsButton v-if="current.status === 'enabled'" variant="secondary" size="sm" :data-d4-01-provider-disable="current.providerId" @click="setProviderStatus(current.providerId, 'disabled')">{{ tr("停用") }}</DsButton>
+          <DsButton v-else variant="primary" size="sm" :data-d4-01-provider-enable="current.providerId" @click="setProviderStatus(current.providerId, 'enabled')">{{ tr("启用") }}</DsButton>
         </div>
-        <h4 class="mp2-card-title">{{ tr("地址") }}</h4>
-        <div class="mp2-field"><span>{{ tr("API 地址") }}</span>
-          <div class="mp2-static">{{ current.baseUrl }}<small> · {{ current.scope === "ORGANIZATION" ? tr("组织") : tr("个人") }} · {{ adapterName(current.adapterType) }}</small></div>
-        </div>
-        <h4 class="mp2-card-title">{{ tr("密钥") }}</h4>
-        <div class="mp2-field"><span>{{ tr("API 密钥") }} <small :data-d4-01-cred-status="current.providerId">{{ credLabel(current.providerId) }}</small></span>
-          <div class="mp2-row">
+        <p v-if="error" class="d401-error" role="alert">{{ errText(error) }}</p>
+
+        <h4 class="mp2-pv-sec">{{ tr("连接") }}</h4>
+        <div class="set-group mp2-pv-group">
+          <div class="setting-row">
+            <span class="set-lab">{{ tr("API 地址") }}</span>
+            <span class="mp2-pv-val" :title="current.baseUrl">{{ current.baseUrl }}</span>
+          </div>
+          <div class="setting-row" data-model-provider-protocol>
+            <span class="set-lab">{{ tr("接口类型") }}</span>
+            <span class="mp2-pv-val" :title="current.adapterType">{{ adapterName(current.adapterType) }}</span>
+            <button type="button" class="mp2-link" @click="protocolDialogOpen = true">{{ tr("查看协议") }}</button>
+          </div>
+          <div class="setting-row">
+            <span class="set-lab">{{ tr("范围") }}</span>
+            <span class="mp2-pv-val">{{ current.scope === "ORGANIZATION" ? tr("组织") : tr("个人") }}</span>
+          </div>
+          <div class="setting-row">
+            <span class="set-lab">{{ tr("API 密钥") }}<small :data-d4-01-cred-status="current.providerId">{{ credLabel(current.providerId) }}</small></span>
             <input
-              class="set-input"
+              class="set-input mp2-pv-input"
               :data-d4-01-cred-input="current.providerId"
               :aria-label="'API 密钥：' + current.displayName"
               type="password"
-              :placeholder="credStatus[current.providerId]?.configured ? tr('已保存（只写入，不再显示）· 粘贴新密钥可替换') : tr('粘贴密钥')"
+              :placeholder="credStatus[current.providerId]?.configured ? tr('粘贴新密钥可替换') : tr('粘贴密钥')"
               :value="credDraft[current.providerId] || ''"
               @input="onCredDraft(current.providerId, $event)"
             />
             <DsButton variant="secondary" size="sm" :data-d4-01-cred-set="current.providerId" :disabled="!credDraft[current.providerId]" @click="saveCred(current.providerId, !!credStatus[current.providerId]?.configured)">{{ tr("保存") }}</DsButton>
             <DsButton v-if="credStatus[current.providerId]?.configured" variant="ghost" size="sm" :data-d4-01-cred-delete="current.providerId" @click="deleteCred(current.providerId)">{{ tr("删除") }}</DsButton>
           </div>
-        </div>
-        <h4 class="mp2-card-title">{{ tr("连接状态") }}</h4>
-        <div class="mp2-row">
-          <DsButton variant="secondary" size="sm" :data-d4-01-test="current.providerId" @click="runTest(current.providerId)">{{ tr("测试连接") }}</DsButton>
-          <span v-if="tests[current.providerId]" class="ds-badge ds-badge--sm" :class="tests[current.providerId].ok ? 'ds-badge--success' : 'ds-badge--danger'" :data-d4-01-test-result="current.providerId">{{ tests[current.providerId].ok ? tr("连接成功") : tr("连接失败") }}</span>
-          <small v-if="tests[current.providerId]" class="set-cap">{{ testLabel(tests[current.providerId]) }}</small>
-          <span class="toolbar-spacer" />
-          <DsButton variant="secondary" size="sm" :data-d4-01-provider-edit="current.providerId" @click="openProviderEdit(current.providerId)">{{ tr("编辑服务商") }}</DsButton>
-          <DsButton v-if="current.status === 'enabled'" variant="ghost" size="sm" :data-d4-01-provider-disable="current.providerId" @click="setProviderStatus(current.providerId, 'disabled')">{{ tr("停用") }}</DsButton>
-          <DsButton v-else variant="secondary" size="sm" :data-d4-01-provider-enable="current.providerId" @click="setProviderStatus(current.providerId, 'enabled')">{{ tr("启用") }}</DsButton>
-        </div>
-
-        <h4 class="mp2-card-title">{{ tr("接口类型") }}</h4>
-        <div class="mp2-row mp2-protocol-row" data-model-provider-protocol>
-          <span :title="current.adapterType">{{ adapterName(current.adapterType) }}</span>
-          <div class="toolbar-spacer" />
-          <DsButton variant="ghost" size="sm" @click="protocolDialogOpen = true">{{ tr("查看接口协议") }}</DsButton>
-        </div>
-
-        <template v-if="imageModels(current.providerId).length">
-          <h4 class="mp2-card-title">{{ tr("图片接口") }}</h4>
-          <div class="mp2-field" data-d4-01-image-api>
-            <div class="mp2-static">{{ current.baseUrl }}<small> · {{ adapterName(current.adapterType) }}</small></div>
-            <div class="mp2-row">
-              <span v-for="m in imageModels(current.providerId)" :key="m.configId" class="ds-badge ds-badge--sm ds-badge--neutral">{{ m.displayName || m.remoteModelId }}</span>
-            </div>
-          </div>
-        </template>
-
-        <h4 class="mp2-card-title">{{ tr("模型列表") }}</h4>
-        <div class="mp2-field" data-d4-01-pane="models"><span>{{ tr("模型与能力") }}</span>
-          <div v-for="group in groupedModels(current.providerId)" :key="group.cap" class="mp2-model-group" :data-model-group="group.cap">
-            <h5 class="mp2-model-group-title">{{ tr(group.label) }} <small>{{ group.items.length }}</small></h5>
-            <ul class="mp2-models">
-              <li v-for="m in group.items" :key="m.configId" :data-d4-01-model="m.configId" :class="{ off: m.status !== 'enabled' }">
-                <div class="mp2-model-row">
-                  <span class="mp2-model-id" :title="m.remoteModelId">{{ m.displayName || m.remoteModelId }}</span>
-                  <span v-for="c in m.capabilities" :key="c" class="ds-badge ds-badge--sm" :class="m.verifiedCapabilities.includes(c) ? 'ds-badge--success' : 'ds-badge--neutral'" :title="m.verifiedCapabilities.includes(c) ? tr('已验证') : tr('已声明，未验证')">{{ CAP_SHORT[c] ? tr(CAP_SHORT[c]) : c }}</span>
-                  <button class="mp2-link" @click="editingCaps = editingCaps === m.configId ? null : m.configId">{{ tr("编辑") }}</button>
-                  <button v-if="m.status === 'enabled'" class="mp2-link" :data-d4-01-model-disable="m.configId" @click="setModelStatus(m.configId, 'disabled')">{{ tr("停用") }}</button>
-                  <button v-else class="mp2-link" :data-d4-01-model-enable="m.configId" @click="setModelStatus(m.configId, 'enabled')">{{ tr("启用") }}</button>
-                </div>
-                <div v-if="editingCaps === m.configId" class="mp2-caps-edit">
-                  <label v-for="c in CAPABILITY_CHOICES" :key="c.id">
-                    <input type="checkbox" :data-d4-01-model-cap="m.configId" :data-d4-01-model-cap-id="c.id" :checked="draftCaps(m).includes(c.id)" @change="toggleModelCap(m.configId, m, c.id)" />
-                    {{ tr(c.label) }}
-                  </label>
-                  <DsButton variant="secondary" size="sm" :data-d4-01-model-cap-save="m.configId" @click="saveCaps(m.configId); editingCaps = null">{{ tr("保存") }}</DsButton>
-                </div>
-              </li>
-            </ul>
-          </div>
-          <p v-if="!modelsOf(current.providerId).length" class="set-cap" data-d4-01-models-empty>{{ tr("还没有模型。可以从服务商拉取，或手动添加。") }}</p>
-          <div class="mp2-row">
-            <DsButton variant="secondary" size="sm" :data-d4-01-pull="current.providerId" :disabled="pulling === current.providerId" @click="pullModels(current.providerId)">
-              {{ pulling === current.providerId ? tr("拉取中…") : remote[current.providerId] ? tr("重新拉取") : tr("拉取模型") }}
-            </DsButton>
-            <DsButton variant="ghost" size="sm" data-d4-01-model-add @click="startAddModel(current.providerId)">{{ tr("添加自定义模型") }}</DsButton>
+          <div class="setting-row">
+            <span class="set-lab">{{ tr("连接测试") }}<small v-if="tests[current.providerId]">{{ testLabel(tests[current.providerId]) }}</small></span>
+            <span v-if="tests[current.providerId]" class="mp2-pv-val" :class="tests[current.providerId].ok ? 'mp2-ok-text' : 'mp2-bad-text'" :data-d4-01-test-result="current.providerId">{{ tests[current.providerId].ok ? tr("连接成功") : tr("连接失败") }}</span>
+            <DsButton variant="secondary" size="sm" :data-d4-01-test="current.providerId" @click="runTest(current.providerId)">{{ tr("测试连接") }}</DsButton>
           </div>
         </div>
 
-        <div v-if="addingModel && mForm.providerId === current.providerId" class="mp2-sub" data-d4-01-model-form>
-          <label class="mp2-field"><span>{{ tr("模型 ID") }} <small>{{ tr("服务商那边的模型名") }}</small></span>
-            <input class="set-input mono" data-d4-01-model-remote :aria-label="tr('模型 ID')" :placeholder="tr('例如 deepseek-chat')" :value="mForm.remoteModelId" @input="onModelRemote" />
+        <div class="mp2-pv-sec mp2-pv-sec-row" data-d4-01-pane="models">
+          <h4>{{ tr("模型") }} <small>{{ modelsOf(current.providerId).length }}</small></h4>
+          <DsButton variant="ghost" size="sm" data-d4-01-model-add @click="startAddModel(current.providerId)">{{ tr("手动添加") }}</DsButton>
+          <DsButton variant="secondary" size="sm" :data-d4-01-pull="current.providerId" :disabled="pulling === current.providerId" @click="pullModels(current.providerId)">
+            {{ pulling === current.providerId ? tr("拉取中…") : tr("拉取模型") }}
+          </DsButton>
+        </div>
+
+        <div v-if="addingModel && mForm.providerId === current.providerId" class="set-group mp2-pv-group" data-d4-01-model-form>
+          <label class="setting-row"><span class="set-lab">{{ tr("模型 ID") }}<small>{{ tr("服务商那边的模型名") }}</small></span>
+            <input class="set-input" data-d4-01-model-remote :aria-label="tr('模型 ID')" :placeholder="tr('例如 deepseek-chat')" :value="mForm.remoteModelId" @input="onModelRemote" />
           </label>
-          <label class="mp2-field"><span>{{ tr("显示名称") }} <small>{{ tr("可选") }}</small></span>
+          <label class="setting-row"><span class="set-lab">{{ tr("显示名称") }}<small>{{ tr("可选") }}</small></span>
             <input class="set-input" data-d4-01-model-name :aria-label="tr('显示名称')" :value="mForm.displayName" @input="onModelName" />
           </label>
-          <div class="mp2-field"><span>{{ tr("能力") }}</span>
+          <div class="setting-row"><span class="set-lab">{{ tr("能力") }}</span>
             <div class="mp2-caps-edit" data-d4-01-model-create-caps>
               <label v-for="c in CAPABILITY_CHOICES" :key="c.id">
                 <input type="checkbox" :data-d4-01-model-create-cap="c.id" :checked="mForm.capabilities.includes(c.id)" @change="toggleCreateCap(c.id)" />
@@ -710,26 +758,57 @@ onMounted(() => { void loadEgress(); });
               </label>
             </div>
           </div>
-          <div class="mp2-actions">
+          <div class="setting-row mp2-pv-actions">
             <DsButton variant="ghost" size="sm" @click="addingModel = false">{{ tr("取消") }}</DsButton>
             <DsButton variant="primary" size="sm" data-d4-01-model-create :disabled="!mForm.remoteModelId.trim()" @click="submitModel">{{ tr("添加模型") }}</DsButton>
           </div>
         </div>
 
-        <RemoteModelsPanel
-          v-if="remote[current.providerId]"
-          class="mp2-sub"
-          :provider-id="current.providerId"
-          :items="remote[current.providerId]"
-          :picked="picked[current.providerId] || {}"
-          :pulling="pulling === current.providerId"
-          :filter="remoteFilter[current.providerId] || ''"
-          @update:filter="onRemoteFilter"
-          @toggle-pick="onTogglePick"
-          @add-one="onAddOne"
-          @register="onRegister"
-        />
+        <template v-for="group in groupedModels(current.providerId)" :key="group.cap">
+          <h5 class="mp2-pv-sub" :data-model-group="group.cap">{{ tr(group.label) }} <small>{{ group.items.length }}</small></h5>
+          <div class="set-group mp2-pv-group">
+            <div v-for="m in group.items" :key="m.configId" class="mp2-pv-model" :data-d4-01-model="m.configId" :class="{ off: m.status !== 'enabled' }">
+              <div class="setting-row">
+                <span class="set-lab mp2-model-id" :title="m.remoteModelId">{{ m.displayName || m.remoteModelId }}</span>
+                <span class="mp2-caps">
+                  <span v-for="c in m.capabilities" :key="c" class="ds-badge ds-badge--sm ds-badge--neutral" :title="m.verifiedCapabilities.includes(c) ? tr('已验证') : tr('已声明，未验证')">{{ CAP_SHORT[c] ? tr(CAP_SHORT[c]) : c }}</span>
+                </span>
+                <button class="mp2-link" @click="editingCaps = editingCaps === m.configId ? null : m.configId">{{ tr("能力") }}</button>
+                <button v-if="m.status === 'enabled'" class="mp2-link" :data-d4-01-model-disable="m.configId" @click="setModelStatus(m.configId, 'disabled')">{{ tr("停用") }}</button>
+                <button v-else class="mp2-link" :data-d4-01-model-enable="m.configId" @click="setModelStatus(m.configId, 'enabled')">{{ tr("启用") }}</button>
+              </div>
+              <div v-if="editingCaps === m.configId" class="mp2-caps-edit mp2-pv-capsrow">
+                <label v-for="c in CAPABILITY_CHOICES" :key="c.id">
+                  <input type="checkbox" :data-d4-01-model-cap="m.configId" :data-d4-01-model-cap-id="c.id" :checked="draftCaps(m).includes(c.id)" @change="toggleModelCap(m.configId, m, c.id)" />
+                  {{ tr(c.label) }}
+                </label>
+                <DsButton variant="secondary" size="sm" :data-d4-01-model-cap-save="m.configId" @click="saveCaps(m.configId); editingCaps = null">{{ tr("保存") }}</DsButton>
+              </div>
+            </div>
+          </div>
+        </template>
+        <p v-if="!modelsOf(current.providerId).length" class="set-cap" data-d4-01-models-empty>{{ tr("还没有模型。点「拉取模型」从服务商读取清单，或手动添加。") }}</p>
       </div>
+    </DsDialog>
+
+    <!-- 拉取模型：单独弹窗，按 文本 / 图像 / 视频 / 搜索 分类挑选后注册 -->
+    <DsDialog class="mp2-wide-dialog" :open="!!remoteOpenFor && !!remote[remoteOpenFor]" :title="tr('拉取模型')" @close="remoteOpenFor = null">
+      <RemoteModelsPanel
+        v-if="remoteOpenFor && remote[remoteOpenFor]"
+        :provider-id="remoteOpenFor"
+        :items="remote[remoteOpenFor]"
+        :picked="picked[remoteOpenFor] || {}"
+        :dropped="dropped[remoteOpenFor] || {}"
+        :pulling="pulling === remoteOpenFor"
+        :filter="remoteFilter[remoteOpenFor] || ''"
+        @update:filter="onRemoteFilter"
+        @toggle-pick="onTogglePick"
+        @toggle-drop="onToggleDrop"
+        @add-one="onAddOne"
+        @remove-one="onRemoveOne"
+        @save="onSave"
+        @set-picks="onSetPicks"
+      />
     </DsDialog>
 
     <DsDialog class="mp2-form-dialog" :open="egressDialogOpen" :title="tr('出网代理')" @close="egressDialogOpen = false">
@@ -835,7 +914,7 @@ onMounted(() => { void loadEgress(); });
       />
     </DsDialog>
 
-    <DsDialog class="mp2-wide-dialog" :open="protocolDialogOpen" :title="tr('接口协议')" @close="protocolDialogOpen = false">
+    <DsDialog class="mp2-proto-dialog" :open="protocolDialogOpen" :title="tr('接口协议')" @close="protocolDialogOpen = false">
       <div data-model-settings-protocol-container><ProtocolSettingsPanel /></div>
     </DsDialog>
 
@@ -887,11 +966,43 @@ onMounted(() => { void loadEgress(); });
 .mp2-model-group-title small { color: var(--muted); font-weight: var(--fw-regular); }
 .mp2-protocol-row { gap: 8px; }
 
+/* 服务商详情（10-18 重排）：分组卡片，卡片无描边，标题与卡片之间留足间距 */
+.mp2-pv { display: flex; flex-direction: column; gap: 0; }
+.mp2-pv-head { display: flex; align-items: center; gap: 12px; padding-bottom: 8px; }
+.mp2-pv-head .mp2-logo { width: 40px; height: 40px; border-radius: 10px; }
+.mp2-pv-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mp2-pv-title b { font-size: var(--fs-headline); font-weight: var(--fw-medium); }
+.mp2-pv-title small { font-size: var(--fs-caption); color: var(--muted); }
+.mp2-warn-text { color: var(--warning-text, #a05a00); }
+.mp2-pv-sec { margin: 20px 0 8px; font-size: var(--fs-secondary); font-weight: var(--fw-medium); color: var(--muted); }
+.mp2-pv-sec-row { display: flex; align-items: center; gap: 8px; }
+.mp2-pv-sec-row h4 { flex: 1; margin: 0; font-size: var(--fs-secondary); font-weight: var(--fw-medium); color: var(--muted); }
+.mp2-pv-sec-row h4 small { font-weight: var(--fw-regular); margin-left: 4px; }
+.mp2-pv-sub { margin: 14px 0 6px; font-size: var(--fs-caption); font-weight: var(--fw-medium); color: var(--muted); }
+.mp2-pv-sub small { font-weight: var(--fw-regular); margin-left: 4px; }
+.mp2-pv-group { box-shadow: none !important; }
+.mp2-pv-group > .setting-row, .mp2-pv-model > .setting-row { min-height: 44px; }
+.mp2-pv-val { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-secondary); color: var(--muted); }
+.mp2-pv-input { width: 260px; max-width: 45%; }
+.mp2-ok-text { color: var(--success-text, #248a3d); }
+.mp2-bad-text { color: var(--failed); }
+.mp2-pv-actions { justify-content: flex-end !important; }
+.mp2-pv-model + .mp2-pv-model { box-shadow: inset 0 0.5px 0 var(--line); }
+.mp2-pv-model.off { opacity: 0.55; }
+.mp2-pv-model .setting-row { padding: 10px 16px; gap: 10px; }
+.mp2-pv-model .mp2-model-id { font-size: var(--fs-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.mp2-caps { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.mp2-pv-capsrow { padding: 0 16px 12px; }
+
 /* task-56：设置弹窗尺寸与内部滚动 */
 .mp2-form-dialog :deep(.dialog) { width: min(560px, calc(100% - 64px)); max-height: calc(100% - 64px); display: flex; flex-direction: column; }
 .mp2-form-dialog :deep(.dialog-body) { overflow: auto; min-height: 0; }
 .mp2-wide-dialog :deep(.dialog) { width: min(880px, calc(100% - 64px)); max-height: calc(100% - 64px); display: flex; flex-direction: column; }
 .mp2-wide-dialog :deep(.dialog-body) { overflow: auto; min-height: 0; }
+/* 接口协议：固定高度，左右两栏各自滚动 */
+.mp2-proto-dialog :deep(.dialog) { width: min(960px, calc(100% - 48px)); height: min(680px, calc(100% - 48px)); max-height: none; display: flex; flex-direction: column; }
+.mp2-proto-dialog :deep(.dialog-body) { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.mp2-proto-dialog :deep(.dialog-body) > div { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 /* task-47：模型页重排 —— 两栏紧凑、左栏不空荡、窄窗单栏；字阶/间距统一到设置页 token。 */
 .d401-settings { padding-bottom: var(--space-3); }

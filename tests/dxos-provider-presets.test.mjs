@@ -1,9 +1,9 @@
 /**
- * 8 条服务商预设的离线验收（纯逻辑 + 对着真实后端逐条做「能用性」断言）。
+ * 9 条服务商预设的离线验收（纯逻辑 + 对着真实后端逐条做「能用性」断言）。
  *
  * 覆盖：
  *   · 预设表形状：id/name/baseUrl/adapterType/docsUrl/credentialMode/models/notes 齐全且不重不漏；
- *   · 模型 id 与能力口径来自调研（dotted），没有官方清单的只有 Lovart（modelsSource:"catalog"）；
+ *   · 模型 id 与能力口径来自调研（dotted），没有官方清单的只有 Lovart 与 APIMart（modelsSource:"catalog"）；
  *   · 预设 → 表单填充的纯逻辑（名称 / 地址 / adapterType / 凭据形态）；
  *   · 双密钥（Lovart）组合 / 解析 / 校验；
  *   · payload 必带 adapterType（create 与 update），且逐条通过 validateEndpoint + ModelService.createProvider；
@@ -67,7 +67,7 @@ const PROTOCOL_UNIVERSE = [
 ];
 const PROTOCOL_ID_SET = new Set(PROTOCOL_UNIVERSE);
 
-/** 任务下发的 8 条口径（id / baseUrl / adapterType / 凭据形态）：表必须逐条一致。 */
+/** 任务下发的 9 条口径（id / baseUrl / adapterType / 凭据形态）：表必须逐条一致。 */
 const EXPECTED = [
   { id: "modelscope", baseUrl: "https://api-inference.modelscope.cn/v1", adapterType: "modelscope", credentialMode: "single" },
   { id: "agnes", baseUrl: "https://apihub.agnes-ai.com/v1", adapterType: "agnes", credentialMode: "single" },
@@ -77,6 +77,7 @@ const EXPECTED = [
   { id: "openai", baseUrl: "https://api.openai.com/v1", adapterType: "openai-compatible", credentialMode: "single" },
   { id: "gemini", baseUrl: "https://generativelanguage.googleapis.com", adapterType: "gemini", credentialMode: "single" },
   { id: "anthropic", baseUrl: "https://api.anthropic.com", adapterType: "anthropic", credentialMode: "single" },
+  { id: "apimart", baseUrl: "https://api.apimart.ai/v1", adapterType: "apimart", credentialMode: "single" },
 ];
 
 function draftForPreset(preset) {
@@ -85,14 +86,14 @@ function draftForPreset(preset) {
 
 /* ══ 1 预设表形状 ══ */
 
-test("① 8 条预设：id 不重不漏，字段齐全，baseUrl / docsUrl 都是合法 https", () => {
-  assert.equal(PROVIDER_PRESETS.length, 8, "必须正好 8 条预设");
+test("① 9 条预设：id 不重不漏，字段齐全，baseUrl / docsUrl 都是合法 https", () => {
+  assert.equal(PROVIDER_PRESETS.length, 9, "必须正好 9 条预设");
   assert.deepEqual(
     PROVIDER_PRESETS.map((p) => p.id),
     EXPECTED.map((e) => e.id),
-    "顺序与 id 必须与任务口径一致（ModelScope·Agnes·Lovart·火山引擎·DeepSeek·GPT·Gemini·Claude）",
+    "顺序与 id 必须与任务口径一致（ModelScope·Agnes·Lovart·火山引擎·DeepSeek·GPT·Gemini·Claude·APIMart）",
   );
-  assert.equal(new Set(PROVIDER_PRESETS.map((p) => p.id)).size, 8, "id 不得重复");
+  assert.equal(new Set(PROVIDER_PRESETS.map((p) => p.id)).size, 9, "id 不得重复");
   for (const preset of PROVIDER_PRESETS) {
     assert.ok(preset.name.trim().length > 0, preset.id + " 要有名称");
     assert.ok(preset.adapterType.trim().length > 0, preset.id + " 要有 adapterType");
@@ -119,6 +120,28 @@ test("② baseUrl / adapterType / credentialMode 逐条与任务口径一致", (
   // 唯一双密钥预设是 Lovart。
   assert.deepEqual(PROVIDER_PRESETS.filter((p) => p.credentialMode === "dual").map((p) => p.id), ["lovart"]);
   assert.equal(presetById("lovart").docsUrl.includes("lovart.notion.site"), true, "Lovart docsUrl 指向官方指南");
+
+  // APIMart：catalog 拉模型 + 官方文档 + 镜像域名写进说明；协议必须真的在协议表里（legacy apimart 或内置 apimart-http）。
+  const apimart = presetById("apimart");
+  assert.equal(apimart.modelsSource, "catalog", "APIMart 有数百个模型，靠 catalog 拉取，不手抄清单");
+  assert.deepEqual([...apimart.models], [], "APIMart 预设不得编造模型清单");
+  assert.equal(apimart.docsUrl, "https://docs.apimart.ai/cn");
+  assert.match(apimart.notes, /apib\.ai/, "APIMart notes 要写明 apib.ai 是同一家的镜像域名");
+  assert.match(apimart.notes, /自动识别/, "APIMart notes 要写明适配器按主机名自动识别");
+  assert.match(apimart.notes, /异步任务/, "APIMart notes 要写明图片 / 视频 / 音频是异步任务");
+  assert.match(apimart.notes, /过期/, "APIMart notes 要提醒生成链接会过期");
+  assert.match(apimart.notes, /出网代理/, "APIMart notes 要写明没有外网代理时先配置模型出网代理");
+  assert.equal(presetProtocolId(apimart.adapterType), "apimart", "APIMart 协议 id 就是 apimart（不走 OpenAI 兼容）");
+  // 协议落地两条都要查：legacy 供应商协议 apimart，与 v2 内置 apimart-http。
+  assert.equal(legacy.PROVIDER_PROTOCOLS.apimart && legacy.PROVIDER_PROTOCOLS.apimart.id, "apimart", "legacy 协议表必须有 apimart");
+  assert.equal(legacy.PROVIDER_PROTOCOLS.apimart.models.endpoint, "/v1/models", "legacy apimart 模型清单端点");
+  const apimartHttp = builtins.BUILTIN_PROVIDER_PROTOCOLS_V2.find((p) => p.id === "apimart-http");
+  assert.ok(apimartHttp, "v2 内置协议表必须有 apimart-http");
+  assert.equal(apimartHttp.kind, "provider");
+  assert.equal(apimartHttp.models.path, "/v1/models", "apimart-http 默认模型清单端点");
+  assert.equal(apimartHttp.auth.type, "bearer", "apimart-http 鉴权是 Bearer");
+  assert.match(apimartHttp.summary, /docs\.apimart\.ai/, "apimart-http 的 summary 要带官方文档地址");
+  assert.ok(PROTOCOL_ID_SET.has("apimart"), "协议宇宙里必须有 apimart");
 });
 
 /* ══ 2 模型清单与能力口径 ══ */
@@ -140,8 +163,8 @@ test("③ 模型 id / 能力取自调研：能力值都是 dotted 官方口径�
       assert.match(preset.notes, /catalog/, preset.id + " catalog 预设要在 notes 里写明来源");
     }
   }
-  assert.deepEqual(PROVIDER_PRESETS.filter((p) => p.modelsSource === "catalog").map((p) => p.id), ["lovart"]);
-  // 调研的能力 → 模型域能力枚举，只允许落到真实存在的枚举；音频在模型域没有枚举，如实为空。
+  assert.deepEqual(PROVIDER_PRESETS.filter((p) => p.modelsSource === "catalog").map((p) => p.id), ["lovart", "apimart"]);
+  // 调研的能力 → 模型域能力枚举，只允许落到真实存在的枚举；音频与 3D 使用原生枚举。
   assert.deepEqual([...domain.CAPABILITIES], [...MODEL_CAPABILITIES]);
   const ALLOWED = new Set(domain.CAPABILITIES);
   for (const preset of PROVIDER_PRESETS) {
@@ -150,7 +173,7 @@ test("③ 模型 id / 能力取自调研：能力值都是 dotted 官方口径�
       for (const cap of mapPresetCapabilitiesToModelCapabilities(model.capabilities)) assert.ok(ALLOWED.has(cap), preset.id + " 单模型映射越界：" + cap);
     }
   }
-  assert.deepEqual(mapPresetCapabilitiesToModelCapabilities(["audio.tts"]), [], "模型域没有音频能力，不硬塞");
+  assert.deepEqual(mapPresetCapabilitiesToModelCapabilities(["audio.tts"]), ["audio-generation"]);
   assert.deepEqual(mapPresetCapabilitiesToModelCapabilities(["llm.chat.vision", "image.edit"]), ["chat", "vision-input", "image-generation"]);
 });
 

@@ -103,6 +103,7 @@ export function createSeededV28(dir, { now = SEED_NOW } = {}) {
   const dbPath = path.join(dir, "identity.db");
   const store = new IdentityStore({ path: dbPath }).open();
   try {
+    store.connection.exec("PRAGMA user_version = 28");
     if (store.schemaVersion !== 28) throw new Error("夹具期望 v28，实际 " + store.schemaVersion);
     seedStandard(store.connection, { now });
   } finally {

@@ -4,7 +4,7 @@
  */
 const { app, BrowserWindow, WebContentsView, screen, session } = require("electron");
 const path = require("node:path");
-const geometry = require("../../../electron/geometry.cjs");
+const geometry = require("../../../electron/geometry.ts");
 const { safeURL } = require("../../../electron/policy.cjs");
 
 const out = (line) => process.stdout.write(line + "\n");

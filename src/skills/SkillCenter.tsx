@@ -1494,7 +1494,7 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
                   权限声明：读文件 {detail.skill.v2.permissions.readsFiles ? "是" : "否"} · 写文件{" "}
                   {detail.skill.v2.permissions.writesFiles ? "是" : "否"} · 网络{" "}
                   {detail.skill.v2.permissions.network ? "是" : "否"} · 敏感数据{" "}
-                  {detail.skill.v2.permissions.sensitive ? "是" : "否"}
+                  {detail.skill.v2.permissions.sensitive?.length ? "是" : "否"}
                 </p>
               ) : null}
             </section>

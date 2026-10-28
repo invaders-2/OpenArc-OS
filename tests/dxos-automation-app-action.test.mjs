@@ -247,7 +247,7 @@ test("app_action：App 未安装（已禁用）时执行期结构化拒绝，不
 
 // ── ④ 主进程接线（源码级） ───────────────────────────────────────────────
 test("装配契约（源码级）：main.cjs 的 app_action 适配器复用 developer-domain 的工厂", () => {
-  const main = fs.readFileSync(path.join(process.cwd(), "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(process.cwd(), "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes("createDeveloperAppActionAdapter"), "main.cjs 必须复用 createDeveloperAppActionAdapter");
   assert.ok(!/退化为能力清单里的工具声明/.test(main), "main.cjs 不得再保留旧的 tools-only 投影注释");
   // 投影真值只有一处：developer-domain.cjs。

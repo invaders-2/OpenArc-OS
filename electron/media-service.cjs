@@ -1044,6 +1044,21 @@ function createMediaBundle(options = {}) {
         const projectId = await ensureProject(payload, userId);
         return { projectId: projectId };
       }
+      case "media/draft/get": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return { draft: mediaStore.getVideoProjectDraft(projectId, userId) };
+      }
+      case "media/draft/latest": return { draft: mediaStore.latestVideoProjectDraft(userId) };
+      case "media/draft/save": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return { draft: mediaStore.saveVideoProjectDraft({ projectId, ownerId: userId, quick: payload.quick, timeline: payload.timeline, sources: payload.sources, expectedVersion: payload.expectedVersion }) };
+      }
+      case "media/draft/import-legacy": {
+        const projectId = await ensureProject(payload, userId);
+        return mediaStore.importVideoProjectDraft({ projectId, ownerId: userId, quick: payload.quick, timeline: payload.timeline, sources: payload.sources });
+      }
       case "media/asset/save": {
         const projectId = requireStr(payload.projectId, 80);
         if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
@@ -1454,9 +1469,17 @@ function createMediaBundle(options = {}) {
         }) };
       }
       case "media/public-media/upload": {
-        return { media: await mediaPublicMedia.uploadPublicMedia({
-          fileName: requireStr(payload.fileName, 255),
-          uploader: typeof options.publicMediaUploader === "function" ? options.publicMediaUploader : null,
+        // uploader 只从宿主装配注入；命令分支不认任何图床域名。
+        const uploader = typeof options.publicMediaUploader === "function" ? options.publicMediaUploader : null;
+        const fileName = requireStr(payload.fileName, 255);
+        if (fileName) return { media: await mediaPublicMedia.uploadPublicMedia({ fileName, uploader }) };
+        const name = requireStr(payload.name, 255);
+        if (!name) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "fileName 或 name 必填");
+        return { media: await mediaPublicMedia.uploadPublicMediaBytes({
+          fileName: name,
+          bytes: decodeBase64(payload, "base64"),
+          mime: requireStr(payload.mime, 120),
+          uploader,
         }) };
       }
 

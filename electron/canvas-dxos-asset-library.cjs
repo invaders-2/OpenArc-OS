@@ -30,7 +30,7 @@ const LIBRARY_FORMAT = "dx-canvas-asset-library/v1";
 const DEFAULT_NAME = "我的资产库";
 const MAX_ITEMS = 1000;
 const MAX_ASSET_BYTES = 8 * 1024 * 1024;
-const ITEM_KINDS = Object.freeze(["asset", "prompt", "workflow"]);
+const ITEM_KINDS = Object.freeze(["asset", "prompt", "workflow", "character"]);
 // task-25 A10：DX 的 visibility private|public|restricted + publicAccess read|edit + 逐成员 ACL。
 // ORGANIZATION 保留为既有兼容档（同组织只读）。
 const LIBRARY_VISIBILITIES = Object.freeze(["PRIVATE", "ORGANIZATION", "PUBLIC", "RESTRICTED"]);
@@ -106,6 +106,30 @@ class CanvasAssetLibraryService {
     this.tempDir = tempDir;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.logger = logger;
+    this.folderRegistryFile = process.env.OPENARC_ASSET_FOLDERS_FILE || path.join(os.homedir(), "Library", "Application Support", "openarc-os", "dxos", "asset-library-folders.json");
+    this.customFolders = this.#readFolderRegistry();
+  }
+
+  #readFolderRegistry() {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.folderRegistryFile, "utf8"));
+      const map = new Map();
+      for (const [libraryId, names] of Object.entries(parsed && typeof parsed === "object" ? parsed : {})) {
+        if (Array.isArray(names)) map.set(libraryId, new Set(names.filter((name) => typeof name === "string" && name.trim()).map((name) => name.slice(0, 60))));
+      }
+      return map;
+    } catch { return new Map(); }
+  }
+
+  #writeFolderRegistry() {
+    try {
+      fs.mkdirSync(path.dirname(this.folderRegistryFile), { recursive: true, mode: 0o700 });
+      const out = {};
+      for (const [libraryId, names] of this.customFolders) out[libraryId] = [...names];
+      const temp = this.folderRegistryFile + ".tmp";
+      fs.writeFileSync(temp, JSON.stringify(out), { mode: 0o600 });
+      fs.renameSync(temp, this.folderRegistryFile);
+    } catch (error) { try { this.logger?.("[asset-folders] persist failed " + String((error && error.message) || error)); } catch { /* ignore */ } }
   }
 
   /** 晚绑定 dxos-fs 实例（宿主在 createDxosFsAdapter 之后调用；未注入时文件节点同步结构化不可用）。 */
@@ -172,8 +196,15 @@ class CanvasAssetLibraryService {
     };
   }
 
-  #itemView(row) {
+  #itemView(row, context = null) {
     const resourceRef = row.resource_ref || null;
+    const readUrl = (ref) => {
+      if (!ref || !context || !this.canvasService || typeof this.canvasService.readAsset !== "function") return null;
+      const read = this.canvasService.readAsset({ context, ref: "openarc-asset:" + ref });
+      return read && read.ok && read.dataUrl ? String(read.dataUrl) : null;
+    };
+    const url = readUrl(resourceRef);
+    const previewUrl = readUrl(row.cover_ref) || url;
     return {
       id: row.id,
       libraryId: row.library_id,
@@ -199,6 +230,8 @@ class CanvasAssetLibraryService {
       ...(row.media_kind ? { mediaKind: row.media_kind } : {}),
       ...(resourceRef ? { resourceRef: "openarc-asset:" + resourceRef, media: { resourceId: resourceRef, name: row.title, mime: row.mime || "application/octet-stream", kind: row.media_kind || "file", bytes: row.bytes == null ? null : Number(row.bytes) } } : {}),
       ...(row.cover_ref ? { coverRef: "openarc-asset:" + row.cover_ref } : {}),
+      ...(url ? { url } : {}),
+      ...(previewUrl ? { previewUrl } : {}),
       ...(row.workflow_json ? { workflow: JSON.parse(row.workflow_json) } : {}),
       ...(row.versions_json ? { versions: JSON.parse(row.versions_json) } : {}),
       referenceCount: resourceRef ? this.store.countResourceRefs(resourceRef) : 0,
@@ -221,7 +254,7 @@ class CanvasAssetLibraryService {
     });
     const seeded = this.#seedSystemPrompts(library, actor.user.id);
     const access = this.#access(library, actor.user);
-    return ok({ library: this.#libraryView(library, access), items: seeded.items.map((row) => this.#itemView(row)) });
+    return ok({ library: this.#libraryView(library, access), items: seeded.items.map((row) => this.#itemView(row, context)) });
   }
 
   createLibrary({ context, name = DEFAULT_NAME, visibility = "PRIVATE", publicAccess = "READ" } = {}) {
@@ -319,8 +352,138 @@ class CanvasAssetLibraryService {
     this.#seedSystemPrompts(loaded.library, loaded.user.id);
     return ok({
       library: this.#libraryView(loaded.library, loaded.access),
-      items: this.store.itemsOfLibrary(loaded.library.id).map((row) => this.#itemView(row)),
+      items: this.store.itemsOfLibrary(loaded.library.id).map((row) => this.#itemView(row, context)),
     });
+  }
+
+  // ---------------------------------------------------------------- 文件夹（复用 group_name）
+  #folderNames(libraryId) {
+    const names = new Set();
+    for (const row of this.store.itemsOfLibrary(libraryId)) if (row.group_name && row.group_name !== "未分组") names.add(row.group_name);
+    for (const name of this.customFolders.get(libraryId) || []) names.add(name);
+    return [...names];
+  }
+
+  folderList({ context, libraryId: id } = {}) {
+    const loaded = this.#load(context, id, { needEdit: false });
+    if (!loaded.ok) return loaded;
+    const counts = new Map();
+    for (const row of this.store.itemsOfLibrary(loaded.library.id)) { const name = row.group_name || "未分组"; counts.set(name, (counts.get(name) || 0) + 1); }
+    return ok({ folders: this.#folderNames(loaded.library.id).map((name) => ({ name, count: counts.get(name) || 0, custom: (this.customFolders.get(loaded.library.id) || new Set()).has(name) })) });
+  }
+
+  folderCreate({ context, libraryId: id, name } = {}) {
+    const loaded = this.#load(context, id, { needEdit: true });
+    if (!loaded.ok) return loaded;
+    const folder = str(name, 60).trim();
+    if (!folder || folder === "全部" || folder === "未分组") return fail("INVALID_INPUT", "folder-name");
+    const names = this.#folderNames(loaded.library.id);
+    if (names.includes(folder)) return fail("CONFLICT", "folder-exists");
+    const set = this.customFolders.get(loaded.library.id) || new Set();
+    set.add(folder); this.customFolders.set(loaded.library.id, set); this.#writeFolderRegistry();
+    return ok({ folder: { name: folder, count: 0, custom: true } });
+  }
+
+  folderRename({ context, libraryId: id, from, to } = {}) {
+    const loaded = this.#load(context, id, { needEdit: true });
+    if (!loaded.ok) return loaded;
+    const oldName = str(from, 60).trim(); const nextName = str(to, 60).trim();
+    if (!oldName || !nextName || nextName === "全部" || nextName === "未分组") return fail("INVALID_INPUT", "folder-name");
+    const names = this.#folderNames(loaded.library.id);
+    if (!names.includes(oldName)) return fail("NOT_FOUND", "folder");
+    if (oldName !== nextName && names.includes(nextName)) return fail("CONFLICT", "folder-exists");
+    for (const row of this.store.itemsOfLibrary(loaded.library.id)) if ((row.group_name || "未分组") === oldName) this.store.updateItem(row.id, { group: nextName });
+    const set = this.customFolders.get(loaded.library.id) || new Set();
+    if (set.delete(oldName)) set.add(nextName);
+    this.customFolders.set(loaded.library.id, set); this.#writeFolderRegistry();
+    return ok({ from: oldName, to: nextName });
+  }
+
+  folderMove({ context, libraryId: id, itemId, folder } = {}) {
+    const loaded = this.#load(context, id, { needEdit: true });
+    if (!loaded.ok) return loaded;
+    const row = this.store.itemById(str(itemId, 80));
+    if (!row || row.library_id !== loaded.library.id) return fail("NOT_FOUND", "item");
+    const target = str(folder, 60).trim() || "未分组";
+    if (target !== "未分组" && !this.#folderNames(loaded.library.id).includes(target)) return fail("INVALID_INPUT", "folder-not-found");
+    const updated = this.store.updateItem(row.id, { group: target });
+    return ok({ item: this.#itemView(updated || row) });
+  }
+
+  // ---------------------------------------------------------------- AI 角色（条目 kind=character）
+  #characterView(row) {
+    let data = {};
+    try { data = row.workflow_json ? JSON.parse(row.workflow_json) : {}; } catch { data = {}; }
+    return {
+      id: row.id,
+      name: row.title || "",
+      description: typeof data.description === "string" ? data.description : "",
+      prompt: row.prompt || "",
+      referenceUrls: Array.isArray(data.referenceUrls) ? data.referenceUrls : [],
+      createdAt: Number(row.created_at || 0),
+      updatedAt: Number(row.updated_at || 0),
+    };
+  }
+
+  #characterData(input, current = {}) {
+    const nameRaw = String(input && input.name !== undefined ? input.name : current.name || "").trim();
+    if (!nameRaw || nameRaw.length > 80) return fail("INVALID_INPUT", "character-name");
+    const name = nameRaw;
+    const descriptionRaw = String(input && input.description !== undefined ? input.description : (current.description || ""));
+    if (descriptionRaw.length > 500) return fail("INVALID_INPUT", "character-description");
+    const description = descriptionRaw.trim();
+    const promptRaw = String(input && input.prompt !== undefined ? input.prompt : (current.prompt || ""));
+    if (promptRaw.length > 4000) return fail("INVALID_INPUT", "character-prompt");
+    const prompt = promptRaw.trim();
+    const urls = Array.isArray(input && input.referenceUrls) ? input.referenceUrls : (Array.isArray(current.referenceUrls) ? current.referenceUrls : []);
+    const referenceUrls = [];
+    for (const raw of urls.slice(0, 12)) {
+      const url = str(raw, 2000).trim();
+      if (!url) continue;
+      if (!/^https?:\/\//i.test(url) && !url.startsWith("openarc-asset:")) return fail("INVALID_INPUT", "character-reference-url");
+      referenceUrls.push(url);
+    }
+    return ok({ name, description, prompt, referenceUrls });
+  }
+
+  characterCreate({ context, libraryId: id, name, description = "", prompt = "", referenceUrls = [] } = {}) {
+    const loaded = this.#load(context, id, { needEdit: true });
+    if (!loaded.ok) return loaded;
+    const normalized = this.#characterData({ name, description, prompt, referenceUrls });
+    if (!normalized.ok) return normalized;
+    const row = this.store.insertItem({
+      id: itemId(), libraryId: loaded.library.id, kind: "character", title: normalized.name,
+      prompt: normalized.prompt, group: "AI 角色", workflowJson: JSON.stringify({ description: normalized.description, referenceUrls: normalized.referenceUrls }),
+      createdBy: loaded.user.id, createdAt: this.#now(), updatedAt: this.#now(),
+    });
+    return ok({ character: this.#characterView(row) });
+  }
+
+  characterList({ context, libraryId: id } = {}) {
+    const loaded = this.#load(context, id, { needEdit: false });
+    if (!loaded.ok) return loaded;
+    return ok({ characters: this.store.itemsOfLibrary(loaded.library.id).filter((row) => row.kind === "character").map((row) => this.#characterView(row)) });
+  }
+
+  characterUpdate({ context, libraryId: id, itemId: targetId, name, description, prompt, referenceUrls } = {}) {
+    const loaded = this.#load(context, id, { needEdit: true });
+    if (!loaded.ok) return loaded;
+    const row = this.store.itemById(str(targetId, 80));
+    if (!row || row.library_id !== loaded.library.id || row.kind !== "character") return fail("NOT_FOUND", "character");
+    const current = this.#characterView(row);
+    const normalized = this.#characterData({ name, description, prompt, referenceUrls }, current);
+    if (!normalized.ok) return normalized;
+    const updated = this.store.updateItem(row.id, { title: normalized.name, prompt: normalized.prompt, workflowJson: JSON.stringify({ description: normalized.description, referenceUrls: normalized.referenceUrls }) });
+    return ok({ character: this.#characterView(updated || row) });
+  }
+
+  characterDelete({ context, libraryId: id, itemId: targetId } = {}) {
+    const loaded = this.#load(context, id, { needEdit: true });
+    if (!loaded.ok) return loaded;
+    const row = this.store.itemById(str(targetId, 80));
+    if (!row || row.library_id !== loaded.library.id || row.kind !== "character") return fail("NOT_FOUND", "character");
+    this.store.deleteItem(row.id);
+    return ok({ removed: true });
   }
 
   #seedSystemPrompts(library, userId) {
@@ -829,7 +992,7 @@ class CanvasAssetLibraryService {
     let rows = this.store.itemsOfLibrary(loaded.library.id);
     if (kind && ITEM_KINDS.includes(kind)) rows = rows.filter((row) => row.kind === kind);
     if (q) rows = rows.filter((row) => (row.title + " " + (row.prompt || "")).toLowerCase().includes(q));
-    return ok({ items: rows.map((row) => this.#itemView(row)) });
+    return ok({ items: rows.map((row) => this.#itemView(row, context)) });
   }
 
   /** 引用：返回稳定 ResourceRef 与当前引用计数（源 :229-243 的 media 字段在本仓是 ResourceRef）。 */

@@ -28,7 +28,7 @@ const requireFromRoot = createRequire(path.join(ROOT, "package.json"));
 
 const PROBE_PATH = path.join(ROOT, "experiments", "dxos-e2e-write", "run-all.mjs");
 const PRELOAD_PATH = path.join(ROOT, "electron", "preload.cjs");
-const MAIN_PATH = path.join(ROOT, "electron", "main.cjs");
+const MAIN_PATH = path.join(ROOT, "electron", "runtime-composition.cjs");
 
 /** 在 vm 沙箱里执行真实 preload.cjs（假 electron），返回 contextBridge 真实暴露的 openarc 对象。 */
 function loadExposedPreload() {

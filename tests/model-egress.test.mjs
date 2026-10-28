@@ -331,7 +331,7 @@ test("S1 · MODEL_COMMANDS 登记 model/proxy/get|set；未知能力命令仍被
 });
 
 test("S2 · main.cjs 只把 egress 注入模型域；在线更新仍用原 fetch；不动 globalThis", () => {
-  const main = read("electron/main.cjs");
+  const main = read("electron/runtime-composition.cjs");
   assert.ok(main.includes('require("./net-egress.cjs")'));
   assert.ok(main.includes("identity.modelService.fetchImpl = modelEgressFetch"));
   assert.ok(main.includes("providerProtocolService.fetchImpl = modelEgressFetch"));

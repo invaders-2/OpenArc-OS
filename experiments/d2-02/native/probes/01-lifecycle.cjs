@@ -22,8 +22,8 @@ const path = require("node:path");
 const ROOT = path.join(__dirname, "..", "..", "..", "..");
 const { NativeViewController, VIEW_RADIUS } = require(path.join(ROOT, "electron", "native-view-controller.cjs"));
 const occlusion = require(path.join(ROOT, "electron", "occlusion.cjs"));
-const manager = require(path.join(ROOT, "electron", "window-manager.cjs"));
-const domain = require(path.join(ROOT, "electron", "window-domain.cjs"));
+const manager = require(path.join(ROOT, "electron", "window-manager.ts"));
+const domain = require(path.join(ROOT, "electron", "window-domain.ts"));
 
 const W = 1100;
 const H = 760;
