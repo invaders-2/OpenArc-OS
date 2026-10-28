@@ -35,6 +35,8 @@ export type UIState = {
   mini: boolean | null;
   hideEdges: boolean;
   snap: boolean;
+  /** 拖动节点时显示对齐参考线并吸附（按住 Alt 临时关闭） */
+  guides: boolean;
   cmtMode: boolean;
   pick: string | null;
   /** 「替换」模式：点画布上的节点 / 素材库里的素材，替换这个节点的当前版本 */
@@ -97,7 +99,7 @@ export class CanvasStore {
     this.state = {
       canvasId, name, doc: { nodes: [], edges: [], comments: [] }, version: null, saving: "idle", loaded: false,
       view: { x: 0, y: 0, k: 1 },
-      ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, theme: "dark", themePref: pref, leftDrag },
+      ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, guides: true, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, theme: "dark", themePref: pref, leftDrag },
       runtime: {}, runs: [], models: [], toasts: [], undo: [], redo: [],
       collab: { clientId: null, transport: null, peers: [] },
     };

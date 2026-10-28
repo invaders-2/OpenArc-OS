@@ -149,7 +149,7 @@ function registerFilesIpc(context) {
     return files.trash(String(payload?.folderId ?? ""), String(payload?.id ?? ""), payload?.groupId);
   });
   ipcMain.handle("files:trashList", async (event) => {
-    if (!trusted(e)) throw Error("Forbidden");
+    if (!trusted(event)) throw Error("Forbidden");
     return files.listTrash();
   });
   ipcMain.handle("files:trashRestore", async (e, payload) => {
@@ -161,13 +161,13 @@ function registerFilesIpc(context) {
     return files.purge(String(payload?.id ?? ""));
   });
   ipcMain.handle("files:trashEmpty", async (event) => {
-    if (!trusted(e)) throw Error("Forbidden");
+    if (!trusted(event)) throw Error("Forbidden");
     return files.empty();
   });
 
   const video = createVideoService();
   ipcMain.handle("video:status", async (event) => {
-    if (!trusted(e)) throw Error("Forbidden");
+    if (!trusted(event)) throw Error("Forbidden");
     return video.status();
   });
   ipcMain.handle("video:probe", async (e, payload) => {
@@ -201,7 +201,7 @@ function registerFilesIpc(context) {
     }
   });
   ipcMain.handle("video:cancel", async (event) => {
-    if (!trusted(e)) throw Error("Forbidden");
+    if (!trusted(event)) throw Error("Forbidden");
     return video.cancel();
   });
 
@@ -243,7 +243,7 @@ function registerFilesIpc(context) {
   });
 
   ipcMain.handle("system:info", async (event) => {
-    if (!trusted(e)) throw Error("Forbidden");
+    if (!trusted(event)) throw Error("Forbidden");
     const os = require("node:os");
     const dataDir = app.getPath("userData");
     let disk = null;

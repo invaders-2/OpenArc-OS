@@ -18,6 +18,7 @@ import { download } from "./menus";
 import { saveNodeToLibrary } from "./Library";
 import { closePop, openPop } from "./overlay";
 import { useAssetUrl } from "./useAsset";
+import { OptimizeButton } from "./OptimizeButton";
 import { useEditorState } from "./editors/registry";
 import { draftToFinal, smartClip, trimToNode } from "../videoTools";
 import { videoAiMenu } from "./VideoTools";
@@ -237,6 +238,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
       <div className="vp-foot">
         <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>
+        <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="vp-audio opt" />
         <button className="vp-model" data-p="model" onClick={(e) => paramPop(ctl, node, "model", e.currentTarget)} title={m?.name || "未配置模型"}>{m?.name || "未配置模型"}</button>
         <span className="vp-between" />
         <span className="vp-vals">
@@ -313,6 +315,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       {foot.length ? <div className={"gp-opts" + (fit ? " fit" : "")} ref={optsRef}>{foot}</div> : null}
       {/* 动作区三个独立元素（不再用一个药丸包住耗时+发送）：同一中线、间距 8、发送不压药丸 */}
       <div className="gp-act">
+        <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="mic opt" />
         <button className="mic" data-p="mic" title="语音输入" onClick={(e) => voice(ctl, node, e.currentTarget, (v) => { setDraft(v); commitPrompt(v); })}><Icon name="mic" size="s" /></button>
         {/* 没配模型时 est 为空：不渲染空药丸（否则看起来像没渲染完），也不占位 */}
         {est ? <span className="est tnum" title="预计耗时">{est}{m?.local ? " · 本机" : ""}</span> : null}

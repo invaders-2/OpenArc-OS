@@ -97,7 +97,7 @@ export interface CanvasBackend {
   /** 图片编辑，返回新版本（原图保留在历史里） */
   editImage(req: EditRequest, onEvent: (e: GenEvent) => void, signal: AbortSignal): Promise<GenOutput>;
   /** Agent / 提示词润色用的对话（流式）；返回完整文本 */
-  chat(req: { canvasId: string; configId?: string; effort?: "auto" | "low" | "high"; messages: ChatMessage[] }, onDelta: (full: string) => void, signal: AbortSignal): Promise<string>;
+  chat(req: { canvasId: string; configId?: string; effort?: "auto" | "low" | "high"; messages: ChatMessage[]; /** 附图（openarc-asset / data / https），只发给能看图的模型 */ images?: string[] }, onDelta: (full: string) => void, signal: AbortSignal): Promise<string>;
   runAgentTask?(req: { goal: string; context: CanvasAgentContext }): Promise<{ ok: boolean; taskId?: string; status?: string; error?: string }>;
   defaultChatModel?(): Promise<string | null>;
   watchAgentTask?(taskId: string, onSnapshot: (snapshot: AgentTaskSnapshot) => void): () => void;

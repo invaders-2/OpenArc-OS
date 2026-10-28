@@ -200,6 +200,7 @@ function Settings({ ctl }: { ctl: Ctl }) {
     {seg("leftdrag", [["select", "框选（右键 / 中键 / 空格拖动平移）"], ["pan", "平移（Shift 拖动框选）"]] as const, ui.leftDrag, (k) => { store.setUI({ leftDrag: k }); save("openarc-canvas-leftdrag", k); })}
     <div className="sec"><span>画布显示</span></div>
     {seg("snap", [["on", "网格吸附"], ["off", "自由拖动"]] as const, ui.snap ? "on" : "off", (k) => store.setUI({ snap: k === "on" }))}
+    {seg("guides", [["on", "对齐参考线（按住 Alt 临时关闭）"], ["off", "不显示参考线"]] as const, ui.guides ? "on" : "off", (k) => store.setUI({ guides: k === "on" }))}
     {seg("mini", [["auto", "小地图：缩小时出现"], ["on", "一直显示"], ["off", "隐藏"]] as const, ui.mini == null ? "auto" : ui.mini ? "on" : "off", (k) => store.setUI({ mini: k === "auto" ? null : k === "on" }))}
     {seg("edges", [["show", "显示连线"], ["hide", "隐藏连线"]] as const, ui.hideEdges ? "hide" : "show", (k) => store.setUI({ hideEdges: k === "hide" }))}
     <div className="sec"><span>批量生成结果（2× / 4×）的保存方式</span></div>

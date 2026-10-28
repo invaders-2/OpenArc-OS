@@ -12,6 +12,7 @@ import { addMenu, blankMenu, nodeMenu, portMenu, onNodeAct } from "./menus";
 import { NodeView } from "./NodeView";
 import { closePop } from "./overlay";
 import { addToStack, hiddenIds, isStack } from "../stack";
+import { bodyBox, snapToGuides, unionBox, type Box, type Guide } from "../snapGuides";
 
 type Drag =
   | { kind: "pan"; sx: number; sy: number; vx: number; vy: number; moved: boolean; /** 右键按下：没拖动就在松开时弹右键菜单 */ menu?: { nodeId: string | null } }
@@ -28,6 +29,9 @@ export function Viewport() {
   const menuAt = useRef(0);
   const [marq, setMarq] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [panning, setPanning] = useState(false);
+  /** 拖动节点时的对齐参考线（世界坐标） */
+  const [guides, setGuidesState] = useState<Guide[]>([]); const guidesRef = useRef(0);
+  const setGuides = (g: Guide[]) => { if (!g.length && !guidesRef.current) return; guidesRef.current = g.length; setGuidesState(g); };
   /** 拖动节点经过的堆叠（松开就放进去） */
   const [dropStack, setDropStack] = useState<string | null>(null); const dropRef = useRef<string | null>(null);
   const stackUnder = (x: number, y: number, moving: Set<string>) => {
@@ -112,7 +116,17 @@ export function Viewport() {
       const p = ctl.toWorld(e.clientX, e.clientY); const dx = p.x - d.start.x, dy = p.y - d.start.y;
       if (!d.moved && Math.abs(dx) + Math.abs(dy) < 3 / st.view.k) return;
       if (!d.moved) { store.snapshot(); d.moved = true; store.setUI({ dragging: true }); }
-      const pos = new Map(d.orig.map((o) => { let x = o.x + dx, y = o.y + dy; if (st.ui.snap) { x = Math.round(x / 20) * 20; y = Math.round(y / 20) * 20; } return [o.id, { x: Math.round(x), y: Math.round(y) }]; }));
+      // 对齐参考线：整批节点的外框去对其它节点的边 / 中线；对上的方向不再做网格吸附
+      let gx = 0, gy = 0, lines: Guide[] = [];
+      if (st.ui.guides && !e.altKey) {
+        const moving = new Set(d.orig.map((o) => o.id)); const hidden = hiddenIds(st.doc.nodes);
+        const box = unionBox(d.orig.flatMap((o) => { const n = store.node(o.id); return n ? [bodyBox({ x: o.x + dx, y: o.y + dy, w: n.w, h: n.h })] : []; }));
+        const others: Box[] = st.doc.nodes.filter((n) => !moving.has(n.id) && !hidden.has(n.id)).map(bodyBox);
+        if (box) { const r = snapToGuides(box, others, 6 / st.view.k); gx = r.dx; gy = r.dy; lines = r.guides; }
+      }
+      const onX = lines.some((g) => g.axis === "x"), onY = lines.some((g) => g.axis === "y");
+      setGuides(lines);
+      const pos = new Map(d.orig.map((o) => { let x = o.x + dx + gx, y = o.y + dy + gy; if (st.ui.snap) { if (!onX) x = Math.round(x / 20) * 20; if (!onY) y = Math.round(y / 20) * 20; } return [o.id, { x: Math.round(x), y: Math.round(y) }]; }));
       store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (pos.has(n.id) ? { ...n, ...pos.get(n.id)! } : n)) }));
       const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
       if (over !== dropRef.current) { dropRef.current = over; setDropStack(over); }
@@ -151,7 +165,7 @@ export function Viewport() {
     }
     if (d.kind === "pan" && !d.moved) { if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur(); store.setUI({ sel: new Set(), edge: null, editCell: null }); }
     if (d.kind === "node" && d.moved) {
-      store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
+      setGuides([]); store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
       const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
       // 拖的是普通分组：只叠分组外单独选中的节点，组里的节点跟着分组走，不拆进叠
       const dragged = new Set(d.orig.map((o) => o.id)); const inDraggedGroup = new Set(d.orig.flatMap((o) => { const g = store.node(o.id); return g && g.kind === "group" ? g.children || [] : []; }));
@@ -227,6 +241,7 @@ export function Viewport() {
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const files = [...(e.dataTransfer?.files || [])]; if (files.length) void addFiles(store, files, ctl.toWorld(e.clientX, e.clientY)); }}>
       <div id="world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${k})` }}>
         <Edges />
+        {guides.map((g, i) => <div key={i} className={"snapguide " + g.axis} style={g.axis === "x" ? { left: g.at, top: g.from, height: g.to - g.from, width: 1.5 / k } : { top: g.at, left: g.from, width: g.to - g.from, height: 1.5 / k }} />)}
         <div id="nodes">
           {(() => { const hidden = hiddenIds(doc.nodes); return doc.nodes.filter((n) => !hidden.has(n.id)); })().sort((a, b) => (a.kind === "group" && !isStack(a) ? 0 : 1) - (b.kind === "group" && !isStack(b) ? 0 : 1)).map((n) => {
             const run = runtime[n.id];

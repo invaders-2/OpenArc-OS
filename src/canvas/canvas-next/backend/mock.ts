@@ -90,7 +90,8 @@ export function createMockBackend(opts: MockOptions = {}): CanvasBackend {
     },
     async chat(req, onDelta, signal) {
       const lc = req.messages[req.messages.length - 1]?.content; const last = typeof lc === "string" ? lc : (lc || []).map((p) => (p.type === "text" ? p.text : "")).join("");
-      const reply = /"kind":"table"/.test(last) ? mockTableJson(last) : "（模拟后端）收到：" + last.slice(0, 80);
+      const sys = req.messages[0]?.role === "system" && typeof req.messages[0].content === "string" ? req.messages[0].content : "";
+      const reply = sys.includes("【OpenArc 提示词优化】") ? mockOptimized(last, req.images?.length || 0) : /"kind":"table"/.test(last) ? mockTableJson(last) : "（模拟后端）收到：" + last.slice(0, 80);
       for (let i = 1; i <= 10; i++) { await sleep(40, signal); onDelta(reply.slice(0, Math.ceil(reply.length * i / 10))); }
       return reply;
     },
@@ -104,6 +105,12 @@ export function createMockBackend(opts: MockOptions = {}): CanvasBackend {
       return { ok: true as const, duration, shots: Array.from({ length: n }, (_, i) => ({ inSec: Math.round(i * step * 100) / 100, outSec: Math.round(Math.min(duration, (i + 1) * step) * 100) / 100 })) };
     },
   };
+}
+
+/** 模拟「优化提示词」：把用户原话扩成一段结构化描述（只用于离线预览） */
+function mockOptimized(user: string, images: number): string {
+  const said = (user.split("用户的提示词：\n")[1] || "").trim() || "根据输入生成画面";
+  return `${said}。主体居中、清晰锐利，背景简洁干净，柔和的侧逆光勾出轮廓，色调统一${images ? `，保持参考图（共 ${images} 张）中产品的外观、颜色与材质不变` : ""}，画面有层次与质感，商业摄影级细节。`;
 }
 
 function mockText(req: GenRequest): string {
