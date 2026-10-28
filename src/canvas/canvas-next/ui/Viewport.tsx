@@ -141,8 +141,9 @@ export function Viewport() {
   const onPointerUp = useCallback((e: React.PointerEvent) => {
     const d = drag.current; if (!d) return; drag.current = null; setPanning(false); const st = store.state;
     if (d.kind === "pan" && d.menu) {
-      if (d.moved) return;
+      // Windows 在 mouseup 之后才发 contextmenu：拖动平移结束也要记下时间，onContext 才会忽略它
       menuAt.current = Date.now();
+      if (d.moved) return;
       const id = d.menu.nodeId && store.node(d.menu.nodeId) ? d.menu.nodeId : null;
       if (id) { if (!st.ui.sel.has(id)) store.setUI({ sel: new Set([id]), edge: null }); nodeMenu(ctl, { x: e.clientX, y: e.clientY }); }
       else blankMenu(ctl, { x: e.clientX, y: e.clientY }, ctl.toWorld(e.clientX, e.clientY));
@@ -152,7 +153,9 @@ export function Viewport() {
     if (d.kind === "node" && d.moved) {
       store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
       const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
-      if (over) addToStack(store, over, d.orig.map((o) => o.id));
+      // 拖的是普通分组：只叠分组外单独选中的节点，组里的节点跟着分组走，不拆进叠
+      const dragged = new Set(d.orig.map((o) => o.id)); const inDraggedGroup = new Set(d.orig.flatMap((o) => { const g = store.node(o.id); return g && g.kind === "group" ? g.children || [] : []; }));
+      if (over) addToStack(store, over, [...dragged].filter((id) => !inDraggedGroup.has(id)));
     }
     if (d.kind === "marq") { setMarq(null); if (!d.moved) store.setUI({ sel: d.base, edge: null, editCell: null }); }
     if (d.kind === "conn") {
