@@ -29,7 +29,8 @@ export function deleteSelection(store: CanvasStore) {
   if (ui.edge) { const e = store.state.doc.edges.find((x) => x.id === ui.edge); store.removeEdge(ui.edge); store.setUI({ edge: null }); if (e) afterInputsChanged(store, e.to); return; }
   if (!ui.sel.size) return;
   // 删除堆叠 = 连同叠里的节点一起删（分组只删框，组内节点留在画布上）
-  const ids = withStackMembers(store, [...ui.sel]); const touched = store.state.doc.edges.filter((e) => ui.sel.has(e.from) && !ui.sel.has(e.to)).map((e) => e.to);
+  const ids = withStackMembers(store, [...ui.sel]); const gone = new Set(ids);
+  const touched = [...new Set(store.state.doc.edges.filter((e) => gone.has(e.from) && !gone.has(e.to)).map((e) => e.to))];
   store.removeNodes(ids); touched.forEach((t) => afterInputsChanged(store, t));
   store.toast(`已删除 ${ids.length} 个节点 · ⌘Z 撤销`);
 }

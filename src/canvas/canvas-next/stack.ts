@@ -35,6 +35,9 @@ export const stackOf = (doc: CanvasDoc, id: string) => doc.nodes.find((n) => isS
 const stackable = (n: CanvasNode | undefined): n is CanvasNode => !!n && n.kind !== "group";
 
 /** 选中的节点收成一叠，叠放在第一个节点的位置 */
+/** 分组 / 堆叠的显示名 */
+export const groupLabel = (n: CanvasNode) => (isStack(n) ? "堆叠" : n.text && n.text !== "分组" ? n.text : "分组");
+
 export function stackSelection(store: CanvasStore): CanvasNode | null {
   const doc = store.state.doc;
   const ids = [...store.state.ui.sel].filter((id) => stackable(store.node(id)) && !stackOf(doc, id));
@@ -64,7 +67,10 @@ export function addToStack(store: CanvasStore, sid: string, ids: string[]) {
   const add = ids.filter((id) => id !== sid && stackable(store.node(id)) && !have.has(id) && !stackOf(doc, id));
   if (!add.length) return 0;
   if (have.size + add.length > STACK_MAX) { store.toast(`一叠最多 ${STACK_MAX} 个节点`); return 0; }
-  store.updateNode(sid, (n) => ({ ...n, children: [...(n.children || []), ...add] }));
+  // 从普通分组里拖进叠：同时移出原分组，一个节点只属于一个容器
+  const addSet = new Set(add);
+  store.mutate((d) => ({ ...d, nodes: d.nodes.map((n) => n.id === sid ? { ...n, children: [...(n.children || []), ...add] }
+    : n.kind === "group" && (n.children || []).some((c) => addSet.has(c)) ? { ...n, children: (n.children || []).filter((c) => !addSet.has(c)) } : n) }), { history: true });
   store.setUI({ sel: new Set([sid]) });
   store.toast(`已放进堆叠：${add.length} 个节点`);
   return add.length;
