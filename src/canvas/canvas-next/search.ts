@@ -7,13 +7,13 @@
 import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { title } from "./actions";
 import { genOf, isGenKind, textOf, type GenKind } from "./model";
-import { isStack } from "./stack";
+import { groupLabel } from "./stack";
 
 export type SearchKind = "all" | GenKind | "table" | "group";
 export type SearchScope = "world" | string;
 
 export const groupsOf = (doc: CanvasDoc) => doc.nodes.filter((n) => n.kind === "group");
-export const groupName = (n: CanvasNode) => (isStack(n) ? "堆叠" : n.text && n.text !== "分组" ? n.text : "分组");
+export const groupName = groupLabel;
 
 /** 分组里的全部节点 id（含嵌套分组的成员） */
 export function membersOf(doc: CanvasDoc, gid: string): Set<string> {

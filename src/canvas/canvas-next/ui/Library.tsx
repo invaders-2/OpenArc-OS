@@ -53,8 +53,8 @@ export function LibrarySection({ q }: { q: string }) {
     void cmd({ type: "canvas/assetLibrary/folderList", libraryId: libId }).then((r) => setFolders(r && r.ok ? (r.folders || []) : [])).catch(() => setFolders([]));
     setBusy(true); void cmd({ type: "canvas/assetLibrary/get", libraryId: libId }).then((r) => { if (!r || !r.ok) throw new Error(String(r?.error || "")); setItems(r.items || []); }).catch(() => setErr("读取资产库失败")).finally(() => setBusy(false));
   }, [cmd, tab, libId, q, tick]);
-  if (!cmd) return <div className="sec"><span>资源库</span><span className="lg-dim">桌面版可用</span></div>;
   useEffect(() => { setFolder("全部"); }, [libId, tab]);
+  if (!cmd) return <div className="sec"><span>资源库</span><span className="lg-dim">桌面版可用</span></div>;
   const inFolder = (it: Item) => folder === "全部" || (folder === "未分组" ? !it.group || it.group === "未分组" : it.group === folder);
   const shown = tab === "res" ? [] : items.filter((it) => inFolder(it) && it.kind !== "character" && (!q || [it.title, it.prompt].join(" ").includes(q)));
   const newFolder = (anchor: Element) => openPop(anchor, (close) => <FolderName title="新建文件夹" onDone={async (name) => {

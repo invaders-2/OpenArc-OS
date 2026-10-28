@@ -102,9 +102,10 @@ const INLINE_FALLBACK_MAX = 2 * 1024 * 1024;
 
 /** 上传图片：新建节点，或填进指定节点，或作为某节点的输入 */
 /** 文档上传（TapNow：文档作为文本输入）：纯文本类直接读，docx / xlsx 交给桌面端抽文本 */
-const DOC_EXT = /\.(txt|md|markdown|csv|tsv|json|ya?ml|xml|html?|srt|vtt|log|docx|xlsx|xlsm|pdf)$/i;
+// PDF 正文暂不能解析（主进程会如实拒绝），所以不在可选类型里；拖进来时按「不支持的文件」提示
+const DOC_EXT = /\.(txt|md|markdown|csv|tsv|json|ya?ml|xml|html?|srt|vtt|log|docx|xlsx|xlsm)$/i;
 const PLAIN_EXT = /\.(txt|md|markdown|csv|tsv|json|ya?ml|xml|html?|srt|vtt|log)$/i;
-export const DOC_ACCEPT = ".txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.srt,.vtt,.docx,.xlsx,.pdf";
+export const DOC_ACCEPT = ".txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.srt,.vtt,.docx,.xlsx";
 export const isDocument = (f: { name: string; type: string }) => DOC_EXT.test(f.name) || /^text\//.test(f.type) || f.type === "application/json";
 export const DOC_MAX_CHARS = 60000;
 export async function documentText(store: CanvasStore, f: File): Promise<{ text: string; truncated: boolean } | { error: string }> {
@@ -113,7 +114,7 @@ export async function documentText(store: CanvasStore, f: File): Promise<{ text:
     const raw = await f.text().catch(() => null); if (raw == null) return { error: "读取失败：" + f.name };
     const text = raw.replace(/\0/g, "").trim(); return { text: text.slice(0, DOC_MAX_CHARS), truncated: text.length > DOC_MAX_CHARS };
   }
-  if (!store.backend.extractDocument) return { error: `${f.name}：浏览器里只能读纯文本文档，docx / xlsx 请在桌面版上传` };
+  if (!store.backend.extractDocument) return { error: `${f.name}：网页预览里只能读纯文本文档，docx / xlsx 请在桌面版上传` };
   const buf = await f.arrayBuffer().catch(() => null);
   if (!buf) return { error: "读取失败：" + f.name };
   const bytes = new Uint8Array(buf); let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -137,7 +138,7 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
   for (const f of files) {
     const kind: GenKind | null = f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : null;
     if (!kind && isDocument(f)) { const id = await addDocument(store, f, { x: at.x + dx, y: at.y }); if (id) { made.push(id); dx += 360; if (opts.linkTo && store.node(opts.linkTo)) connect(store, id, opts.linkTo, { quiet: true, select: false }); } continue; }
-    if (!kind) { store.toast(`不支持的文件：${f.name}`); continue; }
+    if (!kind) { store.toast(/\.pdf$/i.test(f.name) ? `${f.name}：暂不能读取 PDF 正文，请另存为 docx 或文本后上传` : `不支持的文件：${f.name}`, 5000); continue; }
     if (f.size > (kind === "image" ? 20 : 200) * 1024 * 1024) { store.toast(`${f.name} 超过 ${kind === "image" ? 20 : 200}MB，未添加`); continue; }
     const dataUrl = await new Promise<string>((r, j) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result)); fr.onerror = () => j(fr.error); fr.readAsDataURL(f); }).catch(() => "");
     if (!dataUrl) { store.toast("读取失败：" + f.name); continue; }
