@@ -638,7 +638,11 @@ export function createBridgeBackend(): CanvasBackend {
         throw error;
       }
     },
-    chat(req, onDelta, signal) { return chatInner({ canvasId: req.canvasId, configId: req.configId, effort: req.effort, messages: req.messages }, onDelta, signal); },
+    async chat(req, onDelta, signal) {
+      // 附图一律内嵌成压缩后的 data URL：不走第三方图床，也就不需要上传授权
+      const images = await Promise.all((req.images || []).map(async (u) => { const d = await toDataUrl(u); return d.startsWith("data:") && d.length * .75 > FALLBACK_MAX ? compressImage(d) : d; }));
+      return chatInner({ canvasId: req.canvasId, configId: req.configId, effort: req.effort, messages: req.messages, images }, onDelta, signal);
+    },
     async runAgentTask(req) {
       const cmd = oa()?.task?.command;
       if (!cmd) return { ok: false, error: "TASK_UNAVAILABLE" };

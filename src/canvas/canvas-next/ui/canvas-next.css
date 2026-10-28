@@ -1476,3 +1476,11 @@
 .cn-root .fname{display:flex;flex-direction:column;gap:6px;padding:4px 6px 6px;min-width:200px}
 .cn-root .fname input{font-size:12.5px;padding:6px 8px;border-radius:8px;background:var(--sunken);border:0;outline:0;color:var(--fg)}
 .cn-root .fname small{color:var(--bad);font-size:11.5px}
+
+/* 拖动节点时的对齐参考线 */
+.cn-root .snapguide{position:absolute;background:#ff2d55;pointer-events:none;z-index:6;}
+/* 优化提示词按钮：生成中转圈，点一下停止 */
+.cn-root .opt.busy{color:var(--fg);background:var(--hover);}
+.cn-root .opt-spin{width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:cn-opt-spin .8s linear infinite;}
+@keyframes cn-opt-spin{to{transform:rotate(360deg);}}
+@media (prefers-reduced-motion:reduce){.cn-root .opt-spin{animation-duration:2.4s;}}
