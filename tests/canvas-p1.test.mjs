@@ -123,10 +123,14 @@ test("C4 Agent 从顶栏移到右下 orb：悬停名称 + 点击开面板", () =
 
 test("C5 替换按钮不挡轮播/徽标/收藏：位置错开", () => {
   const css = read("src/canvas/canvas-next/ui/canvas-next.css");
-  assert.match(css, /\.cn-root \.node-replace\{position:absolute;left:50%;top:8px;/);
+  // 替换与版本切换同在右上角一行（.ntr 横排），徽标在左上并限宽截断，收藏在右上第二行
+  assert.match(css, /\.cn-root \.ntr\{position:absolute;right:8px;top:8px;display:flex;/);
+  assert.match(css, /\.cn-root \.node-replace\{position:static;/);
+  assert.match(css, /\.cn-root \.vstrip\{position:static;/);
   assert.match(css, /\.cn-root \.nbadges\{position:absolute;left:8px;top:8px;/);
+  assert.match(css, /\.cn-root \.nbadges\{max-width:calc\(100% - 84px\);/);
   assert.match(css, /\.cn-root \.favstar\{position:absolute;left:auto;right:8px;top:34px;/);
-  assert.match(css, /\.cn-root \.vstrip\{position:absolute;right:8px;top:8px;/);
+  assert.match(read("src/canvas/canvas-next/ui/NodeView.tsx"), /<div className="ntr">/);
 });
 
 test("C6 HostActions 暴露 openApp，画布入口把 onOpenApp 转进去", () => {

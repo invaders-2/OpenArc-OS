@@ -15,10 +15,16 @@ const emit = () => ls.forEach((l) => l());
 const sub = (l: () => void) => { ls.add(l); return () => { ls.delete(l); }; };
 
 export function openPop(anchor: Element | { x: number; y: number }, render: (close: () => void) => ReactNode, dir: "down" | "up" | "right" = "down", align: "left" | "right" = "left", cls?: string) {
-  pop = { key: ++seq, anchor, render, dir, align, cls }; emit();
+  markAnchor(null); pop = { key: ++seq, anchor, render, dir, align, cls }; markAnchor(anchor); emit();
+}
+/** 弹层打开期间，锚点按钮自己的悬停提示（data-tip）不再显示，免得压在弹层边上 */
+let marked: Element | null = null;
+function markAnchor(a: Element | { x: number; y: number } | null) {
+  if (marked) { marked.removeAttribute("data-pop-anchor"); marked = null; }
+  if (a instanceof Element) { a.setAttribute("data-pop-anchor", ""); marked = a; }
 }
 export function closePop() {
-  if (!pop || pop.closing) return; const k = pop.key; pop = { ...pop, closing: true }; emit();
+  if (!pop || pop.closing) return; const k = pop.key; pop = { ...pop, closing: true }; markAnchor(null); emit();
   setTimeout(() => { if (pop && pop.key === k) { pop = null; emit(); } }, 130);
 }
 export const popOpen = () => !!pop && !pop.closing;
@@ -41,16 +47,19 @@ function Popover({ st }: { st: NonNullable<PopState> }) {
   useLayoutEffect(() => {
     const el = ref.current!;
     const measure = () => {
-      const pr = el.getBoundingClientRect();
+      // 量内容的自然尺寸（被限高时 scrollHeight 仍是完整高度），避免限高 ↔ 放开来回抖
+      const b = el.getBoundingClientRect(); const pr = { x: b.left, y: b.top, width: Math.max(b.width, el.scrollWidth), height: Math.max(b.height, el.scrollHeight) };
       const anchor: PopRect = st.anchor instanceof Element
         ? (() => { const r = st.anchor.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()
         : { x: st.anchor.x, y: st.anchor.y, width: 0, height: 0 };
       const placed = placePopover({ anchor, popup: pr, viewport: { width: innerWidth, height: innerHeight }, dir: st.dir, align: st.align, margin: 8, gap: 8 });
-      setPos({ x: placed.x, y: placed.y, origin: placed.origin, menu: placed.menu, maxWidth: placed.maxWidth, maxHeight: placed.maxHeight, scroll: placed.scrollX || placed.scrollY });
+      setPos((prev) => prev && prev.x === placed.x && prev.y === placed.y && prev.maxHeight === placed.maxHeight && prev.maxWidth === placed.maxWidth && prev.scroll === (placed.scrollX || placed.scrollY) ? prev : { x: placed.x, y: placed.y, origin: placed.origin, menu: placed.menu, maxWidth: placed.maxWidth, maxHeight: placed.maxHeight, scroll: placed.scrollX || placed.scrollY });
     };
     measure();
+    // 内容异步变化（画布列表、模型列表加载完）时重新定位，不能沿用第一次量到的高度把后来的内容裁掉
+    const ro = new ResizeObserver(() => measure()); ro.observe(el);
     window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
   }, [st]);
   // 弹层外按下关闭（按在锚点上交给锚点自己的 onClick 切换）
   useLayoutEffect(() => {
@@ -64,7 +73,8 @@ function Popover({ st }: { st: NonNullable<PopState> }) {
     <div id="pop" ref={ref} className={(st.closing ? "closing" : "") + (pos?.menu ? " menu" : "") + (st.cls ? " " + st.cls : "")}
       style={{
         left: pos?.x ?? -9999, top: pos?.y ?? -9999, transformOrigin: pos?.origin, visibility: pos ? undefined : "hidden",
-        maxWidth: pos?.maxWidth, maxHeight: pos?.maxHeight, overflow: pos?.scroll ? "auto" : undefined,
+        // 只在放不下时才限制尺寸并滚动；放得下就不写死高度
+        maxWidth: pos?.scroll ? pos.maxWidth : undefined, maxHeight: pos?.scroll ? pos.maxHeight : undefined, overflow: pos?.scroll ? "auto" : undefined,
       }}
       onPointerDown={(e) => e.stopPropagation()}>
       {st.render(closePop)}

@@ -119,7 +119,12 @@
 .cn-root.connecting .pz,.cn-root .node.running .pz.in{pointer-events:none;}
 .cn-root.connecting .node:not(.noconn) .pz.in{pointer-events:auto;}
 .cn-root.connecting .node.drop .pz.in .port{color:var(--hi);border-color:var(--hi);transform:scale(1.12);}
-.cn-root .vstrip{position:absolute;right:8px;top:8px;display:flex;align-items:center;gap:2px;padding:2px;border-radius:8px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);font-size:11px;color:#fff;}
+.cn-root .ntr{position:absolute;right:8px;top:8px;display:flex;align-items:center;gap:6px;z-index:3;}
+.cn-root .ntr:empty{display:none;}
+.cn-root .nbody:has(.vstrip) .nbadges{max-width:calc(100% - 170px);}
+/* 右上角已有「2/2」版本切换时，左上不再重复「第 2/2 版」 */
+.cn-root .nbody:has(.vstrip) .nb.ver{display:none;}
+.cn-root .vstrip{position:static;display:flex;align-items:center;gap:2px;padding:2px;border-radius:8px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);font-size:11px;color:#fff;}
 .cn-root .vstrip button{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;}
 .cn-root .vstrip button:hover{background:rgba(255,255,255,.14);}
 .cn-root .vstrip .vnum{padding:0 4px;border-radius:5px;line-height:16px;}
@@ -149,6 +154,9 @@
 .cn-root [data-tip]:hover::after{opacity:1;visibility:visible;transition:opacity var(--d-feedback) var(--e-std) .5s,visibility 0s linear .5s;}
 .cn-root .tipR[data-tip]::after{left:calc(100% + 10px);top:50%;bottom:auto;transform:translateY(-50%);}
 .cn-root .tipB[data-tip]::after{top:calc(100% + 8px);bottom:auto;}
+.cn-root [data-pop-anchor][data-tip]::after{opacity:0!important;visibility:hidden!important;transition:none!important;}
+/* 贴着左边缘的按钮：提示左对齐，不出屏 */
+.cn-root #zb .cap>.ib:first-child[data-tip]::after{left:0;transform:none;}
 .cn-root #tl{left:max(16px,env(safe-area-inset-left,0px));top:calc(16px + env(safe-area-inset-top,0px));height:40px;display:flex;align-items:center;gap:8px;padding:0 10px 0 6px;}
 .cn-root #tl .logo{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;}
 .cn-root #tl .sep{width:1px;height:16px;background:var(--line);}
@@ -175,6 +183,8 @@
 .cn-root #help{width:40px;height:40px;border-radius:50%;}
 .cn-root #mini{left:max(16px,env(safe-area-inset-left,0px));bottom:calc(66px + env(safe-area-inset-bottom,0px));width:220px;height:140px;border-radius:12px;overflow:hidden;cursor:pointer;}
 .cn-root #mini canvas{width:100%;height:100%;display:block;}
+/* 矮窗口里左侧竖排工具栏会伸到小地图的高度：小地图让到工具栏右侧 */
+.cn-root[data-h=short] #mini{left:calc(84px + env(safe-area-inset-left,0px));}
 .cn-root #hint{left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);font-size:12px;color:var(--fg3);white-space:nowrap;pointer-events:none;}
 .cn-root [hidden]{display:none!important;}
 .cn-root #back{left:50%;bottom:calc(70px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;align-items:center;gap:12px;padding:8px 8px 8px 14px;font-size:12px;color:var(--fg2);white-space:nowrap;}
@@ -265,7 +275,7 @@
 .cn-root .gp-nomodel{display:flex;align-items:flex-start;gap:6px;padding:2px 10px 8px;color:var(--fg3);font-size:12px;line-height:1.5;}
 .cn-root .gp-nomodel svg{flex:none;margin-top:2px;}
 /* ── P1：节点 hover「替换」 ── */
-.cn-root .node-replace{position:absolute;left:50%;top:8px;transform:translateX(-50%);display:none;align-items:center;gap:3px;height:24px;padding:0 9px;border-radius:7px;background:rgba(0,0,0,.62);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;font-size:11px;z-index:3;white-space:nowrap;}
+.cn-root .node-replace{position:static;transform:none;display:none;align-items:center;gap:3px;height:24px;padding:0 9px;border-radius:7px;background:rgba(0,0,0,.62);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;font-size:11px;z-index:3;white-space:nowrap;}
 .cn-root .node:hover .node-replace,.cn-root .node.sel .node-replace{display:inline-flex;}
 .cn-root .node-replace:hover{background:rgba(0,0,0,.78);}
 /* ── P1：Agent 移到右下 orb（悬停显示名称） ── */
@@ -285,6 +295,10 @@
 /* ── 选中节点的模型 / 版本徽标 ── */
 .cn-root .nbadges{position:absolute;left:8px;top:8px;display:flex;gap:4px;z-index:3;pointer-events:none;}
 .cn-root .nb{padding:1px 5px;border-radius:5px;font-size:10px;line-height:15px;background:rgba(0,0,0,.6);color:#fff;}
+/* 角标在左上，右上留给「替换」：窄节点里截断角标，不和按钮叠在一起 */
+.cn-root .nbadges{max-width:calc(100% - 84px);overflow:hidden;}
+.cn-root .nb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0;}
+.cn-root .nhead .nhb{margin-left:6px;font-size:11px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .cn-root .nb.ver{background:rgba(255,255,255,.16);backdrop-filter:blur(8px);}
 /* ── 多选工具条 ── */
 .cn-root .multi-bar{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:14px;background:var(--glass);backdrop-filter:blur(18px);border:1px solid var(--line);z-index:22;}
@@ -376,6 +390,12 @@
 .cn-root .ratio-grid button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 4px;border-radius:10px;background:var(--sunken);font-size:11.5px;color:var(--fgd);}
 .cn-root .ratio-grid button.on{background:var(--solid);color:var(--on-solid);}
 .cn-root .ratio-grid i{display:block;border:1.5px solid currentColor;border-radius:3px;}
+/* 比例格：图形区固定高度，文字不折行，各格文字对齐在同一条线上 */
+.cn-root .ratio-grid{grid-template-columns:repeat(4,minmax(48px,1fr));}
+.cn-root .ratio-grid button{display:grid;grid-template-rows:22px auto;place-items:center;white-space:nowrap;}
+.cn-root #pop.pop-model{min-width:320px;}
+/* 新建菜单条目多：放宽高度上限，大屏一次放下，小屏再滚动 */
+.cn-root #pop.pop-add{max-height:min(760px,calc(100vh - 24px));}
 .cn-root .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;}
 .cn-root .sw{width:36px;height:20px;border-radius:10px;background:var(--s4);position:relative;flex:none;}
 .cn-root .sw::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:var(--hi);transition:transform .2s var(--ease);}
@@ -655,7 +675,7 @@
 .cn-root #files .fh{display:flex;align-items:center;gap:6px;padding:4px 6px 8px;font-weight:600;}
 .cn-root #files .fh .sp{flex:1;}
 .cn-root #files .empty{padding:24px;text-align:center;color:var(--fg3);font-size:12px;}
-.cn-root .cmtbox{right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(340px,calc(100vw - 32px));padding:10px;border-radius:14px;background:var(--raised);display:flex;flex-direction:column;gap:6px;z-index:30;}
+.cn-root .cmtbox{right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(78px + env(safe-area-inset-bottom,0px));width:min(340px,calc(100vw - 32px));padding:10px;border-radius:14px;background:var(--raised);display:flex;flex-direction:column;gap:6px;z-index:30;}
 .cn-root .cmtbox textarea{min-height:56px;resize:none;}
 .cn-root .cmtbox .r{display:flex;justify-content:space-between;align-items:center;color:var(--fg3);font-size:12px;}
 .cn-root .cbubble{position:absolute;z-index:31;width:240px;padding:10px 12px;border-radius:12px;background:var(--raised);box-shadow:0 12px 32px rgba(0,0,0,.45);font-size:12.5px;}

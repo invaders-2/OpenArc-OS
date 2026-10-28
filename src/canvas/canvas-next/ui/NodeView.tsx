@@ -81,19 +81,24 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
         <Icon name={TYPE_ICON[node.kind]} size="xs" /><span className="t">{g.title}</span>
         {node.kind === "video" ? <span className="kindtag" data-kindtag>视频</span> : null}
         {g.tag || g.pinned ? <i className="tagdot" title="颜色标记" style={{ background: tagColor(g.tag || "red")! }} /> : null}{g.agent ? <span className="pinmark">Agent</span> : null}
+        {p.sel && out && node.kind === "text" ? <span className="nhb" data-badges="text"><span data-badge="model">{p.modelName || "未配置模型"}</span>{g.hist.length > 1 ? <span className="tnum" data-badge="version"> · 第 {g.hi + 1}/{g.hist.length} 版</span> : null}</span> : null}
         {running ? <span className="st tnum" style={{ color: "var(--fg2)" }}>{run!.batch ? `${run!.batch.done}/${run!.batch.total}` : <i className="runsig" role="status" aria-label="生成中" />}</span>
           : g.err ? <span className="st" style={{ color: "var(--bad)" }}><Icon name="alert" size="xs" /></span>
           : out ? <span className="st" style={{ color: "var(--fg3)" }}><Icon name="check" size="xs" /></span> : null}
       </div>
       <div className={"nbody" + (g.bg ? " tinted" : "")} style={{ height: node.h, ...(g.bg ? { ["--tint" as string]: bgColor(g.bg)! } : {}) }}>
         <Body {...p} out={out} running={running} />
-        {p.sel && out ? <div className="nbadges" data-badges={node.kind}>
+        {/* 文本节点的角标放到标题栏，不压正文 */}
+        {p.sel && out && node.kind !== "text" ? <div className="nbadges" data-badges={node.kind}>
           <span className="nb model" data-badge="model">{p.modelName || (isGenKind(node.kind) ? "未配置模型" : node.kind)}</span>
           {g.hist.length > 1 ? <span className="nb ver tnum" data-badge="version">第 {g.hi + 1}/{g.hist.length} 版</span> : null}
         </div> : null}
-        {g.hist.length > 1 && !running && node.kind !== "text" ? <div className="vstrip tnum"><button data-act="vprev" onPointerDown={(e) => p.onAct(node, "vprev", e)}><Icon name="left" size="xs" /></button><button className="vnum" data-act="vmenu" title="版本操作" onPointerDown={(e) => p.onAct(node, "vmenu", e)}>{g.hi + 1}/{g.hist.length}</button><button data-act="vnext" onPointerDown={(e) => p.onAct(node, "vnext", e)}><Icon name="right" size="xs" /></button></div> : null}
+        {/* 右上角一行：替换 + 版本切换，横向排开不重叠 */}
+        <div className="ntr">
+          {(node.kind === "image" || node.kind === "video" || node.kind === "audio") && out && !running ? <button className="node-replace" data-act="replace" title="替换素材（位置 / 尺寸 / 连线 / 提示词保留）" style={{ height: 24, padding: "0 9px", borderRadius: 7, background: "rgba(0,0,0,.62)", color: "#fff", fontSize: 11, gap: 3, zIndex: 3, whiteSpace: "nowrap", alignItems: "center" }} onPointerDown={(e) => { e.stopPropagation(); p.onAct(node, "replace", e); }}><Icon name="upload" size="xs" />替换</button> : null}
+          {g.hist.length > 1 && !running && node.kind !== "text" ? <div className="vstrip tnum"><button data-act="vprev" onPointerDown={(e) => p.onAct(node, "vprev", e)}><Icon name="left" size="xs" /></button><button className="vnum" data-act="vmenu" title="版本操作" onPointerDown={(e) => p.onAct(node, "vmenu", e)}>{g.hi + 1}/{g.hist.length}</button><button data-act="vnext" onPointerDown={(e) => p.onAct(node, "vnext", e)}><Icon name="right" size="xs" /></button></div> : null}
+        </div>
         {node.kind === "image" && out && !running ? <button className={"favstar" + (g.fav ? " on" : "")} data-act="fav" title={g.fav ? "取消收藏" : "收藏到素材库"} onPointerDown={(e) => p.onAct(node, "fav", e)}><Icon name="star" size="s" /></button> : null}
-        {(node.kind === "image" || node.kind === "video" || node.kind === "audio") && out && !running ? <button className="node-replace" data-act="replace" title="替换素材（位置 / 尺寸 / 连线 / 提示词保留）" style={{ height: 24, padding: "0 9px", borderRadius: 7, background: "rgba(0,0,0,.62)", color: "#fff", fontSize: 11, gap: 3, zIndex: 3, whiteSpace: "nowrap", position: "absolute", left: "50%", top: 8, transform: "translateX(-50%)", alignItems: "center" }} onPointerDown={(e) => { e.stopPropagation(); p.onAct(node, "replace", e); }}><Icon name="upload" size="xs" />替换</button> : null}
         {p.batchInfo && !running ? <span className="bbadge tnum">{p.batchInfo}</span> : null}
         {g.err && !running ? (() => {
           // 主行只出现人话（engine 写入的 err），原始码单独一行灰字；没有可用模型时重试禁用并说明原因

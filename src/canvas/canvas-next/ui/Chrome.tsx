@@ -51,13 +51,13 @@ export function Chrome() {
         <button className="mi" data-ext="mcp" onClick={() => { close(); if (ctl.host.openMcpCenter) ctl.host.openMcpCenter(); else store.toast("MCP 中心要在桌面版里打开"); }}><Icon name="plug" size="s" />MCP 中心<span className="k">已接入的工具</span></button>
         <button className="mi" data-ext="models" onClick={() => { close(); if (ctl.host.openModelSettings) ctl.host.openModelSettings(); else store.toast("模型与 API 要在桌面版里打开"); }}><Icon name="settings" size="s" />模型与 API</button>
       </>, "down", "right")}><Icon name="plug" /></button></div>
-      <div className="cap"><button id="orgBtn" className="sq tipB" data-tip="社区 · 组织治理" aria-label="社区" onClick={() => { if (ctl.host.openApp) ctl.host.openApp("organization"); else store.toast("社区 / 组织治理要在桌面版里打开"); }}><Icon name="share" /></button></div>
+      <div className="cap"><button id="orgBtn" className="sq tipB" data-tip="社区 · 组织治理" aria-label="社区" onClick={() => { if (ctl.host.openApp) ctl.host.openApp("organization"); else store.toast("社区 / 组织治理要在桌面版里打开"); }}><Icon name="users" /></button></div>
       <div className="cap"><button id="usage" className="tipB" data-tip="本画布模型调用" onClick={(e) => { const c: Record<string, number> = { image: 0, video: 0, text: 0, audio: 0 }; runs.forEach((r) => (c[r.type] = (c[r.type] || 0) + 1)); openPop(e.currentTarget, () => <><div className="mh">本画布模型调用</div>{(["image", "video", "text", "audio"] as GenKind[]).map((k) => <div key={k} className="row"><span>{TYPE_LABEL[k]}</span><b className="tnum">{c[k]} 次</b></div>)}<div className="msep" /><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>按模型服务商的用量计费</span></div></>, "down", "right"); }}><Icon name="bolt" size="s" /><span className="tnum">{runs.length}</span></button></div>
       {peers.length ? <div className="cap peers tipB" data-tip={`${peers.length + 1} 人在线`}>{peers.slice(0, 3).map((p, i) => <span key={p.id} className="pav">{(p.name || "协")[0]}{i === 2 && peers.length > 3 ? "+" : ""}</span>)}<span className="pav me">{ctl.host.user?.initial || "我"}</span></div> : null}
       <div className="cap"><button id="shareBtn" className="sq tipB" data-tip="共享与协作" onClick={(e) => ctl.host.openShare ? ctl.host.openShare() : store.backend.kind === "bridge" ? shareMenu(e.currentTarget, true, peers.length) : store.toast("共享需要在桌面版里打开这张画布")}><Icon name="share" /></button></div>
     </div>
     <div id="lb" className="float cap">
-      <button className="ib primary tipR" id="addBtn" data-tip="添加节点" onClick={(e) => addMenu(ctl, e.currentTarget, ctl.center())}><Icon name="plus" /></button>
+      <button className="ib primary tipR" id="addBtn" data-tip="添加节点" onClick={(e) => addMenu(ctl, e.currentTarget, ctl.center(), null, "right")}><Icon name="plus" /></button>
       <button className="ib tipR" data-drawer="search" data-tip="节点搜索 ⌘F" onClick={() => openSearch(ctl)}><Icon name="search" /></button>
       <button className={"ib tipR" + (ui.drawer === "assets" ? " on" : "")} data-drawer="assets" data-tip="素材库" onClick={() => store.setUI({ drawer: ui.drawer === "assets" ? null : "assets" })}><Icon name="folder" /></button>
       <button className="ib tipR" data-drawer="templates" data-tip="模板" onClick={(e) => openTemplates(ctl, e.currentTarget)}><Icon name="layout" /></button>
@@ -68,20 +68,21 @@ export function Chrome() {
     </div>
     <div id="zb" className="float">
       <div className="cap">
-        <button className={"ib tipT" + (showMini ? " on" : "")} id="miniBtn" data-mini-pref={ui.mini === null ? "auto" : ui.mini ? "on" : "off"} data-tip={ui.mini === null ? "小地图：跟随缩放（缩小自动浮出）" : ui.mini ? "小地图：开" : "小地图：关"} onClick={() => store.setUI({ mini: ui.mini === null ? false : ui.mini ? null : true })}><Icon name="map" /></button>
+        <button className={"ib tipT" + (showMini ? " on" : "")} id="miniBtn" data-mini-pref={ui.mini === null ? "auto" : ui.mini ? "on" : "off"} data-tip={showMini ? "隐藏小地图" : "显示小地图"} onClick={() => store.setUI({ mini: !showMini })}><Icon name="map" /></button>
         <button className={"ib tipT" + (ui.hideEdges ? " on" : "")} id="edgeBtn" data-tip={ui.hideEdges ? "显示连线" : "隐藏连线"} onClick={() => { store.setUI({ hideEdges: !ui.hideEdges }); store.toast(!ui.hideEdges ? "已隐藏连线，输入关系仍然生效" : "已显示连线"); }}><Icon name={ui.hideEdges ? "eye" : "eyeoff"} /></button>
         <button className={"ib tipT" + (ui.snap ? " on" : "")} id="snapBtn" data-tip="网格吸附" onClick={() => { store.setUI({ snap: !ui.snap }); store.toast(!ui.snap ? "拖动节点时吸附到 20px 网格" : "已关闭网格吸附"); }}><Icon name="grid" /></button>
         <button className="ib tipT" id="fitBtn" data-tip="适应画布 ⇧1" onClick={() => ctl.fitTo(store.state.doc.nodes)}><Icon name="fit" /></button>
         <input type="range" id="zoomR" min={15} max={200} step={1} aria-label="缩放" value={zoomPct} onChange={(e) => { const r = ctl.rect(); ctl.zoomAt(+e.target.value / 100, r.left + r.width / 2, r.top + r.height / 2); }} />
         <span id="zoomV" className="tnum">{zoomPct}%</span>
       </div>
-      <button className="ib cap tipT" id="themeBtn" data-tip={ui.theme === "light" ? "浅色模式" : "深色模式"} onClick={(e) => themeMenu(ctl, e.currentTarget)}><Icon name={ui.theme === "light" ? "sun" : "moon"} /></button>
+      <button className="ib cap tipT" id="themeBtn" data-tip={"外观：" + (ui.themePref === "system" ? "跟随系统" : ui.themePref === "light" ? "浅色" : "深色")} onClick={(e) => themeMenu(ctl, e.currentTarget)}><Icon name={ui.theme === "light" ? "sun" : "moon"} /></button>
       <button className="ib cap tipT" id="help" data-tip="帮助" onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">帮助</div><button className="mi" onClick={() => { close(); showKeys(); }}><Icon name="grid" size="s" />快捷键<span className="k">?</span></button></>, "up")}><Icon name="help" /></button>
     </div>
     {showMini ? <Minimap /> : null}
     {ui.sel.size > 1 ? <MultiBar /> : null}
     {/* Agent 展开后画布区变窄，提示会压到左下工具栏上：此时不显示 */}
-    {ui.agentOpen ? null : <div id="hint" className="float">{ui.leftDrag === "select" ? "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白框选 · 右键 / 空格拖动平移 · 双击空白添加节点" : "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点"}</div>}
+    {/* 选中节点时底部会出生成面板，提示文字会从面板后面露出来：此时也不显示 */}
+    {ui.agentOpen || ui.sel.size ? null : <div id="hint" className="float">{ui.leftDrag === "select" ? "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白框选 · 右键 / 空格拖动平移 · 双击空白添加节点" : "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点"}</div>}
     <BackToNodes />
     {!nodes.length ? <div id="empty" className="float">
       <div className="l1"><span className="kbd"><Icon name="cursor" size="s" />双击</span>画布自由生成，或从下面开始一条工作流</div>
@@ -985,12 +986,21 @@ function Comments() {
   const ctl = useCtl(); const store = ctl.store; const comments = useS((s) => s.doc.comments); useS((s) => s.view);
   const [open, setOpen] = useState<string | null>(null); const [draft, setDraft] = useState<{ x: number; y: number } | null>(null); const [text, setText] = useState("");
   useEffect(() => { const on = (e: Event) => { setDraft((e as CustomEvent).detail); setText(""); setOpen(null); }; addEventListener("cn:place-comment", on); return () => removeEventListener("cn:place-comment", on); }, []);
+  // 草稿评论框：Esc 关闭；点到框外时，没写内容就直接收起（写了内容的保留，免得误触丢字）
+  const bubbleRef = useRef<HTMLDivElement>(null); const taRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!draft) return; requestAnimationFrame(() => taRef.current?.focus());
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); setDraft(null); } };
+    const onDown = (e: PointerEvent) => { if (bubbleRef.current?.contains(e.target as Node)) return; if (!(taRef.current?.value || "").trim()) setDraft(null); };
+    document.addEventListener("keydown", onKey, true); document.addEventListener("pointerdown", onDown, true);
+    return () => { document.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", onDown, true); };
+  }, [draft]);
   const r = ctl.rect(); const pos = (x: number, y: number) => { const s = ctl.toScreen(x, y); return { left: s.x - r.left, top: s.y - r.top }; };
   const openC = comments.find((c) => c.id === open);
   return <div id="cmts" onPointerDown={(e) => e.stopPropagation()}>
     {comments.map((c, i) => <button key={c.id} className="cpin" style={pos(c.x, c.y)} onClick={() => setOpen(open === c.id ? null : c.id)}>{i + 1}</button>)}
-    {draft ? <div className="cbubble" style={{ left: pos(draft.x, draft.y).left + 30, top: pos(draft.x, draft.y).top - 30 }}>
-      <textarea autoFocus maxLength={200} placeholder={`输入你的评论…（${text.length}/200）`} style={{ width: "100%", minHeight: 60, resize: "none" }} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+    {draft ? <div className="cbubble" ref={bubbleRef} style={{ left: pos(draft.x, draft.y).left + 30, top: pos(draft.x, draft.y).top - 30 }}>
+      <textarea ref={taRef} autoFocus maxLength={200} placeholder="输入你的评论…" style={{ width: "100%", minHeight: 60, resize: "none" }} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <small>{text.length}/200</small>
         <span style={{ display: "flex", gap: 6 }}>
