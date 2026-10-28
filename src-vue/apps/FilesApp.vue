@@ -18,6 +18,7 @@ import {
   List,
   Monitor,
   Music,
+  Plus,
   RefreshCw,
   Search,
   Sparkles,
@@ -272,7 +273,8 @@ const GROUP_LABEL: Record<string, string> = {
 };
 const groupOf = (r: Row) => (r.kind === "folder" ? "folder" : kindOfExt(r.ext ?? ""));
 const groups = computed(() => {
-  if (!group.value) return [{ label: "", rows: rows.value }];
+  // 原型口径：图标网格是扁平的一整片，不按文件类型加小标题；分组只在列表视图里体现。
+  if (!group.value || view.value === "grid") return [{ label: "", rows: rows.value }];
   const out: { label: string; rows: Row[] }[] = [];
   for (const key of ["folder", "image", "video", "audio", "doc", "text", "archive", "other"]) {
     const bucket = rows.value.filter((r) => groupOf(r) === key);
@@ -626,7 +628,7 @@ async function doReveal() {
 
 <template>
   <div class="split finder">
-    <nav class="split-side" :aria-label="t('访达边栏')">
+    <nav class="split-side finder-side" :aria-label="t('访达边栏')">
       <div class="split-section">{{ t("个人收藏") }}</div>
       <button
         type="button"
@@ -640,24 +642,8 @@ async function doReveal() {
       >
         <Monitor :size="16" /> <span class="split-nav-label">{{ t("桌面") }}</span>
       </button>
-      <template v-if="topFolders.length">
-        <div class="split-section">{{ t("桌面文件夹") }}</div>
-        <button
-          v-for="f in topFolders"
-          :key="f.id"
-          type="button"
-          class="split-nav"
-          :aria-current="folderId === f.id ? 'true' : undefined"
-          :class="{ 'drop-target': dropTarget === 'side:' + f.id }"
-          @click="go(f.id)"
-          @dragover="onDragOverTarget($event, f.id), (dropTarget = 'side:' + f.id)"
-          @dragleave="dropTarget = null"
-          @drop="onDropTarget($event, f.id)"
-        >
-          <Folder :size="16" /> <span class="split-nav-label">{{ f.name }}</span>
-        </button>
-      </template>
-      <div class="split-section">{{ t("共享盘") }}</div>
+      <div class="split-section">{{ t("位置") }}</div>
+      <div class="split-nav finder-location"><HardDrive :size="16" /> <span class="split-nav-label">{{ t("本机 · D1") }}</span></div>
       <div class="finder-shared" data-finder-shared>
         <p v-if="sharedLoading" class="finder-shared-hint" data-shared-roots-loading>{{ t("正在读取共享盘…") }}</p>
         <div v-else-if="sharedFailure" class="finder-shared-block">
@@ -684,8 +670,6 @@ async function doReveal() {
         </template>
         <p v-else class="finder-shared-hint" data-shared-roots-empty>{{ t("没有可见的共享盘：公共盘为空，且你不属于任何部门。权限由后端判定，界面不伪造入口。") }}</p>
       </div>
-      <div class="split-section">{{ t("位置") }}</div>
-      <div class="split-nav finder-location"><HardDrive :size="16" /> <span class="split-nav-label">{{ t("本机 · D1") }}</span></div>
       <button
         type="button"
         class="split-nav"
@@ -695,6 +679,8 @@ async function doReveal() {
       >
         <ArrowUpDown :size="16" /> <span class="split-nav-label">{{ t("传输中心") }}</span>
       </button>
+      <div class="split-section">{{ t("标签") }}</div>
+      <p class="finder-tag-empty" data-finder-tags-unavailable>{{ t("标签能力尚未接入：这里不会显示演示标签。") }}</p>
     </nav>
 
     <div class="split-main finder-main" @click.self="clearSelection">
@@ -717,13 +703,16 @@ async function doReveal() {
         <button class="icon-button" :aria-label="t('排序方式')" aria-haspopup="menu" @click="paneMenu($event, 'sort')">
           <ArrowUpDown :size="15" />
         </button>
+        <button class="icon-button" :aria-label="t('新建文件夹')" title="新建文件夹" data-finder-new @click="newFolder">
+          <Plus :size="15" />
+        </button>
+        <button class="icon-button" :aria-label="t('项目 Agent')" :aria-pressed="agentOpen" data-finder-agent-toggle @click="toggleAgent">
+          <Sparkles :size="15" />
+        </button>
         <label class="search-field">
           <Search :size="13" />
           <input v-model="query" type="search" :aria-label="t('搜索此文件夹')" :placeholder="t('搜索')" />
         </label>
-        <button class="icon-button" :aria-label="t('项目 Agent')" :aria-pressed="agentOpen" data-finder-agent-toggle @click="toggleAgent">
-          <Sparkles :size="15" />
-        </button>
       </div>
 
       <div
@@ -774,7 +763,7 @@ async function doReveal() {
                 @keydown.space.prevent.stop="quickLook"
                 @contextmenu.prevent.stop="entryMenu($event, r)"
               >
-                <FolderIcon v-if="r.kind === 'folder'" :size="view === 'grid' ? 46 : 22" />
+                <FolderIcon v-if="r.kind === 'folder'" :size="view === 'grid' ? 64 : 22" />
                 <img
                   v-else-if="thumbs[folderId + '/' + r.id]"
                   class="file-thumb"
@@ -782,7 +771,7 @@ async function doReveal() {
                   alt=""
                   draggable="false"
                 />
-                <span v-else class="file-glyph"><component :is="glyphFor(r.ext)" :size="view === 'grid' ? 40 : 20" /></span>
+                <span v-else class="file-glyph"><component :is="glyphFor(r.ext)" :size="view === 'grid' ? 64 : 20" /></span>
                 <input
                   v-if="renaming === r.id"
                   class="folder-rename"
@@ -871,8 +860,8 @@ async function doReveal() {
         </div>
       </aside>
 
-      <!-- D3-04D 受控资源库入口：契约原样保留 -->
-      <section class="finder-library" data-d3-04d="files" :aria-label="t('资源库')">
+      <!-- D3-04D 受控资源库入口：契约原样保留；原型口径下未选中时不占内容区，选中项时浮在状态栏上方 -->
+      <section v-if="selected.length" class="finder-library finder-library--floating" data-d3-04d="files" :aria-label="t('资源库')">
         <div class="gov-form">
           <b class="finder-library-label">{{ t("资源库") }}</b>
           <DsButton variant="primary" size="sm" data-d3-04d-files-import @click="add('import')" :title="t('复制一份由资源库管理')">{{ t("添加到资源库") }}</DsButton>
@@ -957,11 +946,11 @@ async function doReveal() {
 .finder-agent-head small { color: var(--muted); font-size: var(--fs-micro); }
 .finder-agent-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .finder-agent-field { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-micro); color: var(--muted); }
-.finder-agent-field select { min-height: 24px; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-micro); }
-.finder-agent-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 56px; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-micro); }
+.finder-agent-field select { min-height: 24px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: var(--sunken); color: var(--text); font-size: var(--fs-micro); }
+.finder-agent-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 56px; padding: 6px; border: 0; border-radius: var(--radius-md); background: var(--sunken); color: var(--text); font-size: var(--fs-micro); }
 .finder-agent-primary { min-height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--text); color: var(--content, #fff); font-size: var(--fs-micro); cursor: pointer; }
 .finder-agent-primary:disabled { opacity: 0.45; }
-.finder-agent-mini { min-height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--fs-micro); cursor: pointer; }
+.finder-agent-mini { min-height: 22px; padding: 0 8px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--fs-micro); cursor: pointer; }
 .finder-agent-mini:disabled { opacity: 0.45; }
 .finder-agent-sub { margin: 6px 0 0; font-size: var(--fs-micro); font-weight: var(--fw-medium); color: var(--muted); }
 .finder-agent-tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -974,4 +963,82 @@ async function doReveal() {
 .finder-agent-detail-box { padding: 6px; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.05); }
 .finder-agent-detail-box p { margin: 2px 0; color: var(--muted); font-size: var(--fs-micro); }
 .finder-agent-steps { margin: 2px 0 0; padding-left: 16px; color: var(--muted); font-size: var(--fs-micro); }
+
+/* ── 原型对照（task-4）：侧栏分区 / 行高 / 选中明度差 ─────────────────── */
+/* task-8：几何对齐（侧栏 200 / 工具条 52 / 搜索 180 / 状态栏 28） */
+.finder.split { gap: 0; }
+.finder .split-side { flex-basis: 200px; margin-right: 0; }
+.finder .split-main { padding: 0; padding-top: 0 !important; }
+.finder .pane-title { flex: 1; min-width: 0; }
+.finder .pane-toolbar { height: 52px; margin: 0; padding: 0 20px; flex: none; }
+.finder .pane-toolbar .icon-button { width: 30px; height: 30px; }
+.finder .search-field { width: 180px; height: 30px; flex: none; }
+.finder .folder-body { padding: 0 20px; }
+.finder .file-grid { padding: 4px 2px 0; }
+.finder .finder-status { height: 28px; padding: 0 20px; align-items: center; }
+.finder-side { gap: 2px; }
+.finder-side .split-section {
+  padding: 12px 10px 4px;
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+.finder-side .split-nav {
+  min-height: 32px;
+  padding: 0 10px;
+  gap: 9px;
+}
+.finder-tag-empty {
+  margin: 0;
+  padding: 2px 10px 6px;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-relaxed);
+  color: var(--muted);
+}
+/* 图标网格：文件夹 / 文件 64px，名称 12px 次级色（原型密度） */
+.finder .file-grid {
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+  padding: 8px 4px;
+}
+.finder .file-grid .file-cell {
+  gap: 8px;
+  padding: 10px 8px;
+}
+.finder .file-grid .file-glyph,
+.finder .file-grid .file-thumb {
+  width: 64px;
+  height: 64px;
+}
+.finder .file-grid .file-thumb {
+  border-radius: var(--radius-md);
+}
+.finder .file-grid .file-name {
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+/* 资源库操作条：只在有选中项时浮出，不占内容区常驻高度 */
+.finder-library--floating {
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: 38px;
+  z-index: 4;
+  margin: 0;
+  background: rgb(var(--content-rgb) / 0.96);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--elevation-2);
+}
+
+/* task-8 final overrides */
+.finder .split-side { margin: 8px 0 8px 8px !important; }
+.finder .folder-body { padding: 0 18px; }
+.finder .file-grid { padding: 4px 2px 0; }
+.finder .file-grid .file-cell { gap: 5px; padding: 5px 4px; }
+.finder .file-grid .file-name { font-size: 12px; }
+.finder .pane-toolbar { padding-right: 20px; }
+
+.finder .folder-body { padding: 0; }
+.finder .file-grid { padding: 4px 18px 0; }
+.finder .pane-title { font-size: 15px; line-height: 26px; }
 </style>

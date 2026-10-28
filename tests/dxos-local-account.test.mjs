@@ -432,7 +432,7 @@ test("B4e-13 · attachAppCatalog 晚绑定：已装 App 进入 catalog；形状�
 });
 
 test("B4e-14 · 装配点：main.cjs 在 developerBundle 之后把 App 目录晚绑定给 localAccountService", () => {
-  const src = fs.readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
+  const src = fs.readFileSync(new URL("../electron/runtime-composition.cjs", import.meta.url), "utf8");
   assert.match(src, /createDeveloperAppCatalogAdapter\(/);
   assert.match(src, /localAccountService\.attachAppCatalog\(/);
 });

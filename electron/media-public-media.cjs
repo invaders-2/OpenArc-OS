@@ -12,6 +12,8 @@
  *     sharp 惰性加载；缺失即结构化 MEDIA_DEPENDENCY_UNAVAILABLE，绝不返回假图。
  *   · 本地公共媒体目录 / URL 映射（本仓补充）：<dataDir>/public-media 下的文件名 ⇄
  *     /api/public-media/<id> 相对 URL；绝对路径不出主进程。
+ *   · uploadPublicMedia / uploadPublicMediaBytes（本仓补充）：本地文件或渲染层字节 → **只调用宿主注入的
+ *     uploader**；本模块不内置任何外部图床地址 / 域名。
  *
  * OUT（云 / 商业化 / 外部图床）逐条注明，已删除不导出：
  *   · :12-13  LITTERBOX_UPLOAD_URL / LITTERBOX_DOWNLOAD_HOST
@@ -27,8 +29,25 @@ const path = require("node:path");
 
 const { createMediaError, MEDIA_ERR_INVALID_INPUT, MEDIA_ERR_NOT_FOUND, MEDIA_ERR_DEPENDENCY_UNAVAILABLE } = require("./media-domain.cjs");
 
-/** 外部上传面已整段移除（源 :67-84）。 */
+/** 外部上传面已整段移除（源 :67-84）：本模块不内置外部图床，上传只经注入 uploader。 */
 const PUBLIC_MEDIA_UPLOAD_REMOVED = true;
+
+/** 扩展名 → 素材 MIME（只覆盖媒体域接受的类型；未知扩展名回 null 交给 uploader 拒绝）。 */
+const MEDIA_MIME_BY_EXT = Object.freeze({
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".wav": "audio/wav",
+  ".aac": "audio/aac",
+  ".ogg": "audio/ogg",
+});
 
 let extensions = Object.freeze({});
 
@@ -145,21 +164,48 @@ async function fetchPublicMedia({ url, fetchImpl = null, allowedHosts = [], maxB
   return { id: name, fileName: name, bytes: bytes.length, mime, url: publicMediaUrl(name), fetchedFrom: parsed.hostname };
 }
 
+function publicMediaMime(fileName) {
+  return MEDIA_MIME_BY_EXT[path.extname(String(fileName || "")).toLowerCase()] || null;
+}
+
+function resolveUploader(uploader, options) {
+  const impl = uploader || options.uploader;
+  if (typeof impl !== "function") throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "公共媒体上传未注入 uploader", "缺少 uploader：由宿主显式注入后重试（本模块不内置外部图床）。");
+  return impl;
+}
+
+/** 从字节上传：校验文件名 / 字节后只调用注入的 uploader；返回 uploader 的 url 与可选 service / expiresAt。 */
+async function uploadPublicMediaBytes({ fileName, bytes, mime = null, uploader = null } = {}, options) {
+  const opts = effective(options);
+  const impl = resolveUploader(uploader, opts);
+  const name = publicMediaFileName(fileName);
+  if (!bytes || (typeof bytes.byteLength !== "number" && typeof bytes.length !== "number")) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "公共媒体上传需要素材字节");
+  const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  if (!buffer.length) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "公共媒体上传素材为空");
+  const type = String(mime == null ? "" : mime).trim() || publicMediaMime(name) || "application/octet-stream";
+  const result = await impl({ fileName: name, bytes: buffer, mime: type });
+  if (!result || !result.url) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "上传器未返回 URL");
+  const media = { fileName: name, url: String(result.url), bytes: buffer.length, mime: type };
+  if (result.service != null) media.service = String(result.service);
+  if (result.expiresAt != null) media.expiresAt = result.expiresAt;
+  return media;
+}
+
+/** 本地文件上传：读 public-media 后交给 uploadPublicMediaBytes（MIME 按扩展名推断）。 */
 async function uploadPublicMedia({ fileName, uploader = null } = {}, options) {
   const opts = effective(options);
-  const impl = uploader || opts.uploader;
-  if (typeof impl !== "function") throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "公共媒体上传未注入 uploader", "缺少 uploader：由宿主显式注入后重试（本模块不内置外部图床）。");
-  const full = resolvePublicMediaPath(fileName, opts);
-  const bytes = fs.readFileSync(full);
-  const result = await impl({ fileName: path.basename(full), bytes, mime: "application/octet-stream" });
-  if (!result || !result.url) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "上传器未返回 URL");
-  return { fileName: path.basename(full), url: String(result.url), bytes: bytes.length };
+  const impl = resolveUploader(uploader, opts);
+  const name = publicMediaFileName(fileName);
+  const bytes = fs.readFileSync(resolvePublicMediaPath(name, opts));
+  return uploadPublicMediaBytes({ fileName: name, bytes, mime: publicMediaMime(name), uploader: impl }, opts);
 }
 
 module.exports = {
   PUBLIC_MEDIA_UPLOAD_REMOVED,
   fetchPublicMedia,
   uploadPublicMedia,
+  uploadPublicMediaBytes,
+  publicMediaMime,
   configurePublicMedia,
   publicMediaDir,
   normalizePublicImageForApimartVideo,

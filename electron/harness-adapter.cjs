@@ -141,7 +141,8 @@ function buildDshSpawn({ bin, args = [], env = {}, execPath = process.execPath, 
     return { command: nodeBin, args: [String(bin), ...args], env: childEnv, interpreter: "bundled-node" };
   }
   if (isElectron) childEnv.ELECTRON_RUN_AS_NODE = "1";
-  return { command: execPath, args: [String(bin), ...args], env: childEnv, interpreter: isElectron ? "electron-node" : "node" };
+  const interpreterArgs = isElectron ? ["--expose-internals"] : [];
+  return { command: execPath, args: [...interpreterArgs, String(bin), ...args], env: childEnv, interpreter: isElectron ? "electron-node" : "node" };
 }
 
 /** 显式 allowlist；其余一律不继承。 */

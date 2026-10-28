@@ -8,8 +8,8 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const domain = require("../electron/window-domain.cjs");
-const manager = require("../electron/window-manager.cjs");
+const domain = require("../electron/window-domain.ts");
+const manager = require("../electron/window-manager.ts");
 const { applyWindowCommandBatch, MAX_WINDOW_COMMANDS } = require("../electron/window-command-ipc.cjs");
 
 const HOST = { width: 1440, height: 940 };
@@ -229,7 +229,7 @@ test("⑩ 契约：9 条 Window Command 不变；标签组命令独立登记；m
     assert.equal(typeof manager.REDUCERS[type], "function", type);
     assert.equal(manager.WINDOW_COMMANDS.includes(type), false);
   }
-  const main = fs.readFileSync(path.join(process.cwd(), "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(process.cwd(), "electron", "window-browser-ipc.cjs"), "utf8");
   assert.ok(main.includes('require("./window-command-ipc.cjs")'));
   assert.ok(main.includes("applyWindowCommandBatch({"));
   assert.ok(main.includes("windowBatch"));

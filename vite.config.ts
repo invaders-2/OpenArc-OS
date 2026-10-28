@@ -28,12 +28,8 @@ function devCsp(): Plugin {
 }
 
 /**
- * 开发期 CJS：渲染进程从 electron/ 直接 import 了 .cjs 领域模块
- * （window-domain / window-manager / geometry …）。`vite build` 走 Rollup 的
- * commonjs 插件，能拿到 default 导出；但 `vite dev` 是**原样**把 .cjs 交给浏览器，
- * 于是 "does not provide an export named 'default'"（已实测）。
- * 这里只在 dev 用 esbuild（Vite 自己的依赖）把 .cjs 就地打成 ESM（含它的相对 require），
- * 构建路径不执行本插件。
+ * 开发期 CJS：窗口领域已迁到原生 TS；目前只剩 CanvasHost 的 image-params.cjs。
+ * `vite build` 走 Rollup commonjs；dev 只把这一个既有模块打成 ESM，不扩大特殊路径。
  */
 function devCjs(): Plugin {
   return {
@@ -42,7 +38,7 @@ function devCjs(): Plugin {
     enforce: "pre",
     async load(id) {
       const file = id.replace(/\?.*$/, "");
-      if (!file.endsWith(".cjs") || !file.includes("/electron/")) return null;
+      if (!file.endsWith("/electron/image-params.cjs")) return null;
       const result = await esbuild({
         entryPoints: [file],
         bundle: true,
@@ -58,6 +54,7 @@ function devCjs(): Plugin {
 }
 
 export default defineConfig(({ command }) => ({
+  server: { watch: { ignored: ["**/artifacts/**", "**/.oa-browser/**"] } },
   base: "./",
   // React Refresh 只在 dev 需要（build 走 esbuild 的 JSX），因此 build 路径不挂 react()。
   // Vue 插件 build 路径也必须挂：vue.html 是一个真实入口，.vue SFC 只有它能编译。
@@ -66,9 +63,9 @@ export default defineConfig(({ command }) => ({
   build: {
     rollupOptions: {
       // 三个入口：
-      //   index.html            产品主界面（React，仍是唯一产品入口）
+      //   index.html            React 产品入口（OA_UI=react）
       //   design-system.html    设计系统回归面（内部验证用，打包时可排除）
-      //   vue.html              Vue 壳层（接线验证期，index.html 入口未切换）
+      //   vue.html              默认 Vue 产品入口
       // 回归面必须是**真实构建产物**，探针才与 D1-04 的性能口径一致；
       // 复制一份 class 名出来测等于没测。
       input: {

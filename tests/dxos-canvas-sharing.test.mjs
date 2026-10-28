@@ -536,6 +536,7 @@ CREATE TABLE canvas_shares (
 function seedOldCanvasShares(dbPath, rows, { orphan = false } = {}) {
   const store = new IdentityStore({ path: dbPath }).open();
   try {
+    store.connection.exec("PRAGMA user_version = 28");
     assert.equal(store.schemaVersion, 28);
     store.connection.prepare("INSERT INTO canvas_boards (id, organization_id, owner_user_id, name, created_at, updated_at) VALUES (?,?,?,?,?,?)")
       .run("cv_old", "team_old", "usr_owner", "旧画布", 100, 100);
@@ -566,7 +567,7 @@ test("迁移 canvas_shares：旧 VIEWER/EDITOR/CONTRIBUTOR 数据重建后可写
     // 第一次：CanvasStore 就绪时显式迁移（事务内）
     const identity = new IdentityStore({ path: dbPath }).open();
     try {
-      assert.equal(identity.schemaVersion, 28, "画布共享迁移不抢版本号（v29 属于任务合并包）");
+      assert.equal(identity.schemaVersion, 30, "画布共享迁移不抢版本号（v29 属于任务合并包）");
       new CanvasStore({ identity });
       const columns = identity.connection.prepare("PRAGMA table_info(canvas_shares)").all().map((c) => c.name);
       assert.ok(columns.includes("created_at"), "必须补 created_at");

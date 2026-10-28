@@ -1,12 +1,12 @@
 import { watch } from "vue";
-import manager from "../../electron/window-manager.cjs";
+import * as manager from "../../electron/window-manager.ts";
 import { useShellStore } from "../stores/shell";
 import { useIdentityStore } from "../stores/identity";
 import { browserRuntime, type NativeResult } from "./browser-runtime";
 
 /**
  * 原生层上行通路（`src/desktop/useDesktop.ts:332-375` 同一条线）：
- * 用 **electron/window-manager.cjs 的 nativeIntents()** 从窗口域结算原生意图，
+ * 用 **electron/window-manager.ts 的 nativeIntents()** 从窗口域结算原生意图，
  * 再经 `window.openarc.sync()` 交给主进程。没有第二套"意图"算法。
  *
  * 指纹稳定才下发：拖动/重排每帧都会改 model，无差别 IPC 会把主进程刷满。

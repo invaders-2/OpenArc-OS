@@ -28,6 +28,7 @@ const { ToolStore } = require("../electron/tool-store.cjs");
 const { createToolAdapters } = require("../electron/tool-adapters.cjs");
 const { TaskStore } = require("../electron/task-store.cjs");
 const { TaskService } = require("../electron/task-service.cjs");
+const { TaskHarnessOrchestrator } = require("../electron/task-harness-orchestrator.cjs");
 const { ControlledToolProxy } = require("../electron/controlled-tool-proxy.cjs");
 const { SideEffectStore } = require("../electron/side-effect-store.cjs");
 const { SideEffectAuthority } = require("../electron/side-effect-authority.cjs");
@@ -71,7 +72,7 @@ async function setup() {
   assert.equal(mr.ok, true, "run 未进入 RUNNING：" + JSON.stringify(mr));
 
   return {
-    fx, ctx, canvasService, canvasId, sideEffectRuntime, sideEffectAuthority, sideEffectStore, toolStore, toolRegistry, adapters, taskStore,
+    fx, ctx, canvasService, canvasId, sideEffectRuntime, sideEffectAuthority, sideEffectStore, toolStore, toolRegistry, adapters, taskStore, taskService,
     run: { taskId: t.task.taskId, stepId: step.step.stepId, runId: run.run.runId },
     grantEdit() { return fx.authService.grantAppToolPermission({ context: fx.adminCtx(), appId: APP_ID, actions: ["tool.canvas.edit"] }); },
     doc() { return canvasService.getCanvas({ context: ctx, canvasId }).canvas; },
@@ -178,5 +179,101 @@ test("D5-02 F4 · 没有 tool.canvas.edit 权限时绝不产生 SideEffectCall�
     const after = s.doc();
     assert.equal(after.revision, 1, "0 mutation");
     assert.equal(after.doc.nodes.length, 0, "0 mutation");
+  } finally { s.close(); }
+});
+
+test("1A · 可信拒绝只收敛本次提案，绝不执行画布写入", async () => {
+  const s = await setup();
+  try {
+    s.grantEdit();
+    const planned = await s.sideEffectRuntime.proposeWrite({ context: s.ctx, ...s.run, toolId: "canvas.edit", arguments: { canvasId: s.canvasId, baseRevision: 1, command: COMMAND } });
+    assert.equal(planned.ok, true, JSON.stringify(planned));
+    const denied = s.sideEffectAuthority.denySideEffect({ context: { sessionRef: s.fx.sessions.admin, source: "user" }, callId: planned.approvalRequestId });
+    assert.equal(denied.ok, true, JSON.stringify(denied));
+    const executed = await s.sideEffectRuntime.executeApproved({ callId: planned.approvalRequestId });
+    assert.equal(executed.ok, false);
+    assert.equal(s.sideEffectStore.callById(planned.approvalRequestId).status, "BLOCKED");
+    assert.equal(s.doc().revision, 1);
+    assert.equal(s.doc().doc.nodes.length, 0);
+  } finally { s.close(); }
+});
+
+test("1A · 重复提案与重复执行去重，revision 和命令日志只前进一次", async () => {
+  const s = await setup();
+  try {
+    s.grantEdit();
+    const input = { context: s.ctx, ...s.run, toolId: "canvas.edit", arguments: { canvasId: s.canvasId, baseRevision: 1, command: COMMAND } };
+    const first = await s.sideEffectRuntime.proposeWrite(input);
+    const duplicateProposal = await s.sideEffectRuntime.proposeWrite(input);
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(duplicateProposal.duplicate, true);
+    assert.equal(duplicateProposal.approvalRequestId, first.approvalRequestId);
+    assert.equal(s.sideEffectStore.callsOfTask(s.run.taskId).length, 1);
+    s.sideEffectAuthority.approveSideEffect({ context: { sessionRef: s.fx.sessions.admin, source: "user" }, callId: first.approvalRequestId });
+    const executed = await s.sideEffectRuntime.executeApproved({ callId: first.approvalRequestId });
+    const repeated = await s.sideEffectRuntime.executeApproved({ callId: first.approvalRequestId });
+    assert.equal(executed.ok, true, JSON.stringify(executed));
+    assert.equal(repeated.ok, true, JSON.stringify(repeated));
+    assert.equal(repeated.duplicate, true);
+    assert.equal(s.doc().revision, 2);
+    assert.equal(s.doc().doc.nodes.length, 1);
+    assert.equal(s.log().items.length, 1);
+  } finally { s.close(); }
+});
+
+test("1A · 批准后 baseRevision 冲突保留用户编辑，AI 旧提案不覆盖", async () => {
+  const s = await setup();
+  try {
+    s.grantEdit();
+    const planned = await s.sideEffectRuntime.proposeWrite({ context: s.ctx, ...s.run, toolId: "canvas.edit", arguments: { canvasId: s.canvasId, baseRevision: 1, command: COMMAND } });
+    assert.equal(planned.ok, true, JSON.stringify(planned));
+    const user = s.canvasService.applyCommand({ context: s.ctx, canvasId: s.canvasId, baseRevision: 1, command: { type: "node.add", node: { id: "user_n1", type: "prompt", text: "用户并发编辑" } }, actorKind: "USER" });
+    assert.equal(user.ok, true, JSON.stringify(user));
+    s.sideEffectAuthority.approveSideEffect({ context: { sessionRef: s.fx.sessions.admin, source: "user" }, callId: planned.approvalRequestId });
+    const executed = await s.sideEffectRuntime.executeApproved({ callId: planned.approvalRequestId });
+    assert.equal(executed.ok, false, JSON.stringify(executed));
+    assert.equal(s.doc().revision, 2);
+    assert.deepEqual(s.doc().doc.nodes.map((n) => n.id), ["user_n1"]);
+    assert.equal(s.doc().doc.nodes[0].text, "用户并发编辑");
+  } finally { s.close(); }
+});
+
+test("1A · 停止任务后后续 canvas.edit 提案被拒绝且零新增写入", async () => {
+  const s = await setup();
+  try {
+    s.grantEdit();
+    const first = await s.sideEffectRuntime.proposeWrite({ context: s.ctx, ...s.run, toolId: "canvas.edit", arguments: { canvasId: s.canvasId, baseRevision: 1, command: COMMAND } });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    s.sideEffectAuthority.approveSideEffect({ context: { sessionRef: s.fx.sessions.admin, source: "user" }, callId: first.approvalRequestId });
+    assert.equal((await s.sideEffectRuntime.executeApproved({ callId: first.approvalRequestId })).ok, true);
+    const task = s.taskStore.taskById(s.run.taskId);
+    const cancelled = s.taskService.cancelTask({ context: s.ctx, taskId: s.run.taskId, expectedRevision: task.revision });
+    assert.equal(cancelled.ok, true, JSON.stringify(cancelled));
+    const second = await s.sideEffectRuntime.proposeWrite({ context: s.ctx, ...s.run, toolId: "canvas.edit", arguments: { canvasId: s.canvasId, baseRevision: 2, command: { type: "node.add", node: { id: "ai_n2", type: "prompt", text: "不应执行" } } } });
+    assert.equal(second.ok, false, JSON.stringify(second));
+    assert.equal(s.sideEffectStore.callsOfTask(s.run.taskId).length, 1);
+    assert.equal(s.doc().revision, 2);
+    assert.deepEqual(s.doc().doc.nodes.map((n) => n.id), ["ai_n1"]);
+  } finally { s.close(); }
+});
+
+test("1A · 等待审批时 cancel 同步收敛 pending call，不能再次批准执行", async () => {
+  const s = await setup();
+  try {
+    s.grantEdit();
+    const planned = await s.sideEffectRuntime.proposeWrite({ context: s.ctx, ...s.run, toolId: "canvas.edit", arguments: { canvasId: s.canvasId, baseRevision: 1, command: COMMAND } });
+    assert.equal(planned.ok, true, JSON.stringify(planned));
+    const orchestrator = new TaskHarnessOrchestrator({ taskService: s.taskService, sideEffectRuntime: s.sideEffectRuntime });
+    const task = s.taskStore.taskById(s.run.taskId);
+    const cancelled = await orchestrator.cancel({ context: s.ctx, taskId: s.run.taskId, expectedRevision: task.revision });
+    assert.equal(cancelled.ok, true, JSON.stringify(cancelled));
+    const call = s.sideEffectStore.callById(planned.approvalRequestId);
+    assert.equal(call.status, "BLOCKED");
+    assert.equal(call.errorCode, "TASK_CANCELLED");
+    assert.equal(s.sideEffectStore.leasesOfCall(call.callId).length, 0);
+    assert.equal(s.doc().revision, 1);
+    assert.equal(s.doc().doc.nodes.length, 0);
+    const late = s.sideEffectAuthority.approveSideEffect({ context: { sessionRef: s.fx.sessions.admin, source: "user" }, callId: call.callId });
+    assert.equal(late.ok, false, "取消后的 pending 不得恢复可执行");
   } finally { s.close(); }
 });

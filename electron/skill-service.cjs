@@ -25,6 +25,7 @@ const skillStore = require("./skill-store.cjs");
 const skillImport = require("./skill-import.cjs");
 const skillPack = require("./skill-pack.cjs");
 const { createOnlineSourceConfig } = require("./skill-online-source.cjs");
+const { createSkillGithubInstaller } = require("./skill-github-installer.cjs");
 const skillRunner = require("./skill-runner.cjs");
 const skillAnalyzer = require("./skill-analyzer.cjs");
 const skillWorkspace = require("./skill-workspace.cjs");
@@ -74,25 +75,41 @@ function archiveBuffer(payload, field) {
   return buffer;
 }
 
+function visibleSkills(context) {
+  const userId = String(context && context.userId || "");
+  return skillStore.listSkills().filter((skill) => skill.builtin === true || skill.origin === "official" || (userId && skill.ownerUserId === userId));
+}
+function ownedSkill(context, id) {
+  const skill = visibleSkills(context).find((item) => item.id === id);
+  if (!skill) throw createSkillError(SKILL_ERR_NOT_FOUND, "技能不存在：" + id);
+  return skill;
+}
+function claimNewSkills(beforeIds, ownerUserId, result) {
+  for (const skill of skillStore.listSkills()) if (!beforeIds.has(skill.id) && !skill.ownerUserId) skillStore.setSkillOwner(skill.id, ownerUserId);
+  if (result && Array.isArray(result.skills)) for (const skill of result.skills) if (!beforeIds.has(skill.id)) skill.ownerUserId = ownerUserId;
+}
+function visiblePackIds(context) {
+  return new Set(visibleSkills(context).map((skill) => skill.source && skill.source.metadata && skill.source.metadata.packId).filter(Boolean));
+}
+
 /** 技能来源文本：优先显式 markdown，其次技能自身的 source.instructions。 */
-function skillSourceText(payload) {
+function skillSourceText(payload, context) {
   const explicit = requireStr(payload.markdown, 64000);
   if (explicit) return explicit;
   const skillId = requireStr(payload.skillId, 160);
   if (!skillId) throw createSkillError(SKILL_ERR_INVALID_INPUT, "skill/analyze 需要 markdown 或 skillId");
-  const skill = skillStore.listSkills().find((item) => item.id === skillId);
-  if (!skill) throw createSkillError(SKILL_ERR_NOT_FOUND, "技能不存在：" + skillId);
+  const skill = ownedSkill(context, skillId);
   const instructions = skill.source && skill.source.instructions ? skill.source.instructions : skill.systemPrompt;
   if (!instructions) throw createSkillError(SKILL_ERR_INVALID_INPUT, "技能没有可分析的源文档：" + skillId);
   return String(instructions).slice(0, 64000);
 }
 
 /** 从已注册技能 / 技能包重建可再次导入的 ZIP（只用内存快照，不遍历任意磁盘路径）。 */
-function exportArchive(payload) {
+function exportArchive(payload, context) {
   const skillId = requireStr(payload.skillId, 160);
   const packId = requireStr(payload.packId, 160);
   if (!skillId && !packId) throw createSkillError(SKILL_ERR_INVALID_INPUT, "skill/pack/export 需要 skillId 或 packId");
-  const all = skillStore.listSkills();
+  const all = visibleSkills(context);
   let chosen;
   if (skillId) {
     const one = all.find((item) => item.id === skillId);
@@ -134,8 +151,8 @@ function exportArchive(payload) {
  */
 function createSkillCatalogSource() {
   return {
-    list: () => (typeof skillStore.listSkills === "function" ? skillStore.listSkills() : (typeof skillStore.agentSkillTools === "function" ? skillStore.agentSkillTools() : [])),
-    call: (skillId, args, ctx) => skillRunner.runSkill(String(skillId), args, ctx && typeof ctx === "object" ? ctx : {}),
+    list: (context = {}) => visibleSkills(context),
+    call: (skillId, args, ctx) => { ownedSkill(ctx, String(skillId)); return skillRunner.runSkill(String(skillId), args, ctx && typeof ctx === "object" ? ctx : {}); },
   };
 }
 
@@ -146,7 +163,7 @@ function createSkillCatalogSource() {
  * B6d：fsAdapter 只喂 skillRunner（产物落盘 saveImagesToFs / saveAudiosToFs / saveVideosToFs）；
  * 技能目录 / 技能包 / 工作空间的 fsImpl 仍是 node:fs（见下方第 1 节的注）。
  */
-function createSkillBundle({ userDataDir, identityStore = null, authorization = null, providerAdapter = null, modelAdapter = null, cliRuntime = null, mediaAdapter = null, fsAdapter = null, onlineInstaller = null, logger = null, clock = null } = {}) {
+function createSkillBundle({ userDataDir, identityStore = null, authorization = null, providerAdapter = null, modelAdapter = null, cliRuntime = null, mediaAdapter = null, fsAdapter = null, onlineInstaller = null, githubFetcher, logger = null, clock = null } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
   const paths = userDataDir ? resolveDxosPaths(userDataDir) : null;
   const dataDir = paths ? paths.root : null;
@@ -193,6 +210,12 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
     // task-25 D09：ModelScope 在线安装器只接受显式注入；未注入时 importOnlineSkillPack 结构化依赖缺失。
     runner: onlineInstaller || null,
   });
+  const githubFetch = githubFetcher === undefined ? (typeof fetch === "function" ? fetch : null) : githubFetcher;
+  const githubInstaller = createSkillGithubInstaller({
+    fetchImpl: githubFetch,
+    importArchive: (buffer, sourceName, options) => skillPack.importRegisteredSkillPack(buffer, sourceName, options),
+    clock: now,
+  });
 
   // ---- 5) 执行器 / 分析器：模型出口、CLI、媒体、虚拟文件树 ----
   skillRunner.configureSkillRunner({ skillStore: skillStore, providerAdapter: providerAdapter || null, modelAdapter: modelAdapter || null, cliRuntime: cliRuntime || null, mediaAdapter: mediaAdapter || null, fsAdapter: fsAdapter || null, clock: now, logger: logger });
@@ -216,6 +239,7 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
     skillImport: true,
     skillPack: true,
     onlineInstaller: !!onlineInstaller,
+    githubInstaller: !!githubFetch,
     skillRunner: true,
     skillAnalyzer: true,
     skillWorkspace: !!db,
@@ -244,33 +268,35 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
   /** 命令分发。失败一律 throw（由 execute 统一规约），成功返回原始值（由 execute 统一脱敏）。 */
   async function dispatch(command, payload, context) {
     const userId = context.userId;
+    const beforeSkillIds = new Set(skillStore.listSkills().map((skill) => skill.id));
     switch (command) {
       // ---------------- 技能目录 ----------------
       case "skill/list": {
-        return { items: skillStore.listSkills() };
+        return { items: visibleSkills(context) };
       }
       case "skill/get": {
         const id = requireStr(payload.skillId, 160) || requireStr(payload.id, 160);
         if (!id) throw createSkillError(SKILL_ERR_INVALID_INPUT, "skillId 必填");
-        const skill = skillStore.listSkills().find((item) => item.id === id);
-        if (!skill) throw createSkillError(SKILL_ERR_NOT_FOUND, "技能不存在：" + id);
-        return { skill };
+        return { skill: ownedSkill(context, id) };
       }
       case "skill/enable":
       case "skill/disable": {
         const id = requireStr(payload.skillId, 160) || requireStr(payload.id, 160);
         if (!id) throw createSkillError(SKILL_ERR_INVALID_INPUT, "skillId 必填");
+        ownedSkill(context, id);
         const updated = skillStore.setSkillEnabled(id, command === "skill/enable");
         if (!updated) throw createSkillError(SKILL_ERR_NOT_FOUND, "技能不存在：" + id);
         return { skill: updated };
       }
       case "skill/save": {
         const input = payload.skill && typeof payload.skill === "object" ? payload.skill : payload;
-        return { skill: skillStore.saveCustomSkill(input) };
+        if (input.id && skillStore.listSkills().some((skill) => skill.id === input.id)) ownedSkill(context, String(input.id));
+        return { skill: skillStore.saveCustomSkill({ ...input, ownerUserId: userId }) };
       }
       case "skill/delete": {
         const id = requireStr(payload.skillId, 160) || requireStr(payload.id, 160);
         if (!id) throw createSkillError(SKILL_ERR_INVALID_INPUT, "skillId 必填");
+        ownedSkill(context, id);
         return { skillId: id, deleted: skillStore.deleteCustomSkill(id) };
       }
 
@@ -280,24 +306,38 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
         if (!id) throw createSkillError(SKILL_ERR_INVALID_INPUT, "skillId 必填");
         const args = payload.arguments && typeof payload.arguments === "object" ? payload.arguments : payload.args && typeof payload.args === "object" ? payload.args : {};
         const options = payload.options && typeof payload.options === "object" ? payload.options : {};
+        ownedSkill(context, id);
         return await skillRunner.runSkill(id, args, Object.assign({ userId: userId, rootId: requireStr(payload.rootId, 160) || undefined, providerId: requireStr(payload.providerId, 120) || undefined, model: requireStr(payload.model, 200) || undefined }, options));
       }
       case "skill/analyze": {
-        const result = await skillAnalyzer.analyzeSkillDocument(skillSourceText(payload), requireStr(payload.sourceName, 200) || undefined);
+        const result = await skillAnalyzer.analyzeSkillDocument(skillSourceText(payload, context), requireStr(payload.sourceName, 200) || undefined);
         return result;
       }
 
       // ---------------- 技能包 ----------------
       case "skill/pack/list": {
-        const items = skillPack.listSkillPacks();
+        const packIds = visiblePackIds(context);
+        const items = skillPack.listSkillPacks().filter((pack) => packIds.has(pack.id));
         // task-36 D09：在线来源查询复用 list（不新增命令）；只有显式请求时才附加字段。
         if (payload.onlineSourceAction === "get" || payload.onlineSource === true) {
           return { items, onlineSource: onlineSourceConfig ? onlineSourceConfig.get() : { enabled: false, source: "", unavailable: true } };
         }
         return { items };
       }
+      case "skill/pack/inspectOnline": {
+        const source = requireStr(payload.source, 2048) || requireStr(payload.onlineSource, 2048);
+        if (!source) throw createSkillError(SKILL_ERR_INVALID_INPUT, "GitHub 仓库地址必填");
+        return { preview: await githubInstaller.inspect(source, userId) };
+      }
+      case "skill/pack/installStaged": {
+        const previewId = requireStr(payload.previewId, 160);
+        if (!previewId) throw createSkillError(SKILL_ERR_INVALID_INPUT, "安装预览令牌必填");
+        const result = await githubInstaller.install(previewId, userId);
+        claimNewSkills(beforeSkillIds, userId, result);
+        return result;
+      }
       case "skill/pack/install": {
-        // task-36 D09：在线来源设置/清理复用 install（不扩前端冻结的 15 条命令白名单）。
+        // task-36 D09：在线来源设置/清理复用 install。
         if (payload.onlineSourceAction === "set") {
           if (!onlineSourceConfig) throw createSkillError(SKILL_ERR_DEPENDENCY_UNAVAILABLE, "在线来源配置未装配", { dependency: "userDataDir" });
           try { return { onlineSource: onlineSourceConfig.set({ enabled: payload.enabled === true, source: requireStr(payload.source, 12000) || "" }) }; }
@@ -308,8 +348,12 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
           return { onlineSource: onlineSourceConfig.clear() };
         }
         // task-25 D09：在线安装复用 install 命令；缺安装器即结构化缺失。
-        if (payload.onlineSource != null) return skillPack.importOnlineSkillPack(requireStr(payload.onlineSource, 12000));
-        return skillPack.importRegisteredSkillPack(archiveBuffer(payload, "archiveBase64"), requireStr(payload.sourceName, 200) || "skill-pack.zip");
+        if (payload.onlineSource != null) {
+          const result = await skillPack.importOnlineSkillPack(requireStr(payload.onlineSource, 12000));
+          claimNewSkills(beforeSkillIds, userId, result); return result;
+        }
+        const result = skillPack.importRegisteredSkillPack(archiveBuffer(payload, "archiveBase64"), requireStr(payload.sourceName, 200) || "skill-pack.zip");
+        claimNewSkills(beforeSkillIds, userId, result); return result;
       }
       case "skill/pack/import": {
         const options = {
@@ -317,14 +361,16 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
           packName: requireStr(payload.packName, 200) || undefined,
           idPrefix: requireStr(payload.idPrefix, 40) || undefined,
         };
-        return skillImport.importSkillPackage(archiveBuffer(payload, "archiveBase64"), options);
+        const result = skillImport.importSkillPackage(archiveBuffer(payload, "archiveBase64"), options);
+        claimNewSkills(beforeSkillIds, userId, result); return result;
       }
       case "skill/pack/export": {
-        return exportArchive(payload);
+        return exportArchive(payload, context);
       }
       case "skill/pack/uninstall": {
         const id = requireStr(payload.packId, 160) || requireStr(payload.id, 160);
         if (!id) throw createSkillError(SKILL_ERR_INVALID_INPUT, "packId 必填");
+        if (!visiblePackIds(context).has(id)) throw createSkillError(SKILL_ERR_NOT_FOUND, "技能包不存在：" + id);
         if (!skillPack.deleteSkillPack(id)) throw createSkillError(SKILL_ERR_NOT_FOUND, "技能包不存在：" + id);
         return { packId: id, deleted: true };
       }
@@ -332,8 +378,12 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
       // ---------------- 工作区 / 健康 ----------------
       case "skill/workspace/list": {
         const packId = requireStr(payload.packId, 160);
-        if (packId) return { packId: packId, items: skillWorkspace.listAgentWorkspaceProfiles(packId) };
-        const packs = skillPack.listSkillPacks();
+        const packIds = visiblePackIds(context);
+        if (packId) {
+          if (!packIds.has(packId)) throw createSkillError(SKILL_ERR_NOT_FOUND, "技能包不存在：" + packId);
+          return { packId: packId, items: skillWorkspace.listAgentWorkspaceProfiles(packId) };
+        }
+        const packs = skillPack.listSkillPacks().filter((pack) => packIds.has(pack.id));
         const items = [];
         for (const pack of packs) {
           for (const profile of skillWorkspace.listAgentWorkspaceProfiles(pack.id)) items.push(Object.assign({ packId: pack.id }, profile));

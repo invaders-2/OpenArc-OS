@@ -306,6 +306,46 @@ function resolveImageSize({ size = null, ratio = null, resolution = null, custom
   return cell && !isGptImageModel(model) ? fitSizeToTier(cell, resKey) : cell;
 }
 
+/**
+ * 对话式服务商（Lovart 这类只吃提示词、没有 size / aspect_ratio 字段的适配器）的尺寸要求。
+ * 返回「画面比例 3:4，输出 1536×2048 像素」这种可以直接写进提示词的确定要求；
+ * 比例与像素都拿不到时返回 null（不凭空造尺寸，与 resolveImageSize 同一纪律）。
+ */
+function sizeRequirement({ size = null, ratio = null } = {}) {
+  const pair = parseSize(size);
+  const parts = [];
+  const ratioText = normalizeRatioText(ratio) || (pair ? ratioFromSize(pair) : null);
+  if (ratioText) parts.push("画面比例 " + ratioText);
+  if (pair) parts.push("输出 " + pair.width + "×" + pair.height + " 像素");
+  return parts.length ? parts.join("，") : null;
+}
+
+/** 把尺寸要求拼到提示词末尾（提示词为空就整段作为提示词）；拿不到尺寸时原样返回。 */
+function withSizeRequirement(prompt, options) {
+  const base = String(prompt == null ? "" : prompt);
+  const text = sizeRequirement(options);
+  if (!text) return base;
+  return base + (base.trim() ? "\n\n" : "") + "【画面要求】" + text + "，严格按此比例与尺寸出图。";
+}
+
+/** "3:4" 这类可读比例原样用；自适应 / custom / source / 数字等无法表达成比例的取值一律忽略。 */
+function normalizeRatioText(value) {
+  const m = /^\s*(\d{1,4}(?:\.\d+)?)\s*[:：]\s*(\d{1,4}(?:\.\d+)?)\s*$/.exec(String(value == null ? "" : value));
+  if (!m) return null;
+  const width = Number(m[1]);
+  const height = Number(m[2]);
+  return width > 0 && height > 0 ? m[1] + ":" + m[2] : null;
+}
+
+/** 像素 → 化简后的可读比例（1536x2048 → 3:4）；只在没有显式比例时用。 */
+function ratioFromSize(pair) {
+  if (!pair || !pair.width || !pair.height) return null;
+  const divisor = gcdInt(pair.width, pair.height);
+  const width = Math.round(pair.width / divisor);
+  const height = Math.round(pair.height / divisor);
+  return width > 0 && height > 0 && width <= 64 && height <= 64 ? width + ":" + height : null;
+}
+
 /** 从画布节点的可编辑字段解析（node.ratio / node.resolution / node.customSize / node.customRatio）。 */
 function resolveImageSizeFromNode(node, { tables = null } = {}) {
   if (!node || typeof node !== "object") return null;
@@ -399,6 +439,10 @@ module.exports = {
   isGptImageModel,
   resolveImageSize,
   resolveImageSizeFromNode,
+  sizeRequirement,
+  withSizeRequirement,
+  normalizeRatioText,
+  ratioFromSize,
   normalizeImageSizeTables,
   sniffImageMime,
   normalizeDeclaredMime,

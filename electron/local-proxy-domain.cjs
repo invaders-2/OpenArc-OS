@@ -130,6 +130,21 @@ const LOCAL_PROXY_COMMANDS = Object.freeze({
     network: Object.freeze({ default: "off" }),
     summary: "用一次性配对码换取局域网令牌（只返回一次；默认只读，可绑定单个画布）",
   },
+  "desktop/lan/devices": {
+    risk: "read", credential: false, probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "列出已连接局域网设备（名称/IP/权限/连接时间，不含令牌）",
+  },
+  "desktop/lan/revoke": {
+    risk: "write", credential: false, probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "按 tokenId/clientId/ip 撤销局域网令牌并断开连接",
+  },
+  "desktop/lan/join": {
+    risk: "write", credential: false, probesExternal: true,
+    network: Object.freeze({ default: "off" }),
+    summary: "访客通过主进程 HTTP 向主机配对端点兑换 LAN 令牌（渲染层不直连 HTTP）",
+  },
   // task-22：缓存清理（只删 dxos 下 cache/temp 目录内容；不碰凭据 / 数据库）。
   "desktop/cache/clear": {
     risk: "destructive",

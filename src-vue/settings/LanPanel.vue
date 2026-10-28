@@ -336,165 +336,132 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="!available" data-lan-panel="1" data-lan-available="false">
-    <DsPageState
-      kind="unavailable"
-      title="当前环境没有桌面桥"
-      description="局域网协作需要 OpenArc 桌面应用（Electron）的 desktop 域；这里不展示模拟状态。"
-    />
+    <DsPageState kind="unavailable" title="局域网协作不可用" description="需要在 OpenArc 桌面应用里使用。" />
   </div>
 
-  <section v-else class="device-section lan-panel" aria-label="局域网协作" data-lan-panel="1" data-lan-available="true" :data-lan-enabled="enabled ? 'true' : 'false'">
-    <div class="device-section-head">
-      <h3>局域网协作</h3>
-      <DsBadge :tone="statusTone" data-lan-status-badge>{{ statusLabel }}</DsBadge>
-    </div>
+  <!-- 原型 A：分组卡片（标签左、值/控件右），卡片无描边 -->
+  <section v-else class="lan-panel" aria-label="局域网协作" data-lan-panel="1" data-lan-available="true" :data-lan-enabled="enabled ? 'true' : 'false'">
+    <h3 class="lan-sec">局域网协作 <span class="lan-state" data-lan-status-badge :data-tone="statusTone">{{ statusLabel }}</span></h3>
 
     <p v-if="failure" class="device-error" role="alert" :data-lan-error="failure.code">{{ failure.text }}</p>
     <p v-if="statusFailure" class="device-error" role="alert" data-lan-status-error>{{ statusFailure }}</p>
     <p v-if="status?.lastError" class="device-error" role="alert" data-lan-last-error>最近一次错误：{{ status.lastError }}</p>
     <p v-if="notice" class="device-note" role="status" data-lan-notice>{{ notice }}</p>
 
-    <div class="lan-toggle-row">
-      <button
-        type="button"
-        role="switch"
-        class="switch"
-        :aria-checked="enabled"
-        aria-label="局域网协作"
-        :disabled="busy !== null || loading"
-        data-lan-switch
-        @click="toggle"
-      />
-      <div class="lan-toggle-text">
-        <strong>{{ enabled ? "局域网协作已开启" : "局域网协作已关闭" }}</strong>
-        <span class="device-note">
-          {{ enabled
-            ? "监听 " + listeningAddress + "；只有持有一次性配对码换来的令牌才能连接，令牌只读，不含编辑权。"
-            : "默认关闭：不监听任何端口。开启后会在 0.0.0.0 的随机端口上等待已配对设备。" }}
+    <div class="set-group">
+      <div class="setting-row">
+        <span class="set-lab">允许局域网内的设备查看画布
+          <small data-lan-optin-note>{{ enabled ? "已在 " + listeningAddress + " 等待已配对的设备；对方只能查看，不能编辑。" : "默认关闭，不占用任何端口。关闭后已发出的配对码和授权会全部作废。" }}</small>
         </span>
+        <button
+          type="button"
+          role="switch"
+          class="switch"
+          :aria-checked="enabled"
+          aria-label="局域网协作"
+          :disabled="busy !== null || loading"
+          data-lan-switch
+          :data-lan-action="enabled ? 'stop' : 'start'"
+          @click="enabled ? askStop() : start()"
+        />
       </div>
-      <DsButton
-        v-if="!enabled"
-        variant="secondary"
-        size="sm"
-        :status="busy === 'start' ? 'loading' : 'idle'"
-        :disabled="loading || busy !== null"
-        data-lan-action="start"
-        @click="start"
-      >开启</DsButton>
-      <DsButton
-        v-else
-        variant="danger"
-        size="sm"
-        :status="busy === 'stop' ? 'loading' : 'idle'"
-        :disabled="busy !== null"
-        data-lan-action="stop"
-        @click="askStop"
-      >停止并撤销</DsButton>
-    </div>
-
-    <p class="device-note" data-lan-optin-note>
-      这是显式开关（opt-in）：关闭时零监听；停止会清空配对码、已签发令牌与所有局域网房间 —— 正在连接的设备会立即断开。
-    </p>
-    <p class="device-note" data-lan-scope-note>
-      本区的配对码只用于局域网只读协作；下方「配对」是设备域的设备凭据，两者互不相通，不能互相替代。
-    </p>
-
-    <dl class="lan-status" data-lan-status>
-      <dt>监听地址</dt>
-      <dd data-lan-address>{{ status?.listening ? listeningAddress : "未监听" }}</dd>
-      <dt>WebSocket 路径</dt>
-      <dd data-lan-path>{{ status?.path || "/api/canvas/collab" }}</dd>
-      <dt>在线客户端</dt>
-      <dd data-lan-clients>{{ status?.clients ?? 0 }} / 32</dd>
-      <dt>活动令牌</dt>
-      <dd data-lan-tokens>{{ status?.tokens ?? 0 }}</dd>
-      <dt>配对码</dt>
-      <dd data-lan-pairing-status>
-        {{ status?.pairing.active ? "有效 · 剩余 " + statusPairingRemaining + " · 到期 " + formatTime(status.pairing.expiresAt) : "没有有效配对码" }}
-      </dd>
-      <dt>权限</dt>
-      <dd><DsBadge tone="neutral" size="sm">只读（不能编辑画布）</DsBadge></dd>
-    </dl>
-
-    <div class="lan-actions">
-      <DsButton
-        variant="secondary"
-        size="sm"
-        :status="busy === 'pairing' ? 'loading' : 'idle'"
-        :disabled="!enabled || busy !== null"
-        data-lan-action="pairing"
-        @click="createPairing"
-      >生成一次性配对码</DsButton>
-      <DsButton variant="ghost" size="sm" :disabled="loading" @click="loadStatus()">刷新状态</DsButton>
-    </div>
-
-    <div v-if="pairing" class="device-pairing-secret" data-lan-pairing-panel>
-      <p class="device-note">配对码只显示这一次；关闭面板或停止服务后界面不再展示。换到令牌即作废，重新生成会替换旧码。</p>
-      <code class="device-secret" data-lan-pairing-code>{{ pairing.code }}</code>
-      <p class="device-meta" data-lan-pairing-expiry>
-        剩余 {{ remaining }} · 到期 {{ formatTime(pairing.expiresAt) }} · 端口 {{ pairing.port ?? "—" }} · 路径 {{ pairing.path }}
-      </p>
-      <div class="lan-actions">
-        <DsButton variant="secondary" size="sm" @click="copy(pairing.code, 'code')" data-lan-action="copy-code">
-          {{ copied === "code" ? "已复制" : copied === "failed:code" ? "复制失败，请手动选中" : "复制配对码" }}
-        </DsButton>
+      <div class="setting-row">
+        <span class="set-lab">在线设备</span>
+        <span class="lan-val" data-lan-clients>{{ status?.clients ?? 0 }} / 32</span>
+      </div>
+      <div class="setting-row">
+        <span class="set-lab">已授权设备</span>
+        <span class="lan-val" data-lan-tokens>{{ status?.tokens ?? 0 }}</span>
+      </div>
+      <div class="setting-row">
+        <span class="set-lab">权限</span>
+        <span class="lan-val">只读（不能编辑画布）</span>
       </div>
     </div>
 
-    <div v-if="pairToken" class="device-pairing-secret" data-lan-pair-token-panel>
-      <p class="device-note">令牌只显示这一次；不写日志、不落盘。关闭面板或停止服务后界面即清除；服务端令牌在停止时撤销。</p>
-      <code class="device-secret" data-lan-pair-token>{{ pairToken.token }}</code>
-      <p class="device-meta" data-lan-token-meta>
-        到期 {{ formatTime(pairToken.expiresAt) }} · 连接地址 {{ pairToken.ws }} · {{ pairToken.tokenId ? "令牌 " + pairToken.tokenId : "" }}
-      </p>
-      <div class="lan-actions">
-        <DsButton variant="secondary" size="sm" @click="copy(pairToken.token, 'token')" data-lan-action="copy-token">
-          {{ copied === "token" ? "已复制" : copied === "failed:token" ? "复制失败，请手动选中" : "复制令牌" }}
+    <h3 class="lan-sec">配对新设备</h3>
+    <div class="set-group">
+      <div class="setting-row">
+        <span class="set-lab">一次性配对码
+          <small data-lan-pairing-status>{{ status?.pairing.active ? "有效，还剩 " + statusPairingRemaining : "生成后在另一台设备上输入，用一次就失效" }}</small>
+        </span>
+        <DsButton
+          variant="secondary"
+          size="sm"
+          :status="busy === 'pairing' ? 'loading' : 'idle'"
+          :disabled="!enabled || busy !== null"
+          data-lan-action="pairing"
+          @click="createPairing"
+        >{{ pairing ? "重新生成" : "生成配对码" }}</DsButton>
+      </div>
+      <div v-if="pairing" class="setting-row lan-secret-row" data-lan-pairing-panel>
+        <span class="set-lab">
+          <code class="lan-code" data-lan-pairing-code>{{ pairing.code }}</code>
+          <small data-lan-pairing-expiry>只显示这一次 · 还剩 {{ remaining }}</small>
+        </span>
+        <DsButton variant="ghost" size="sm" data-lan-action="copy-code" @click="copy(pairing.code, 'code')">
+          {{ copied === "code" ? "已复制" : copied === "failed:code" ? "复制失败" : "复制" }}
         </DsButton>
       </div>
     </div>
 
     <details class="lan-advanced" data-lan-advanced>
-      <summary>高级：用配对码换取只读令牌（本机验证）</summary>
-      <p class="device-note">
-        pair 是桌面域命令，真实远端设备无法直接调用；这里只用于验证配对码能否换到令牌。换到的令牌只显示一次、只读，
-        不要粘贴到日志或工单；关闭面板即从界面清除。
-      </p>
-      <form class="lan-pair-form" @submit.prevent="pairNow">
-        <input
-          v-model="pairInput"
-          type="text"
-          inputmode="text"
-          autocomplete="one-time-code"
-          aria-label="配对码"
-          placeholder="ABCD-EFGH"
-          data-lan-pair-input
-        />
-        <DsButton variant="secondary" size="sm" type="submit" :status="pairBusy ? 'loading' : 'idle'" :disabled="!enabled || pairBusy" data-lan-action="pair">
-          换取令牌
-        </DsButton>
-      </form>
+      <summary>高级</summary>
+      <div class="set-group">
+        <div class="setting-row">
+          <span class="set-lab">监听地址</span>
+          <span class="lan-val" data-lan-address>{{ status?.listening ? listeningAddress : "未监听" }}</span>
+        </div>
+        <div class="setting-row">
+          <span class="set-lab">连接路径</span>
+          <span class="lan-val" data-lan-path>{{ status?.path || "/api/canvas/collab" }}</span>
+        </div>
+        <form class="setting-row lan-pair-form" @submit.prevent="pairNow">
+          <span class="set-lab">在本机验证配对码<small>用配对码换一次只读授权，确认配对码可用</small></span>
+          <input v-model="pairInput" type="text" inputmode="text" autocomplete="one-time-code" aria-label="配对码" placeholder="ABCD-EFGH" class="set-input lan-pair-input" data-lan-pair-input />
+          <DsButton variant="secondary" size="sm" type="submit" :status="pairBusy ? 'loading' : 'idle'" :disabled="!enabled || pairBusy" data-lan-action="pair">验证</DsButton>
+        </form>
+        <div v-if="pairToken" class="setting-row lan-secret-row" data-lan-pair-token-panel>
+          <span class="set-lab">
+            <code class="lan-code lan-token" data-lan-pair-token>{{ pairToken.token }}</code>
+            <small data-lan-token-meta>只显示这一次 · 到期 {{ formatTime(pairToken.expiresAt) }}</small>
+          </span>
+          <DsButton variant="ghost" size="sm" data-lan-action="copy-token" @click="copy(pairToken.token, 'token')">
+            {{ copied === "token" ? "已复制" : copied === "failed:token" ? "复制失败" : "复制" }}
+          </DsButton>
+        </div>
+      </div>
       <p v-if="pairFailure" class="device-error" role="alert" data-lan-pair-error>{{ pairFailure }}</p>
-      <p class="device-note">成功后配对码会被消费；如需给另一台设备使用，请重新生成配对码。</p>
+      <p class="device-note" data-lan-scope-note>这里的配对码只用于局域网查看画布，和下方「设备配对」的凭据互不相通。</p>
+      <DsButton variant="ghost" size="sm" :disabled="loading" @click="loadStatus()">刷新状态</DsButton>
     </details>
   </section>
 
-  <DsDialog :open="stopDialog" title="停止并撤销局域网协作" @close="stopDialog = false">
+  <DsDialog :open="stopDialog" title="关闭局域网协作？" @close="stopDialog = false">
     <div class="lan-dialog">
-      <p class="device-note">
-        停止会立即撤销：关闭监听、清空一次性配对码、清空已签发令牌并断开所有在线客户端。这不是暂停，重新开启后旧配对码和旧令牌都不能再用。
-      </p>
-      <p class="device-note">确定要停止「{{ status?.listening ? listeningAddress : "局域网协作" }}」吗？</p>
+      <p class="device-note">关闭后会立刻断开所有在线设备，已发出的配对码和授权全部作废；重新开启需要重新配对。</p>
     </div>
     <template #footer>
       <DsButton variant="ghost" @click="stopDialog = false">取消</DsButton>
-      <DsButton variant="danger" :status="busy === 'stop' ? 'loading' : 'idle'" data-lan-action="confirm-stop" @click="stop">停止并撤销</DsButton>
+      <DsButton variant="danger" :status="busy === 'stop' ? 'loading' : 'idle'" data-lan-action="confirm-stop" @click="stop">关闭</DsButton>
     </template>
   </DsDialog>
 </template>
 
 <style scoped>
+.lan-panel { display: flex; flex-direction: column; gap: 8px; }
+.lan-sec { display: flex; align-items: center; gap: 8px; margin: 16px 0 4px; font-size: var(--fs-secondary); font-weight: var(--fw-medium); color: var(--muted); }
+.lan-sec:first-child { margin-top: 0; }
+.lan-state { font-weight: var(--fw-regular); font-size: var(--fs-caption); }
+.lan-state[data-tone="success"] { color: var(--success-text, #248a3d); }
+.lan-val { font-size: var(--fs-secondary); color: var(--muted); }
+.lan-code { font-family: var(--font-mono); font-size: var(--fs-headline); letter-spacing: 0.06em; color: var(--text); user-select: all; }
+.lan-token { font-size: var(--fs-caption); letter-spacing: 0; overflow-wrap: anywhere; }
+.lan-pair-input { width: 160px !important; }
+.lan-advanced { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.lan-advanced > summary { cursor: pointer; font-size: var(--fs-secondary); color: var(--muted); padding: 4px 0; }
+.lan-advanced[open] > summary { margin-bottom: 6px; }
+
 .lan-panel {
   gap: var(--space-3);
 }
@@ -564,7 +531,7 @@ onBeforeUnmount(() => {
   min-width: 140px;
   padding: 7px var(--space-2);
   border-radius: var(--radius-md);
-  border: 1px solid var(--line);
+  border: 0;
   background: rgb(var(--content-rgb) / var(--content-alpha));
   color: var(--text);
   font: inherit;

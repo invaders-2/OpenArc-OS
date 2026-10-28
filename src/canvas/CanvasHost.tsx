@@ -24,7 +24,7 @@
  *   · 本地导入图片进**资源库**，画布文档只存 openarc-asset:<ResourceRef>。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Window as WinDomain } from "../../electron/window-domain.cjs";
+import type { Window as WinDomain } from "../../electron/window-domain.ts";
 import { buildCanvasModelLabelIndex, canvasModelBaseName } from "./canvasModelLabels";
 import { closeStreamWithoutContent, isStreamContentEvent, pageFrameFor, sseChunk, streamCloseErrorFrame } from "./canvasLlmStream";
 import { buildSizePolicyTable } from "../../electron/image-params.cjs";

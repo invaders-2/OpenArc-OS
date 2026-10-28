@@ -3,7 +3,7 @@
  *
  * 被测代码：electron/task-merge-migration.cjs（迁移体）+
  *          electron/identity-store.cjs:1798（#migrate）/ 1812（#applyMigration）/ 1886（applyExplicitMigration）。
- * 本文件只在**库副本**上执行迁移；不启用生产迁移、不动 SCHEMA_VERSION（生产仍是 28）。
+ * 本文件只在**库副本**上执行迁移；任务合并不进入生产 MIGRATIONS，生产当前版本为 30。
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -215,7 +215,7 @@ test("合并迁移：user_version 28 → 29；降回 28 后重放是空跑，数
 });
 
 test("合并迁移：默认不启用、不改 SCHEMA_VERSION；迁移后的副本被生产 open() 以 SCHEMA_TOO_NEW 拒开", () => {
-  assert.equal(SCHEMA_VERSION, 28, "生产 SCHEMA_VERSION 必须仍是 28");
+  assert.equal(SCHEMA_VERSION, 30, "生产 SCHEMA_VERSION 为 30；v29 仍只属于显式任务合并");
   const dir = freshDir();
   const { copy, store } = migrateCopy(dir);
   store.close();
@@ -228,7 +228,7 @@ test("合并迁移：默认不启用、不改 SCHEMA_VERSION；迁移后的副�
         assert.ok(error instanceof SchemaTooNewError);
         assert.equal(error.code, "SCHEMA_TOO_NEW");
         assert.equal(error.found, 29);
-        assert.equal(error.supported, 28);
+        assert.equal(error.supported, 30);
         return true;
       },
     );

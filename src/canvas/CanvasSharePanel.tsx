@@ -77,6 +77,8 @@ export function CanvasSharePanel({
   onClose,
   onAccessChanged,
   onFatalAccessLost,
+  onData,
+  onOpenInvite,
 }: {
   canvasId: string;
   title?: string;
@@ -87,6 +89,8 @@ export function CanvasSharePanel({
   onAccessChanged?: () => void;
   /** 当前打开的画布已经被撤销/删除：让宿主切只读并提示/返回列表。*/
   onFatalAccessLost?: (error: string) => void;
+  onData?: (data: SharesResponse | null) => void;
+  onOpenInvite?: () => void;
 }) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -143,6 +147,7 @@ export function CanvasSharePanel({
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; if (flashTimer.current) window.clearTimeout(flashTimer.current); }; }, []);
   useEffect(() => { void load(); }, [load, refreshToken]);
+  useEffect(() => { onData?.(data); }, [data, onData]);
   useEffect(() => { closeRef.current?.focus(); }, []);
 
   // Esc 关闭；行内两步确认打开时先取消确认（不误关整个面板）。
@@ -305,6 +310,11 @@ export function CanvasSharePanel({
           <h2 id={titleId} className="canvas-share-panel__title">共享</h2>
           {title ? <p className="canvas-share-panel__subject" title={title}>{title}</p> : null}
         </div>
+        {onOpenInvite ? (
+          <button type="button" className="ds-btn ds-btn--secondary ds-btn--sm" data-testid="share-open-invite" onClick={onOpenInvite}>
+            <UserPlus size={14} aria-hidden="true" />邀请
+          </button>
+        ) : null}
         <button ref={closeRef} type="button" className="ds-iconbtn ds-iconbtn--sm ds-iconbtn--ghost" aria-label="关闭共享面板" data-canvas-share-close onClick={onClose}>
           <X size={15} aria-hidden="true" />
         </button>

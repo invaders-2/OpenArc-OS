@@ -49,7 +49,7 @@ export const APP_PATH = (() => {
   return value ? path.resolve(String(value)) : null;
 })();
 
-/** 顶层键 39 个的真实形状（来源：electron/preload.cjs 的 contextBridge.exposeInMainWorld；0.6.1 追加五域与 CLI 域，Stage 1 追加 marketUpdate）。 */
+/** 顶层键的真实形状（来源：electron/preload.cjs 的 contextBridge.exposeInMainWorld；0.6.1 追加五域与 CLI 域，Stage 1 追加 marketUpdate）。 */
 export const CONTRACT = Object.freeze({
   topLevel: Object.freeze([
     { key: "sync", kind: "function" },
@@ -70,6 +70,8 @@ export const CONTRACT = Object.freeze({
     { key: "agent", kind: "domain", members: ["command", "onEvent"] },
     { key: "skill", kind: "domain", members: ["command", "onEvent"] },
     { key: "media", kind: "domain", members: ["command", "onEvent"] },
+    { key: "calendar", kind: "domain", members: ["command"] },
+    { key: "uploadConsent", kind: "domain", members: ["command"] },
     { key: "sideEffect", kind: "domain", members: ["command", "onEvent", "revokeApproval"] },
     { key: "files", kind: "domain", members: ["pathFor", "import", "list", "rename", "remove", "trash", "trashList", "trashRestore", "trashPurge", "trashEmpty", "read", "writeText", "thumb", "info", "startDrag", "copy", "move", "exportTo"] },
     { key: "automation", kind: "domain", members: ["command", "onEvent"] },

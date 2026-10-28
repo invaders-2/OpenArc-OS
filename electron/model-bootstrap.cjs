@@ -86,9 +86,10 @@ function createModelBundle({ identityStore, authorization, authStore, userDataDi
 const MODEL_COMMANDS = Object.freeze([
   "provider/list", "provider/create", "provider/update", "provider/setStatus", "provider/delete",
   "credential/status", "credential/set", "credential/replace", "credential/delete",
-  "model/list", "model/create", "model/update", "model/setStatus",
+  "model/list", "model/create", "model/update", "model/setStatus", "model/delete",
   "defaults/get", "defaults/set",
   "model/test",
+  "model/usage/summary",
   // 模型/协议出口的**可选**代理（默认关闭；只影响模型域出网，绝不写 globalThis，也不碰在线更新/集成）。
   "model/proxy/get", "model/proxy/set",
   // 10-16：拉取服务商模型清单
@@ -107,9 +108,35 @@ const MODEL_COMMAND_NOT_ALLOWED = "MODEL_COMMAND_NOT_ALLOWED";
 const asStr = (v, max = 512) => (typeof v === "string" ? v.slice(0, max) : v == null ? undefined : String(v).slice(0, max));
 const requireStr = (v, max = 512) => { const s = asStr(v, max); return s && s.length ? s : null; };
 
+/**
+ * 模型配置变更（增 / 删 / 改 / 启停）→ 既有 model:event 下行通道。
+ * 只带 id，不带 baseUrl / 凭据；渲染层据此作废画布的模型目录缓存（否则下拉里还留着刚删的模型）。
+ * 发送口与 provider-protocol 的流式事件同一个（main.cjs 的 wireModelEvents 注入），未装配时静默跳过。
+ */
+function emitModelConfigChanged({ service, action, configId, providerId }) {
+  try {
+    const pp = service && service.providerProtocol;
+    const svc = pp && pp.service;
+    if (!svc || typeof svc.emit !== "function" || !svc.eventChannel || typeof svc.eventChannel.progress !== "function") return false;
+    svc.emit(svc.eventChannel.progress({ type: "model/configChanged", action: String(action), configId: configId == null ? null : String(configId), providerId: providerId == null ? null : String(providerId) }));
+    return true;
+  } catch { return false; }
+}
 function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID, send = null }) {
   // P2 协议服务由 createModelBundle 挂载；测试里若用裸 ModelService，新命令报 PROTOCOL_NOT_READY。
   const protocolService = () => (service && service.providerProtocol ? service.providerProtocol : null);
+  /** 模型写入成功才广播（失败 / 被拒不广播）；返回值原样透传给命令调用方。 */
+  const changed = (result, action) => {
+    try {
+      if (result && result.ok === true) {
+        const model = result.model || null;
+        const configId = (model && model.configId) || result.configId || null;
+        const providerId = (model && model.providerId) || result.providerId || null;
+        if (configId) emitModelConfigChanged({ service, action, configId, providerId });
+      }
+    } catch { /* 广播失败不改变写入结果 */ }
+    return result;
+  };
   // W5：宿主注入 send 时，把流式事件接到 model:event（identity-bootstrap 不转发 send，故 main.cjs 另调 wireModelEvents）。
   if (typeof send === "function") wireModelEvents({ service, send });
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("model:command"); } catch { /* not registered */ } }
@@ -145,12 +172,23 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
         case "model/create": {
           const remoteModelId = requireStr(payload.remoteModelId, 200);
           if (!remoteModelId) return { ok: false, error: "INVALID_INPUT" };
-          return service.createModel({ context, providerId: requireStr(payload.providerId, 120), remoteModelId, displayName: asStr(payload.displayName, 200), capabilities: Array.isArray(payload.capabilities) ? payload.capabilities.slice(0, 16).map((c) => asStr(c, 40)) : [], scope: asStr(payload.scope, 20) });
+          return changed(service.createModel({ context, providerId: requireStr(payload.providerId, 120), remoteModelId, displayName: asStr(payload.displayName, 200), capabilities: Array.isArray(payload.capabilities) ? payload.capabilities.slice(0, 16).map((c) => asStr(c, 40)) : [], scope: asStr(payload.scope, 20) }), "created");
         }
-        case "model/update": return service.updateModel({ context, configId: requireStr(payload.configId, 120), displayName: asStr(payload.displayName, 200), capabilities: Array.isArray(payload.capabilities) ? payload.capabilities.slice(0, 16).map((c) => asStr(c, 40)) : null });
-        case "model/setStatus": return service.setModelStatus({ context, configId: requireStr(payload.configId, 120), status: asStr(payload.status, 20) });
+        case "model/update": return changed(service.updateModel({ context, configId: requireStr(payload.configId, 120), displayName: asStr(payload.displayName, 200), capabilities: Array.isArray(payload.capabilities) ? payload.capabilities.slice(0, 16).map((c) => asStr(c, 40)) : null }), "updated");
+        case "model/setStatus": return changed(service.setModelStatus({ context, configId: requireStr(payload.configId, 120), status: asStr(payload.status, 20) }), "status");
+        // 移除模型：拉取弹窗里取消勾选即调用；授权/镜像回滚都在 ModelService.deleteModel 内
+        case "model/delete": return changed(service.deleteModel({ context, configId: requireStr(payload.configId, 120) }), "deleted");
         case "defaults/get": return service.getDefaults({ context });
         case "defaults/set": return service.setDefault({ context, capability: requireStr(payload.capability, 40), configId: requireStr(payload.configId, 120), scope: asStr(payload.scope, 20) });
+        case "model/usage/summary": {
+          const db = service.store && service.store.db;
+          if (!db) return { ok: false, error: "MODEL_STORE_UNAVAILABLE" };
+          const userId = identity && identity.current ? String(identity.current) : null;
+          const calls = db.prepare("SELECT COUNT(*) AS calls, COALESCE(SUM(total_tokens),0) AS tokens, MAX(started_at) AS lastCallAt FROM model_call_records" + (userId ? " WHERE user_id=?" : "")).get(...(userId ? [userId] : []));
+          let agent = { tokens: 0, lastCallAt: null };
+          try { agent = db.prepare("SELECT COALESCE(SUM(total_tokens),0) AS tokens, MAX(created_at) AS lastCallAt FROM agent_usage_events" + (userId ? " WHERE run_id IN (SELECT run_id FROM agent_runs WHERE user_id=?)" : "")).get(...(userId ? [userId] : [])) || agent; } catch { /* agent 表未装配时只报 model 统计 */ }
+          return { ok: true, usage: { calls: Number(calls.calls) || 0, tokens: (Number(calls.tokens) || 0) + (Number(agent.tokens) || 0), lastCallAt: Math.max(Number(calls.lastCallAt) || 0, Number(agent.lastCallAt) || 0) || null, billing: "not-integrated" } };
+        }
         case "model/test": return service.testConnection({ context, configId: requireStr(payload.configId, 120) });
         // 模型/协议出口代理：只读回 enabled/url（无凭据）；写入口校验 http(s)://host:port 并写授权审计。
         case "model/proxy/get":
@@ -270,7 +308,8 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
         }
         default: return { ok: false, error: MODEL_COMMAND_NOT_ALLOWED };
       }
-    } catch {
+    } catch (err) {
+      try { console.error("[model] command failed", { command: typeof raw.command === "string" ? raw.command : raw.type, message: err && err.message ? String(err.message).slice(0, 300) : "unknown" }); } catch { /* ignore */ }
       return { ok: false, error: "INTERNAL_ERROR" };
     }
   });

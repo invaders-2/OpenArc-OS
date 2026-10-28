@@ -121,6 +121,8 @@ interface OpenArcBridge {
   /** 只下发只读的显示器信息，不暴露任何窗口控制能力。 */
   onDisplay?: (callback: (displays: unknown[]) => void) => () => void;
   identity?: OpenArcIdentityBridge;
+  /** 画布域：preload 仅暴露 canvas:command，主进程继续按白名单校验。 */
+  canvas?: OpenArcCommandBridge;
   model?: OpenArcCommandBridge;
   device?: OpenArcCommandBridge;
   /** MCP 中心：唯一入口 command({command,payload})，形状与 electron/preload.cjs 的 openarc.mcp 一致。 */
@@ -130,6 +132,8 @@ interface OpenArcBridge {
   skill?: OpenArcEventBridge;
   automation?: OpenArcEventBridge;
   media?: OpenArcEventBridge;
+  calendar?: OpenArcCommandBridge;
+  uploadConsent?: OpenArcCommandBridge;
   agent?: OpenArcEventBridge;
   developer?: OpenArcCommandBridge;
   integration?: OpenArcCommandBridge;

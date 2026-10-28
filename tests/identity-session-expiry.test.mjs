@@ -314,7 +314,7 @@ test("E8 · 覆写解析：缺 ack / 值非法 / 合法 三种情形，非法一
 });
 
 test("E9 · 默认路径未变：不注入时仍走 DEFAULT_TTL_MS / DEFAULT_IDLE_MS，schema 仍 21", async () => {
-  assert.equal(SCHEMA_VERSION, 28, "当前真实版本 v28");
+  assert.equal(SCHEMA_VERSION, 30, "当前真实版本 v28");
 
   // 只给值、不给 ack 开关：解析结果为空 → 装配层拿到的仍是默认
   const ignored = resolveSessionTtlOverride({ env: { OPENARC_SESSION_IDLE_MS: "3000" } });
@@ -322,7 +322,7 @@ test("E9 · 默认路径未变：不注入时仍走 DEFAULT_TTL_MS / DEFAULT_IDL
   try {
     assert.equal(boot.store.ttlMs, DEFAULT_TTL_MS);
     assert.equal(boot.store.idleMs, DEFAULT_IDLE_MS);
-    assert.equal(boot.store.schemaVersion, 28);
+    assert.equal(boot.store.schemaVersion, 30);
 
     await boot.service.dispatch({ type: "identity/initialize", identifier: "a@b.local", password: PW, displayName: "A" });
     const login = await boot.service.dispatch({ type: "identity/login", identifier: "a@b.local", password: PW });
@@ -395,7 +395,7 @@ test("E11 · 超长 horizon 分块重排：单次定时不超过 2^31-1，早触
 });
 
 test("E12 · 产品入口接线：main.cjs 只经解析器读双重开关，并把生效值交给 runtime boot", () => {
-  const main = fs.readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
+  const main = fs.readFileSync(new URL("../electron/runtime-composition.cjs", import.meta.url), "utf8");
   assert.equal(main.includes("resolveSessionTtlOverride({ env: process.env })"), true);
   assert.equal(main.includes('console.log("[openarc] " + record.message)'), true, "生效时必须打一条可见日志");
   assert.equal(main.includes("sessionTtlMs: sessionTtl.sessionTtlMs"), true);

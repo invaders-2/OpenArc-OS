@@ -69,7 +69,7 @@ const stripComments = (s) =>
    ══════════════════════════════════════════════════════════════════════════ */
 test("命令白名单逐条等于后端 skill-domain.cjs 的 SKILL_COMMANDS（含顺序与条数）", () => {
   const backend = Object.keys(domain.SKILL_COMMANDS);
-  assert.equal(backend.length, 15, "后端应有 15 条 skill 命令");
+  assert.equal(backend.length, 17, "后端应有 17 条 skill 命令（含 GitHub 预览与暂存安装）");
   assert.deepEqual([...SKILL_COMMANDS], backend, "界面白名单必须与后端完全一致，不能多也不能少");
 });
 
@@ -77,7 +77,7 @@ test("白名单命令都是 skill/ 前缀且不重复", () => {
   const set = new Set(SKILL_COMMANDS);
   assert.equal(set.size, SKILL_COMMANDS.length, "白名单不能有重复项");
   for (const c of SKILL_COMMANDS) {
-    assert.match(c, /^skill\/[a-z/]+$/, c + " 必须是 skill/ 前缀命令");
+    assert.match(c, /^skill\/[A-Za-z/]+$/, c + " 必须是 skill/ 前缀命令");
     assert.equal(domain.isSkillCommand(c), true, c + " 必须是后端承认的命令");
   }
 });

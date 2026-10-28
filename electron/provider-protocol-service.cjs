@@ -254,6 +254,57 @@ class ProviderProtocolService {
     }
   }
 
+  /** Lovart transparent-hole image edit: upload masked PNG, generate with attachments=[url]. */
+  async generateImageEdit({ providerId, model, prompt = "", mode = "redraw", sourceDataUrl = "", referenceUrls = [], requestId = null, signal = null, allowLan = false } = {}) {
+    const resolved = this.#resolveImageProvider({ providerId, allowLan });
+    if (!resolved.ok) return resolved;
+    const { provider, endpoint } = resolved;
+    if (!this.#providerOriginMatches(provider, endpoint)) return { ok: false, error: modelDomain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const lovart = adapter.lovartFor(provider.protocol);
+    if (!lovart || typeof lovart.generateImageEdit !== "function") return { ok: false, error: modelDomain.ERROR_CODE.CAPABILITY_UNAVAILABLE, detail: "lovart-image-edit-required" };
+    const rid = requestId || "iedit_" + crypto.randomBytes(8).toString("base64url");
+    const startedAt = this.clock();
+    const out = await lovart.generateImageEdit({ baseUrl: provider.base_url, apiKey: provider.api_key, model, prompt, mode, sourceDataUrl, referenceUrls, signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 300000) });
+    if (!out.ok) {
+      this.#record({ requestId: rid, providerId: provider.id, model, status: "ERROR", startedAt, errorCode: out.error });
+      return { ok: false, error: out.error || modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE, detail: out.detail, requestId: rid };
+    }
+    const images = await this.#saveLovartArtifacts(out.artifacts, provider, signal);
+    if (!images.length) {
+      this.#record({ requestId: rid, providerId: provider.id, model, status: "ERROR", startedAt, errorCode: modelDomain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+      return { ok: false, error: modelDomain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: "lovart-no-edit-artifact", requestId: rid };
+    }
+    this.#record({ requestId: rid, providerId: provider.id, model, status: "ALLOW", startedAt, usage: null });
+    return { ok: true, requestId: rid, images, lovart: { threadId: out.threadId || null, projectId: out.projectId || null, status: out.status || null, uploadedUrl: out.uploadedUrl || null } };
+  }
+
+  /** Tripo3D text/image-to-model: create task → poll → model URL. */
+  async generate3d({ providerId, model, prompt = "", imageUrl = null, imageDataUrl = null, mode = "text", requestId = null, signal = null, allowLan = false } = {}) {
+    const resolved = this.#resolveProvider({ providerId, allowLan });
+    if (!resolved.ok) return resolved;
+    const { provider, endpoint } = resolved;
+    if (!this.#providerOriginMatches(provider, endpoint)) return { ok: false, error: modelDomain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const tripo = adapter.tripoFor(provider.protocol);
+    if (!tripo) return { ok: false, error: modelDomain.ERROR_CODE.CAPABILITY_UNAVAILABLE, detail: "tripo-3d-provider-required" };
+    const rid = requestId || "t3d_" + crypto.randomBytes(8).toString("base64url");
+    let fileToken = null;
+    if (mode === "image" && imageDataUrl) {
+      const match = /^data:([^;,]+)?;base64,(.*)$/i.exec(String(imageDataUrl));
+      if (!match) return { ok: false, error: modelDomain.ERROR_CODE.INVALID_INPUT, detail: "sourceDataUrl-base64-required", requestId: rid };
+      const uploaded = await tripo.uploadFile({ baseUrl: provider.base_url, apiKey: provider.api_key, data: Buffer.from(match[2] || "", "base64"), mime: match[1] || "image/png", filename: "tripo-reference.png", fetchImpl: this.fetchImpl, signal });
+      if (!uploaded.ok) return { ...uploaded, requestId: rid };
+      fileToken = uploaded.fileToken;
+    }
+    const created = await tripo.createTask({ baseUrl: provider.base_url, apiKey: provider.api_key, kind: mode === "image" ? "image" : "text", prompt, fileToken, imageUrl, model, fetchImpl: this.fetchImpl, signal, timeoutMs: Math.min(this.timeoutMs, 30000) });
+    if (!created.ok) return { ...created, requestId: rid };
+    const task = await tripo.getTask({ baseUrl: provider.base_url, apiKey: provider.api_key, taskId: created.taskId, fetchImpl: this.fetchImpl, signal, timeoutMs: 300000 });
+    if (!task.ok) return { ...task, requestId: rid };
+    let mediaPath = null;
+    const downloaded = await tripo.downloadModel({ url: task.modelUrl, fetchImpl: this.fetchImpl, signal });
+    if (downloaded.ok) { const saved = this.#saveArtifact(downloaded.data, downloaded.mime || "model/gltf-binary"); mediaPath = saved ? saved.mediaPath : null; }
+    return { ok: true, requestId: rid, modelUrl: task.modelUrl, mediaPath, taskId: task.taskId, status: task.status, polls: task.polls };
+  }
+
   /** 图像协议族：OpenAI 兼容 images/generations，产物落盘 <userData>/dxos/media/。 */
   async generateImage({ providerId, model, prompt = "", size = null, count = 1, params = {}, requestId = null, signal = null, allowLan = false } = {}) {
     const resolved = this.#resolveImageProvider({ providerId, allowLan });
@@ -390,9 +441,10 @@ class ProviderProtocolService {
           // Lovart 视频生成同样是 send → watch → result；legacy 执行器不认识签名协议，这里直接分发。
           const lovart = adapter.lovartFor(provider.protocol);
           if (lovart) {
-            const out = await lovart.generateComplete({
-              baseUrl: provider.base_url, apiKey: provider.api_key, kind: "video", model,
-              prompt: String(prompt || callParams.prompt || ""),
+            // 10-23：参考素材上传 + 参数写进提示词都在 lovart.generateVideo 里
+            const out = await lovart.generateVideo({
+              baseUrl: provider.base_url, apiKey: provider.api_key, model,
+              prompt: String(prompt || callParams.prompt || ""), inputs: Array.isArray(inputs) ? inputs : [], params: callParams,
               signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 600000),
             });
             if (!out.ok) return { ok: false, error: out.error || modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE, detail: out.detail, requestId: rid };

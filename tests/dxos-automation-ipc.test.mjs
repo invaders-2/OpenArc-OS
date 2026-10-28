@@ -282,11 +282,12 @@ test("装配契约：preload 顶层 automation 键 + main.cjs 装配 automation:
   assert.ok(preload.includes('ipcRenderer.invoke("automation:command"'));
   assert.ok(preload.includes('ipcRenderer.on("automation:event"'));
   assert.ok(!preload.includes("ipcRenderer,") || preload.includes("const { contextBridge, ipcRenderer, webUtils }"), "不暴露原始 ipcRenderer 对象");
-  const main = fs.readFileSync(path.join(process.cwd(), "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(process.cwd(), "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes('require("./automation-service.cjs")'));
   assert.ok(main.includes('require("./automation-bootstrap.cjs")'));
   assert.ok(main.includes("registerAutomationIpc("));
   assert.ok(main.includes('win.webContents.send("automation:event", event)'));
   assert.ok(main.includes("automationBundle.startScheduler()"));
-  assert.ok(main.includes("automationBundle.stopScheduler()"));
+  const lifecycle = fs.readFileSync(path.join(process.cwd(), "electron", "app-lifecycle.cjs"), "utf8");
+  assert.ok(lifecycle.includes("automationBundle.stopScheduler()"));
 });

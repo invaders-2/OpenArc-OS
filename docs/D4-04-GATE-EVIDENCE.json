@@ -10,9 +10,9 @@
     "arch": "arm64"
   },
   "commit": null,
-  "testedCommit": "68c84c976eab15c360c71e14903abf47de5a7d12",
-  "workspaceState": "",
-  "command": "npm run test:d4-04",
+  "testedCommit": "24c34ee136792788849d8bed47f61613c06ca7d5",
+  "workspaceState": "M PLAN.md\n M docs/D4-04-GATE-EVIDENCE.json\n M docs/FRONTEND-ARCHITECTURE-MAPPING.md\n M electron/canvas-bootstrap.cjs\n M electron/canvas-dxos-asset-library.cjs\n M electron/canvas-dxos-commands.cjs\n M electron/canvas-dxos-store.cjs\n M electron/canvas-node-registry.cjs\n M electron/canvas-service.cjs\n D electron/folder-trash.cjs\n D electron/folder-trash.d.cts\n D electron/geometry.cjs\n D electron/geometry.d.cts\n M electron/harness-adapter.cjs\n M electron/identity-store.cjs\n M electron/image-params.cjs\n M electron/lan-collab-service.cjs\n M electron/local-proxy-domain.cjs\n M electron/main.cjs\n M electron/market-domain.cjs\n M electron/market-service.cjs\n M electron/media-domain.cjs\n M electron/media-public-media.cjs\n M electron/media-service.cjs\n M electron/media-store.cjs\n M electron/model-bootstrap.cjs\n M electron/model-domain.cjs\n M electron/model-provider-bridge.cjs\n M electron/model-service.cjs\n M electron/preload.cjs\n M electron/protocol-engine/artifactDownload.cjs\n M electron/protocol-engine/builtins-models.cjs\n M electron/protocol-engine/builtins.cjs\n M electron/protocol-engine/legacy-executor-media.cjs\n M electron/protocol-engine/legacy-protocols.cjs\n M electron/provider-adapter-lovart.cjs\n M electron/provider-adapter.cjs\n M electron/provider-protocol-service.cjs\n M electron/side-effect-runtime.cjs\n M electron/skill-domain.cjs\n M electron/skill-pack.cjs\n M electron/skill-service.cjs\n M electron/skill-store.cjs\n M electron/task-bootstrap.cjs\n M electron/task-harness-orchestrator.cjs\n M electron/window-command-ipc.cjs\n D electron/window-domain.cjs\n D electron/window-domain.d.cts\n D electron/window-manager.cjs\n D electron/window-manager.d.cts\n M experiments/d2-02-gate/lib/gate.mjs\n M experiments/d2-02/motion-parity.mjs\n M experiments/d2-02/native/probes/01-lifecycle.cjs\n M experiments/d2-02/native/probes/02-security-surface.cjs\n M experiments/d2-02/two-browser.mjs\n M experiments/d2-02/window-stress.mjs\n M experiments/dxos-e2e/run-all.mjs\n M package-lock.json\n M package.json\n M public/icons/ICONS-SOURCE.md\n M public/icons/protocols.png\n M resources/market/catalog.json\n M src-vue/App.vue\n M src-vue/apps.ts\n M src-vue/apps/AutomationApp.vue\n M src-vue/apps/CalendarApp.vue\n M src-vue/apps/ChatApp.vue\n M src-vue/apps/DeclareApp.vue\n M src-vue/apps/DevApp.vue\n M src-vue/apps/DramaApp.vue\n M src-vue/apps/FilesApp.vue\n M src-vue/apps/GovernanceApp.vue\n M src-vue/apps/HomeApp.vue\n M src-vue/apps/MarketApp.vue\n M src-vue/apps/McpCenter.vue\n M src-vue/apps/MusicApp.vue\n M src-vue/apps/NotesApp.vue\n M src-vue/apps/OcrPanel.vue\n M src-vue/apps/PhotosApp.vue\n M src-vue/apps/ProjectsApp.vue\n M src-vue/apps/ResourceLibraryApp.vue\n M src-vue/apps/SharedDrivePanel.vue\n M src-vue/apps/SkillsApp.vue\n M src-vue/apps/TrashApp.vue\n M src-vue/apps/VideoApp.vue\n M src-vue/apps/WeatherApp.vue\n M src-vue/apps/music-state.ts\n M src-vue/apps/workbench.css\n M src-vue/design-system/DsDialog.vue\n M src-vue/env.d.ts\n M src-vue/i18n/en-US.ts\n M src-vue/settings/AppearancePane.vue\n M src-vue/settings/DevicePane.vue\n M src-vue/settings/LanPanel.vue\n M src-vue/settings/LocalProxyPanel.vue\n M src-vue/settings/ModelSettings.vue\n M src-vue/settings/ProtocolSettingsPanel.vue\n M src-vue/settings/RemoteModelsPanel.vue\n M src-vue/settings/SettingsContent.vue\n M src-vue/settings/SystemFontsPanel.vue\n M src-vue/settings/SystemPanes.vue\n M src-vue/settings/modelCategories.ts\n M src-vue/settings/providerPresets.ts\n M src-vue/shell/TopBar.vue\n M src-vue/shell/WindowLayer.vue\n M src-vue/shell/native-sync.ts\n M src-vue/stores/shell.ts\n M src/browser/BrowserApp.tsx\n M src/canvas/CanvasHost.tsx\n M src/canvas/CanvasSharePanel.tsx\n M src/desktop/components.tsx\n M src/desktop/tabGroups.ts\n M src/desktop/useDesktop.ts\n M src/main.tsx\n M src/photos/LibraryView.tsx\n M src/settings/ModelSettings.tsx\n M src/skills/SkillCenter.tsx\n M src/skills/skillCenterLogic.ts\n M src/styles.css\n M src/types/openarc-ipc.d.ts\n M tests/authorization-app-grant-scope.test.mjs\n M tests/d4-04-closure2-boot.test.mjs\n M tests/d4-04-smoke.mjs\n M tests/d4-main-e2e.mjs\n M tests/d5-01-browser-tabs.test.mjs\n M tests/d5-02-canvas-edit-proposal.test.mjs\n M tests/d5-03-reset-device-identity.test.mjs\n M tests/device-migration.test.mjs\n M tests/dxos-061-schema.test.mjs\n M tests/dxos-agent-migration.test.mjs\n M tests/dxos-app-package-loading.test.mjs\n M tests/dxos-automation-app-action.test.mjs\n M tests/dxos-automation-ipc.test.mjs\n M tests/dxos-automation-main-wiring.test.mjs\n M tests/dxos-canvas-sharing.test.mjs\n M tests/dxos-canvas-task16.test.mjs\n M tests/dxos-desktop-executor.test.mjs\n M tests/dxos-desktop-settings.test.mjs\n M tests/dxos-developer-ipc.test.mjs\n M tests/dxos-e2e-contract.test.mjs\n M tests/dxos-e2e-write-contract.test.mjs\n M tests/dxos-foundation.test.mjs\n M tests/dxos-fs-wiring.test.mjs\n M tests/dxos-lan-collab.test.mjs\n M tests/dxos-local-account.test.mjs\n M tests/dxos-market-thirdparty.test.mjs\n M tests/dxos-market-update.test.mjs\n M tests/dxos-market.test.mjs\n M tests/dxos-mcp-connections-port.test.mjs\n M tests/dxos-media-export.test.mjs\n M tests/dxos-media-extensions.test.mjs\n M tests/dxos-media-ipc.test.mjs\n M tests/dxos-media-wiring.test.mjs\n M tests/dxos-media.test.mjs\n M tests/dxos-model-settings-ui.test.mjs\n M tests/dxos-platform-ipc.test.mjs\n M tests/dxos-plugin-ipc.test.mjs\n M tests/dxos-provider-presets.test.mjs\n M tests/dxos-skill-center.test.mjs\n M tests/dxos-skill-ipc.test.mjs\n M tests/dxos-skill-online-installer.test.mjs\n M tests/dxos-task-v29-startup.test.mjs\n M tests/dxos-task66-dsh-spawn.test.mjs\n M tests/dxos-window-tab-groups.test.mjs\n M tests/fixtures/d4-04-probe/main.cjs\n M tests/fixtures/d4-04-provider.mjs\n M tests/fixtures/native-probe/main.cjs\n M tests/focus.test.mjs\n M tests/folder-trash.test.mjs\n M tests/geometry.test.mjs\n M tests/identity-session-expiry.test.mjs\n M tests/identity-store.test.mjs\n M tests/migration-task-merge-safety.test.mjs\n M tests/migration-task-merge.test.mjs\n M tests/migration.test.mjs\n M tests/model-egress-fixtures.mjs\n M tests/model-egress.test.mjs\n M tests/persistence.test.mjs\n M tests/side-effect-migration.test.mjs\n M tests/task-merge-fixtures.mjs\n M tests/task-orchestration-migration.test.mjs\n M tests/task-store.test.mjs\n M tests/tool-execution-migration.test.mjs\n M tests/tool-migration.test.mjs\n M tests/win-titlebar.test.mjs\n M tests/window-domain.test.mjs\n M tests/window-manager.test.mjs\n M tests/zorder.test.mjs\n M vite.config.ts\n?? .dsh-artifacts\n?? .github/workflows/verify.yml\n?? .oa-e1.png\n?? .oa-e2.png\n?? .oa-e9.png\n?? .oa-shot.png\n?? canvas-react.html\n?? electron/__tests__/\n?? electron/app-lifecycle.cjs\n?? electron/calendar-bootstrap.cjs\n?? electron/calendar-domain.cjs\n?? electron/calendar-service.cjs\n?? electron/calendar-store.cjs\n?? electron/canvas-asset-public-url.cjs\n?? electron/canvas-desktop-input.cjs\n?? electron/canvas-export-save.cjs\n?? electron/files-ipc.cjs\n?? electron/folder-trash.ts\n?? electron/geometry.ts\n?? electron/media-clip.cjs\n?? electron/media-litterbox.cjs\n?? electron/provider-adapter-apimart.cjs\n?? electron/provider-adapter-tripo.cjs\n?? electron/provider-apimart-models.cjs\n?? electron/runtime-composition.cjs\n?? electron/security-policies.cjs\n?? electron/skill-github-installer.cjs\n?? electron/upload-consent-bootstrap.cjs\n?? electron/upload-consent-service.cjs\n?? electron/window-browser-ipc.cjs\n?? electron/window-domain.ts\n?? electron/window-manager.ts\n?? public/camera-tiles/\n?? public/export-source.webm\n?? public/icons/library.png\n?? public/icons/mcp.png\n?? public/market-previews/\n?? resources/market/tapnow-items.json\n?? src-vue/apps/SkillCreatorDialog.vue\n?? src-vue/apps/canvasSkillLaunch.ts\n?? src-vue/apps/market/\n?? src-vue/settings/remoteModelsLogic.ts\n?? src/canvas/canvas-next/\n?? src/canvas/react-canvas/\n?? src/canvas/studio/\n?? src/canvas/tapnow/\n?? src/skills/skillCreatorLogic.ts\n?? tests/apimart-adapter.test.mjs\n?? tests/apimart-novai-align.test.mjs\n?? tests/apimart-upload-compress.test.mjs\n?? tests/calendar-video-account-isolation.test.mjs\n?? tests/calendar-video-electron.mjs\n?? tests/canvas-agent-electron.mjs\n?? tests/canvas-agent-memory-isolation.test.mjs\n?? tests/canvas-agent-skill-install.test.mjs\n?? tests/canvas-agent-skill-isolation.test.mjs\n?? tests/canvas-agent-state-isolation.test.mjs\n?? tests/canvas-agent-task-gate.test.mjs\n?? tests/canvas-content-alignment.mjs\n?? tests/canvas-controlled-operations.test.mjs\n?? tests/canvas-desktop-capture.mjs\n?? tests/canvas-desktop-folder.mjs\n?? tests/canvas-desktop-recording.mjs\n?? tests/canvas-diag-log.test.mjs\n?? tests/canvas-error-text.test.mjs\n?? tests/canvas-export-save.test.mjs\n?? tests/canvas-export.test.mjs\n?? tests/canvas-extract-version.test.mjs\n?? tests/canvas-gen-size-video.test.mjs\n?? tests/canvas-lifecycle.test.mjs\n?? tests/canvas-model-spec.test.mjs\n?? tests/canvas-motion-capture.mjs\n?? tests/canvas-network-security.test.mjs\n?? tests/canvas-no-model-params.test.mjs\n?? tests/canvas-outpaint-brush.test.mjs\n?? tests/canvas-outpaint-prepad.test.mjs\n?? tests/canvas-p0.test.mjs\n?? tests/canvas-p1.test.mjs\n?? tests/canvas-personal-templates.test.mjs\n?? tests/canvas-popover-placement.test.mjs\n?? tests/canvas-proxy-download.test.mjs\n?? tests/canvas-style-enum.test.mjs\n?? tests/canvas-video-object-replace.test.mjs\n?? tests/dxos-app-icons.test.mjs\n?? tests/dxos-litterbox.test.mjs\n?? tests/dxos-market-data.test.mjs\n?? tests/dxos-remote-models-curate.test.mjs\n?? tests/edit-size-forward.test.mjs\n?? tests/fixtures/calendar-video-probe/\n?? tests/fixtures/canvas-agent-probe/\n?? tests/fixtures/photos/\n?? tests/fixtures/react-canvas-shot-probe/\n?? tests/fixtures/upload-consent-probe/\n?? tests/gen-fix-2-electron-probe.mjs\n?? tests/market-canvas-target.test.mjs\n?? tests/market-command-client.test.mjs\n?? tests/market-composables.test.mjs\n?? tests/market-ui.mjs\n?? tests/media-clip-video.test.mjs\n?? tests/model-config-changed.test.mjs\n?? tests/model-delete.test.mjs\n?? tests/model-spec-source.test.mjs\n?? tests/react-canvas-collab-host.test.mjs\n?? tests/react-canvas-desktop-shot.mjs\n?? tests/skill-creator.test.mjs\n?? tests/skill-github-installer.test.mjs\n?? tests/skill-save-procedure.test.mjs\n?? tests/style-camera-electron-probe.mjs\n?? tests/style-camera-forward.test.mjs\n?? tests/ui-align-geometry.mjs\n?? tests/ui-align-shots.mjs\n?? tests/upload-consent-electron.mjs",
+  "command": "node tests/d4-04-smoke.mjs",
   "officialDsh": true,
   "dshVersion": "0.1.5-rc.2",
   "acpVersion": "1.4.0",
@@ -28,8 +28,16 @@
   "rendererReload": true,
   "revokePendingApproval": true,
   "revokeMidTask": true,
-  "modelRequests": 8,
+  "modelRequests": 16,
   "providerToolCalls": [
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search",
     "resource_search",
     "resource_search",
     "resource_search",
@@ -53,7 +61,7 @@
     "electron": "44.3.0",
     "node": "24.20.0",
     "write": {
-      "instanceId": "exe_5DTg_XfH",
+      "instanceId": "exe_zfSrRzoV",
       "spawned": true,
       "ready": true,
       "exited": true,
@@ -62,7 +70,7 @@
       "launchError": false
     },
     "unknown": {
-      "instanceId": "exe_0uPuyYGW",
+      "instanceId": "exe_aUIs_Zub",
       "spawned": true,
       "ready": true,
       "exited": true,
@@ -71,7 +79,7 @@
       "launchError": false
     },
     "conflict": {
-      "instanceId": "exe_sJHUQE2r",
+      "instanceId": "exe_ZvvF7S6B",
       "spawned": true,
       "ready": true,
       "exited": true,
@@ -184,7 +192,7 @@
     {
       "name": "C3 · Approval UI 显示 tool / risk / target / effect",
       "expected": null,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_AIzGpxeeoACrSX0BWb5YQ",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_Ak2Z_u0z-ZzPowppKJJYP",
       "ok": true
     },
     {
@@ -214,7 +222,7 @@
     {
       "name": "C8 · production executor spawned + ready + real child exit",
       "expected": null,
-      "actual": "{\"instanceId\":\"exe_5DTg_XfH\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "actual": "{\"instanceId\":\"exe_zfSrRzoV\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
       "ok": true
     },
     {
@@ -304,7 +312,7 @@
     {
       "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
       "expected": null,
-      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_0uPuyYGW\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_aUIs_Zub\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
       "ok": true
     },
     {
@@ -322,7 +330,7 @@
     {
       "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
       "expected": null,
-      "actual": "{\"ok\":true,\"actor\":\"usr_NTDX8PkWatBIQinlYhkspR3odZNkTr5L\"}",
+      "actual": "{\"ok\":true,\"actor\":\"usr_PVoQ9XMcIbhl81_Y2DHKFN7WqiTwRq9o\"}",
       "ok": true
     },
     {
@@ -340,7 +348,7 @@
     {
       "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
       "expected": null,
-      "actual": "taskId=task_DSrUZt7gChpskw gate=ready",
+      "actual": "taskId=task_gAZOysQj-pVsEw gate=ready",
       "ok": true
     },
     {
@@ -524,9 +532,9 @@
       "ok": true
     },
     {
-      "name": "Y1 · 预算到限 → Task/Step BLOCKED + Run 停止（不是 RUNNING）",
-      "expected": "BLOCKED/BLOCKED/非 RUNNING",
-      "actual": "{\"task\":\"BLOCKED\",\"step\":\"BLOCKED\",\"run\":\"BLOCKED\"}",
+      "name": "Y1 · 预算到限 → Task/Step BLOCKED + Run 停止（BUDGET_EXHAUSTED）",
+      "expected": "BLOCKED/BLOCKED/BUDGET_EXHAUSTED",
+      "actual": "{\"task\":\"BLOCKED\",\"step\":\"BLOCKED\",\"run\":\"BLOCKED\",\"stopReason\":\"BUDGET_EXHAUSTED\"}",
       "ok": true
     },
     {
@@ -536,9 +544,9 @@
       "ok": true
     },
     {
-      "name": "Y3 · 预算到限 → 只发生 bounded 受控 READ（>0 且 <=8），无 WRITE execution",
-      "expected": "1..8 次 resource.search（provider 请求 14 次被预算截断）",
-      "actual": "{\"execs\":8,\"tools\":[\"resource.search\"],\"modelCalls\":1}",
+      "name": "Y3 · 预算到限 → 只发生 bounded 受控 READ（>0 且 <=32），无 WRITE execution",
+      "expected": "1..32 次 resource.search（provider 请求 33 次被预算截断）",
+      "actual": "{\"execs\":16,\"tools\":[\"resource.search\"],\"modelCalls\":1}",
       "ok": true
     },
     {
@@ -639,8 +647,8 @@
     },
     {
       "name": "L15 · 预算停止 task：bounded 受控 READ execution 保留且归属正确，0 Artifact",
-      "expected": "1..8 exec + 0 artifact",
-      "actual": "{\"execs\":8,\"artifacts\":0}",
+      "expected": "1..32 exec + 0 artifact",
+      "actual": "{\"execs\":16,\"artifacts\":0}",
       "ok": true
     },
     {
@@ -668,8 +676,8 @@
       "ok": true
     }
   ],
-  "providerRequests": 8,
-  "at": "2026-09-18T16:09:02.213Z",
+  "providerRequests": 16,
+  "at": "2026-10-28T02:51:54.637Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
-  "artifactSha256": "8b8220bf9b778b3f4abd0185fd892394edf1bc8b15876739a3d1df28bb86535b"
+  "artifactSha256": "cfb47062f395c57a123f46d71504a6d8643e12fe3ad32289a38e791603112a7b"
 }

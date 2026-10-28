@@ -41,6 +41,8 @@ export const SKILL_COMMANDS: readonly string[] = [
   "skill/run",
   "skill/analyze",
   "skill/pack/list",
+  "skill/pack/inspectOnline",
+  "skill/pack/installStaged",
   "skill/pack/install",
   "skill/pack/import",
   "skill/pack/export",
@@ -73,7 +75,7 @@ export type SkillV2 = {
     readsFiles?: boolean;
     writesFiles?: boolean;
     network?: boolean;
-    sensitive?: boolean;
+    sensitive?: string[];
   };
   resources?: { name?: string; content?: string }[];
 };

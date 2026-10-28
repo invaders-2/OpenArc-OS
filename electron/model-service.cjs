@@ -18,6 +18,101 @@ const { MIRROR_ERROR } = require("./model-provider-bridge.cjs");
  */
 const EGRESS_PROXY_PREF_KEY = "model.egress.proxy";
 
+/**
+ * 删除模型后镜像失败的回滚：按原字段把那一行原样插回。
+ * 不用 store.insertConfig —— 它会重新分配 config_id（既有默认模型立刻悬空），
+ * 且把 status/version/verified_capabilities 归一到 enabled/1/[]。
+ */
+const RESTORE_CONFIG_SQL = "INSERT INTO model_configs (config_id, provider_id, organization_id, owner_user_id, scope, display_name, remote_model_id, capabilities, verified_capabilities, status, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+/** 通用服务商没有「透明区域即编辑区」的约定说明，替它补一句 */
+function editPrompt(mode, prompt) {
+  const p = String(prompt || "");
+  if (mode === "redraw") return "只重绘图中透明（被挖空）的区域，其余部分保持不变。重绘内容：" + p;
+  if (mode === "erase") return "把图中透明（被挖空）的区域按周围环境自然补全，不要生成新物体，其余部分保持不变。" + (p ? "补充：" + p : "");
+  if (mode === "outpaint") return "把图片四周透明的区域自然延展补全，和原有画面无缝衔接，原画面内容不变。" + (p ? "补充：" + p : "");
+  return p;
+}
+
+
+/* ── 画布图片面板的「风格 / 摄影机 / 联网」 ──
+ * 图像面自己的白名单（image-params.cjs）之外的三项；来源可以是 params 或 hints（hints 优先）。
+ * 归一之后才进入适配器：
+ *   · 对话式（SIZE_VIA_PROMPT，如 Lovart）：写进提示词的【画面要求】段，没有就不写；
+ *   · 按字段的适配器（如 APIMart）：只有适配器 uiSpec 明确声明支持时才带字段，否则不发（不做假字段）。
+ */
+const STYLE_TEXT_MAX = 40;
+const CAMERA_TEXT_MAX = 40;
+const CAMERA_KEYS = Object.freeze(["body", "lens", "focal", "aperture"]);
+
+function pickVisualCamera(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out = {};
+  for (const key of CAMERA_KEYS) {
+    const raw = value[key];
+    if (raw == null || raw === "") continue;
+    const text = String(raw).trim().slice(0, CAMERA_TEXT_MAX);
+    if (text) out[key] = text;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** params/hints → { style?, camera?, webSearch? }（只保留真实提供的项）。 */
+function pickVisualOptions(...sources) {
+  const out = {};
+  for (const source of sources) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) continue;
+    if (typeof source.style === "string") {
+      const style = source.style.trim().slice(0, STYLE_TEXT_MAX);
+      if (style) out.style = style;
+    }
+    const camera = pickVisualCamera(source.camera);
+    if (camera) out.camera = camera;
+    if (source.webSearch === true) out.webSearch = true;
+  }
+  return out;
+}
+
+/** 摄影机 → 提示词片段（缺哪个就不写哪个，不编造参数）。 */
+function cameraRequirement(camera) {
+  if (!camera) return null;
+  const parts = [];
+  if (camera.body) parts.push("机身 " + camera.body);
+  if (camera.lens) parts.push("镜头 " + camera.lens);
+  if (camera.focal) parts.push("焦段 " + (/mm$/i.test(String(camera.focal)) ? String(camera.focal) : String(camera.focal) + "mm"));
+  if (camera.aperture) parts.push("光圈 " + camera.aperture);
+  return parts.length ? parts.join("，") : null;
+}
+
+/**
+ * 把风格 / 摄影机 / 联网要求并进提示词：尺寸标题（【画面要求】）已存在就接在同一段里，
+ * 没有就新起一段。没有可写的要求 → 原样返回（不凭空加）。
+ */
+function withVisualRequirements(prompt, visual) {
+  const base = String(prompt == null ? "" : prompt);
+  const clauses = [];
+  if (visual && visual.style) clauses.push("风格：" + visual.style);
+  const camera = cameraRequirement(visual && visual.camera);
+  if (camera) clauses.push("摄影机：" + camera);
+  if (visual && visual.webSearch === true) clauses.push("联网搜索参考资料后再画");
+  if (!clauses.length) return base;
+  const text = clauses.join("；");
+  const marker = "【画面要求】";
+  const index = base.lastIndexOf(marker);
+  if (index >= 0) {
+    const head = base.slice(0, index + marker.length);
+    const tail = base.slice(index + marker.length).trimEnd();
+    if (tail.endsWith("。")) return head + tail.slice(0, -1) + "；" + text + "。";
+    return head + (tail ? tail + "；" : "") + text + "。";
+  }
+  return base + (base.trim() ? "\n\n" : "") + marker + text + "。";
+}
+
+/** 适配器 uiSpec 是否明确声明某项能力（unsupported 的规格不算支持）。 */
+function specAllows(spec, flag) {
+  return !!(spec && typeof spec === "object" && !spec.unsupported && spec[flag] === true);
+}
+
 class ModelService {
   constructor({ identity, authService, authStore, modelStore, credentialStore, fetchImpl = fetch, logger = null, timeoutMs = 30000 } = {}) {
     this.identity = identity; this.authService = authService; this.authStore = authStore;
@@ -281,6 +376,23 @@ class ModelService {
     }
     return { ok: true, model: this.#safeConfig(this.store.configById(configId)) };
   }
+  deleteModel({ context, configId } = {}) {
+    const config = this.store.configById(configId);
+    if (!config) return { ok: true, changed: false };
+    const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.MANAGE, config });
+    if (!auth.ok) return auth;
+    const removed = this.store.transactSync(() => this.store.deleteConfig(configId));
+    // providers.json 的模型清单由同一份 DB 投影，删模型也要重新镜像；失败就原样插回，绝不只删一半
+    const mirror = this.#syncMirror(config.provider_id);
+    if (mirror.ok !== true) {
+      this.store.transactSync(() => this.store.db.prepare(RESTORE_CONFIG_SQL).run(config.config_id, config.provider_id, config.organization_id, config.owner_user_id, config.scope, config.display_name, config.remote_model_id, config.capabilities, config.verified_capabilities, config.status, config.version, config.created_at, config.updated_at));
+      return mirror;
+    }
+    try {
+      this.authStore.auditAuthorization({ actorUserId: auth.actor.user.id, targetUserId: null, appId: context && context.appId ? context.appId : null, departmentId: null, resourceRef: config.config_id, action: "model.deleted", decision: "ALLOW", reasonCode: "ALLOW", permissionSource: auth.actor.isSuper ? "SUPER_ADMIN" : "OWNER", oldPermissions: [config.remote_model_id], newPermissions: [] });
+    } catch { /* 审计失败不影响已完成的删除 */ }
+    return { ok: true, ...removed, configId: config.config_id, providerId: config.provider_id };
+  }
   setVerifiedCapabilities({ context, configId, verifiedCapabilities }) {
     const config = this.store.configById(configId);
     if (!config) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
@@ -364,7 +476,7 @@ class ModelService {
     const cleanParams = domain.sanitizeParams(params);
     // adapterType 决定 wire 协议：anthropic 走官方 Messages，lovart 走 send→watch→result
     // 多段式 agent 线程（适配器提供 chatComplete 高阶入口），其余沿用 OpenAI 兼容实现。
-    const impl = adapter.adapterFor(snapshot.adapterType);
+    const impl = adapter.adapterFor(snapshot.adapterType, snapshot.baseUrl);
     if (typeof impl.chatComplete === "function") {
       const out = await impl.chatComplete({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, messages, params: cleanParams, signal, timeoutMs: Math.max(this.timeoutMs, 120000), fetchImpl: this.fetchImpl });
       if (!out.ok) {
@@ -398,7 +510,7 @@ class ModelService {
 
 
   /** Provider-neutral streaming（统一事件模型）；usage/错误归一化与 chat 一致。 */
-  async chatStream({ context, configId = null, messages = [], tools = null, params = {}, signal = null, requestId = null, capability = "chat", onEvent = () => {} } = {}) {
+  async chatStream({ context, configId = null, messages = [], tools = null, params = {}, signal = null, requestId = null, capability = "chat", onEvent = () => {}, webSearch = false } = {}) {
     const resolved = this.resolveModel({ context, capability, configId });
     if (!resolved.ok) return resolved;
     const snapshot = resolved.snapshot;
@@ -406,9 +518,9 @@ class ModelService {
     if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
     if (cred.providerOrigin !== new URL(snapshot.baseUrl).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
     const start = this.#now(); const rid = requestId || "mreq_" + crypto.randomBytes(8).toString("base64url");
-    const impl = adapter.adapterFor(snapshot.adapterType);
+    const impl = adapter.adapterFor(snapshot.adapterType, snapshot.baseUrl);
     try {
-      const out = await impl.chatStream({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, messages, tools, params: domain.sanitizeParams(params), signal, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, onEvent });
+      const out = await impl.chatStream({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, messages, tools, params: domain.sanitizeParams(params), signal, timeoutMs: webSearch ? Math.max(this.timeoutMs, 180000) : this.timeoutMs, fetchImpl: this.fetchImpl, onEvent, ...(webSearch ? { webSearch: true } : {}) });
       await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ALLOW", usage: out.usage });
       return { ok: true, requestId: rid, text: out.text, toolCalls: out.toolCalls, usage: out.usage, snapshot: this.#safeSnapshot(snapshot) };
     } catch (err) {
@@ -426,11 +538,127 @@ class ModelService {
 
 
   /**
+   * 10-23 · 图片编辑 / 图生图（Lovart 等对话式服务商），凭据走模型配置。
+   *   mode = redraw | erase | outpaint：sourceDataUrl 是带透明区域的 PNG（前端已合成），透明处重绘 / 擦除 / 扩展
+   *   其它（prompt）：inputs 作为附件，prompt 原样发送（多角度、重打光、增强、抠图、标注改图、参考图生图）
+   */
+  async editImage({ context, configId = null, mode = "prompt", prompt = "", sourceDataUrl = "", originalDataUrl = "", maskPngDataUrl = "", inputs = [], signal = null, requestId = null, size = null, hints = null } = {}) {
+    const resolved = this.resolveModel({ context, capability: "image-generation", configId });
+    if (!resolved.ok) return resolved;
+    const snapshot = resolved.snapshot;
+    const impl = adapter.adapterFor(snapshot.adapterType, snapshot.baseUrl);
+    // 按用户选的模型走它自己的接口：Lovart 走对话式附件；OpenAI 兼容走 /images/edits（不支持时退回多模态对话）
+    const generic = typeof impl.generateImageWithInputs !== "function";
+    if (generic && typeof impl.editImage !== "function") return { ok: false, error: domain.ERROR_CODE.CAPABILITY_UNAVAILABLE, detail: "adapter-no-image-edit" };
+    const cred = this.credentials.resolveInternalSync({ credentialRef: snapshot.credentialRef });
+    if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
+    if (cred.providerOrigin !== new URL(snapshot.baseUrl).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const start = this.#now(); const rid = requestId || "ereq_" + crypto.randomBytes(8).toString("base64url");
+    const common = { baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 300000) };
+    // 编辑也要按用户在面板上选的比例 / 档位：对话式只能写提示词；字段式交给适配器发 size/resolution。
+    const promptSized = impl.SIZE_VIA_PROMPT === true;
+    const sizedPrompt = promptSized ? imageParams.withSizeRequirement(prompt, { size, ratio: hints && hints.ratio }) : prompt;
+    const editHints = {
+      ...(hints && hints.ratio && !/自适应|auto/i.test(String(hints.ratio)) ? { ratio: String(hints.ratio) } : {}),
+      ...(hints && hints.resolution ? { resolution: String(hints.resolution) } : {}),
+    };
+    let out;
+    if (typeof impl.editImageMode === "function") {
+      // APIMart：同一个生成接口带 image_urls；支持 mask_url 的模型直接用挖空图当遮罩。
+      // 比例 / 档位走字段，不往提示词里塞（避免同一信息两种形态）。
+      out = await impl.editImageMode({ ...common, ...editHints, mode, prompt, promptForHole: editPrompt(mode, prompt), sourceDataUrl, originalDataUrl, maskPngDataUrl, inputs });
+    } else if (generic) {
+      const r = await impl.editImage({ ...common, prompt: editPrompt(mode, sizedPrompt), inputs: sourceDataUrl ? [sourceDataUrl, ...inputs] : inputs });
+      out = r && r.ok ? { ok: true, artifacts: r.images.map((x) => (x.b64 ? { b64: x.b64, mime: x.mime } : { url: x.url })) } : r;
+    } else if (["redraw", "erase", "outpaint"].includes(String(mode)) && sourceDataUrl) {
+      const refs = await impl.toAttachments({ ...common, inputs });
+      if (!refs.ok) return refs;
+      // 重绘 / 擦除 / 扩图的提示词由适配器按模式拼；尺寸要求交给它拼在末尾（不同模式的模板不一样）。
+      out = await impl.generateImageEdit({ ...common, prompt, mode, size, ratio: (hints && hints.ratio) || null, sourceDataUrl, referenceUrls: refs.attachments });
+    } else {
+      out = await impl.generateImageWithInputs({ ...common, prompt: sizedPrompt, inputs: sourceDataUrl ? [sourceDataUrl, ...inputs] : inputs });
+    }
+    if (!out || !out.ok) {
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "DENY", errorCode: (out && out.error) || domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+      return { ok: false, error: (out && out.error) || domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: out && out.detail };
+    }
+    const images = (Array.isArray(out.artifacts) ? out.artifacts : []).filter((a) => a && (a.url || a.b64)).map((a) => (a.b64 ? { dataUrl: "data:" + (a.mime || "image/png") + ";base64," + a.b64 } : { url: a.url }));
+    if (!images.length) {
+      const said = String(out.text || "").trim().slice(0, 300);
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ERROR", errorCode: domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+      return { ok: false, error: domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: said || "no-image-artifact" };
+    }
+    await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ALLOW", usage: null });
+    return { ok: true, requestId: rid, images, snapshot: this.#safeSnapshot(snapshot) };
+  }
+
+  /**
+   * 10-23 · video-generation（Lovart 等对话式服务商）：凭据走模型配置（与 generateImage 同一解析链），
+   * 不依赖 provider-protocol 那份服务商记录上的 api_key。返回 { ok, videos: [{ url }] }。
+   */
+  async generateVideo({ context, configId = null, prompt = "", inputs = [], params = {}, signal = null, requestId = null } = {}) {
+    const resolved = this.resolveModel({ context, capability: "video-generation", configId });
+    if (!resolved.ok) return resolved;
+    const snapshot = resolved.snapshot;
+    const impl = adapter.adapterFor(snapshot.adapterType, snapshot.baseUrl);
+    if (typeof impl.generateVideo !== "function") return { ok: false, error: domain.ERROR_CODE.CAPABILITY_UNAVAILABLE, detail: "adapter-no-video" };
+    const cred = this.credentials.resolveInternalSync({ credentialRef: snapshot.credentialRef });
+    if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
+    if (cred.providerOrigin !== new URL(snapshot.baseUrl).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const start = this.#now(); const rid = requestId || "vreq_" + crypto.randomBytes(8).toString("base64url");
+    // 视频轮询上限对齐 NOVAI：30 分钟（适配器内部按 1.6 倍退避、封顶 12s）
+    const out = await impl.generateVideo({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, prompt, inputs, params, signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 1800000) });
+    if (!out || !out.ok) {
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "DENY", errorCode: (out && out.error) || domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+      return { ok: false, error: (out && out.error) || domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: out && out.detail };
+    }
+    const videos = (Array.isArray(out.artifacts) ? out.artifacts : []).filter((a) => a && a.url).map((a) => ({ url: a.url, ...(a.mime ? { mime: a.mime } : {}) }));
+    if (!videos.length) {
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ERROR", errorCode: domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+      // 服务商没出视频时把它的原话 / 失败原因带回去，前端提示里能看到（例如额度不足、参数不支持、需要确认）
+      const said = String(out.text || "").trim().slice(0, 300);
+      const why = Array.isArray(out.failures) && out.failures.length ? JSON.stringify(out.failures).slice(0, 300) : "";
+      try { console.warn("[canvas] video no artifact", { status: out.status, text: said, failures: why, artifacts: (out.artifacts || []).length }); } catch { /* ignore */ }
+      return { ok: false, error: domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: said || why || "no-video-artifact" };
+    }
+    await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ALLOW", usage: null });
+    return { ok: true, requestId: rid, videos, snapshot: this.#safeSnapshot(snapshot) };
+  }
+
+  /**
+   * 10-23 · audio-generation（配音 / 音乐 / 音效）：适配器有 generateAudio 时直连（APIMart 等），
+   * 返回 { ok, audios: [{ url } | { dataUrl }] }；适配器没有时给 adapter-no-audio，调用方回落协议引擎。
+   */
+  async generateAudio({ context, configId = null, prompt = "", params = {}, signal = null, requestId = null } = {}) {
+    const resolved = this.resolveModel({ context, capability: "audio-generation", configId });
+    if (!resolved.ok) return resolved;
+    const snapshot = resolved.snapshot;
+    const impl = adapter.adapterFor(snapshot.adapterType, snapshot.baseUrl);
+    if (typeof impl.generateAudio !== "function") return { ok: false, error: domain.ERROR_CODE.CAPABILITY_UNAVAILABLE, detail: "adapter-no-audio" };
+    const cred = this.credentials.resolveInternalSync({ credentialRef: snapshot.credentialRef });
+    if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
+    if (cred.providerOrigin !== new URL(snapshot.baseUrl).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const start = this.#now(); const rid = requestId || "areq_" + crypto.randomBytes(8).toString("base64url");
+    const out = await impl.generateAudio({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, prompt, params, signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 900000) });
+    if (!out || !out.ok) {
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "DENY", errorCode: (out && out.error) || domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+      return { ok: false, error: (out && out.error) || domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: out && out.detail };
+    }
+    const audios = (Array.isArray(out.artifacts) ? out.artifacts : []).filter((a) => a && (a.url || a.b64)).map((a) => (a.b64 ? { dataUrl: "data:" + (a.mime || "audio/wav") + ";base64," + a.b64 } : { url: a.url }));
+    if (!audios.length) {
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ERROR", errorCode: domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+      return { ok: false, error: domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: "no-audio-artifact" };
+    }
+    await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ALLOW", usage: null });
+    return { ok: true, requestId: rid, audios, snapshot: this.#safeSnapshot(snapshot) };
+  }
+
+  /**
    * D5-02 · image-generation（与 chat 同一套解析/授权/审计/错误归一化）。
    * 能力不支持的模型在 resolveModel 就返回 CAPABILITY_UNAVAILABLE —— 绝不改用文本接口顶替。
    * 返回的图片是 data URL（凭据与 provider URL 都不回渲染层）。
    */
-  async generateImage({ context, configId = null, prompt = "", size = null, count = 1, params = {}, signal = null, requestId = null, capability = "image-generation" } = {}) {
+  async generateImage({ context, configId = null, prompt = "", size = null, count = 1, params = {}, signal = null, requestId = null, capability = "image-generation", hints = null } = {}) {
     const resolved = this.resolveModel({ context, capability, configId });
     if (!resolved.ok) return resolved;
     const snapshot = resolved.snapshot;
@@ -439,10 +667,38 @@ class ModelService {
     if (cred.providerOrigin !== new URL(snapshot.baseUrl).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
     const start = this.#now(); const rid = requestId || "ireq_" + crypto.randomBytes(8).toString("base64url");
     // 图像面独立白名单（不复用 chat 的 sanitizeParams；size 由入参独立承载，不进 params）
-    const cleanParams = imageParams.pickImageParams(params);
-    const impl = adapter.adapterFor(snapshot.adapterType);
+    const baseParams = imageParams.pickImageParams(params);
+    // 风格 / 摄影机 / 联网：params 与 hints 都是来源（hints 覆盖 params），归一后再决定怎么下发。
+    const visual = pickVisualOptions(params, hints);
+    const cleanParams = { ...baseParams, ...visual };
+    const impl = adapter.adapterFor(snapshot.adapterType, snapshot.baseUrl);
     if (typeof impl.generateComplete === "function") {
-      const out = await impl.generateComplete({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, kind: "image", model: snapshot.modelId, prompt, size, count, params: cleanParams, signal, timeoutMs: Math.max(this.timeoutMs, 300000), fetchImpl: this.fetchImpl });
+      // 两种服务商形状：
+      //   · 按字段族（APIMart）：比例 / 档位走 aspect_ratio / resolution，原样交给它，不再从像素尺寸倒推；
+      //   · 对话式（Lovart 等）：请求体只有提示词，没有 size / ratio 字段 —— 尺寸必须写成提示词里的
+      //     确定要求，否则上游按自己的默认出图（面板选 3:4 / 2K 也只拿回方图）。
+      const promptSized = impl.SIZE_VIA_PROMPT === true;
+      const fieldSized = !promptSized && impl.ADAPTER_TYPE === "apimart";
+      // 字段式适配器只发「适配器 uiSpec 明确声明支持」的视觉字段；没声明就不发（不造字段、不冒充能力）。
+      // 注意 imageParams 白名单本身含 style（OpenAI images 用），字段式适配器要先摘掉，只有 uiSpec 支持才加回。
+      const modelSpec = typeof impl.uiSpec === "function" ? impl.uiSpec(snapshot.modelId) : null;
+      const fieldBase = { ...baseParams };
+      delete fieldBase.style;
+      const sized = fieldSized
+        ? {
+            ...fieldBase,
+            ...(hints && hints.ratio && !/自适应|auto/i.test(String(hints.ratio)) ? { aspect_ratio: String(hints.ratio) } : {}),
+            ...(hints && hints.resolution ? { resolution: String(hints.resolution) } : {}),
+            ...(specAllows(modelSpec, "style") && visual.style ? { style: visual.style } : {}),
+            ...(specAllows(modelSpec, "camera") && visual.camera ? { camera: visual.camera } : {}),
+            ...(specAllows(modelSpec, "search") && visual.webSearch ? { web_search: true } : {}),
+          }
+        : cleanParams;
+      // 对话式：尺寸 + 风格 / 摄影机 / 联网都写进【画面要求】（没有的项不写）。
+      const finalPrompt = promptSized
+        ? withVisualRequirements(imageParams.withSizeRequirement(prompt, { size, ratio: hints && hints.ratio }), visual)
+        : prompt;
+      const out = await impl.generateComplete({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, kind: "image", model: snapshot.modelId, prompt: finalPrompt, size, count, params: sized, signal, timeoutMs: Math.max(this.timeoutMs, 300000), fetchImpl: this.fetchImpl });
       if (!out.ok) {
         await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "DENY", errorCode: out.error });
         return { ok: false, error: out.error, detail: out.detail };
@@ -484,6 +740,24 @@ class ModelService {
   }
 
   /**
+   * 适配器规格 → 画布投影（specSource + uiSpec）。
+   *
+   * · uiSpec 是对象：来源取适配器自报的 capabilitiesSource（缺省视为 spec）；
+   * · 没有 uiSpec（通用 OpenAI 兼容站点 / 适配器不做规格）：specSource='guess'，不投影 uiSpec，
+   *   前端退回按名字的预设并显示「未验证」；
+   * · 适配器抛错：按 guess 处理，绝不让一个坏适配器把整张模型表打掉。
+   */
+  #projectModelUiSpec(provider, remoteModelId) {
+    let ui = null;
+    try {
+      const impl = adapter.adapterFor(provider.adapter_type, provider.base_url);
+      ui = impl && typeof impl.uiSpec === "function" ? impl.uiSpec(remoteModelId) : null;
+    } catch { ui = null; }
+    if (!ui || typeof ui !== "object" || Array.isArray(ui)) return { specSource: "guess" };
+    return { uiSpec: ui, specSource: ui.capabilitiesSource === "guess" ? "guess" : "spec" };
+  }
+
+  /**
    * 渲染层可见的模型面（**无 baseUrl / 无凭据 / 无 credentialRef**）。
    *
    * 与 resolveModel **同一口径**做授权过滤：App 必须 enabled 且 app grant 含 `model.use`，
@@ -509,6 +783,9 @@ class ModelService {
         configId: m.configId, displayName: m.displayName || m.remoteModelId, remoteModelId: m.remoteModelId,
         providerId: provider.provider_id, providerName: provider.display_name || provider.provider_id,
         capabilities: m.capabilities || [], verifiedCapabilities: m.verifiedCapabilities || [], status: m.status, scope: m.scope,
+        // 规格来源：适配器给的 uiSpec 是 spec（模型族规格）；没有规格 = guess（画布退回按名字的预设并标「未验证」）。
+        // specSource 与 uiSpec 一起投影，前端不用再靠「有没有字段」猜来源。
+        ...this.#projectModelUiSpec(provider, m.remoteModelId),
       });
     }
     /**
@@ -712,7 +989,7 @@ class ModelService {
     if (!cred.ok) return cred;
     if (cred.providerOrigin !== new URL(provider.base_url).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
     // 按 provider.adapter_type 选适配器：anthropic 走 GET /v1/models（x-api-key + anthropic-version）。
-    const r = await adapter.adapterFor(provider.adapter_type).listModels({ baseUrl: provider.base_url, apiKey: cred.secret, fetchImpl: this.fetchImpl, timeoutMs: Math.min(this.timeoutMs, 20000) });
+    const r = await adapter.adapterFor(provider.adapter_type, provider.base_url).listModels({ baseUrl: provider.base_url, apiKey: cred.secret, fetchImpl: this.fetchImpl, timeoutMs: Math.min(this.timeoutMs, 20000) });
     if (!r.ok) {
       const code = r.kind ? domain.normalizeError({ kind: r.kind === "timeout" ? "timeout" : "", network: r.kind === "network" }) : domain.normalizeError({ status: r.status });
       const proxyError = this.#proxyError();
@@ -744,7 +1021,7 @@ class ModelService {
     // 不伪装成 inference:true，也不假装成对话可达。
     const probeConfig = this.store.configById(configId);
     const probeProvider = probeConfig ? this.store.providerById(probeConfig.provider_id) : null;
-    const probeImpl = probeProvider ? adapter.adapterFor(probeProvider.adapter_type) : null;
+    const probeImpl = probeProvider ? adapter.adapterFor(probeProvider.adapter_type, probeProvider.base_url) : null;
     if (probeProvider && probeImpl && typeof probeImpl.probeCredential === "function") {
       const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.TEST, config: probeConfig, provider: probeProvider });
       if (!auth.ok) return auth;
@@ -779,7 +1056,7 @@ class ModelService {
     const cred = this.credentials.resolveInternalSync({ credentialRef: probeProvider.credential_ref });
     if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
     if (cred.providerOrigin !== new URL(probeProvider.base_url).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
-    const listed = await adapter.adapterFor(probeProvider.adapter_type).listModels({ baseUrl: probeProvider.base_url, apiKey: cred.secret, fetchImpl: this.fetchImpl, timeoutMs: Math.min(this.timeoutMs, 20000) });
+    const listed = await adapter.adapterFor(probeProvider.adapter_type, probeProvider.base_url).listModels({ baseUrl: probeProvider.base_url, apiKey: cred.secret, fetchImpl: this.fetchImpl, timeoutMs: Math.min(this.timeoutMs, 20000) });
     if (!listed.ok) {
       const code = listed.kind ? domain.normalizeError({ timeout: listed.kind === "timeout", network: listed.kind === "network" }) : domain.normalizeError({ status: listed.status });
       return { ok: false, error: code, reachable: listed.kind !== "network", credentialAccepted: listed.status !== 401 && listed.status !== 403, inference: false, capability: configCaps[0] || null, probe: "models" };

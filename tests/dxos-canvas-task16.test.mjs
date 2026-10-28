@@ -264,7 +264,7 @@ test("插件数据：set/get/list/delete 真实落盘；key / 容量 / 安装状
 });
 
 test("main.cjs 装配契约：fs 晚绑定、插件宿主晚绑定、platform 注入同一份 fsStore", () => {
-  const main = fs.readFileSync(path.join(process.cwd(), "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(process.cwd(), "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes("canvasAssetLibrary.configureFs(dxosFsAdapter ? dxosFsAdapter.store : null)"), "素材库必须晚绑定 DX 虚拟文件树");
   assert.ok(main.includes('require("./canvas-dxos-plugins.cjs")'), "main.cjs 必须装配画布插件宿主");
   assert.ok(main.includes("createCanvasPluginHost({"), "插件宿主必须由真实 developerStore/developerService 构造");

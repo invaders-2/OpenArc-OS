@@ -370,9 +370,9 @@ onMounted(() => {
   width: 240px;
   min-height: 30px;
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-md);
-  background: rgb(var(--content-rgb) / 0.5);
+  background: var(--sunken);
   color: var(--text);
   font-size: var(--fs-caption);
 }

@@ -157,11 +157,11 @@ test("schema：外键只指向 DX 自己的表，无指向 OpenArc 既有 5 表�
 // ---------------------------------------------------------------------------
 
 test("迁移：SCHEMA_VERSION 到 28，空库直接建到 28，6 表齐备", () => {
-  assert.equal(SCHEMA_VERSION, 28);
+  assert.equal(SCHEMA_VERSION, 30);
   const dir = tempDir();
   const store = new IdentityStore({ path: path.join(dir, "identity.db") }).open();
   try {
-    assert.equal(store.schemaVersion, 28);
+    assert.equal(store.schemaVersion, 30);
     for (const table of NEW_TABLES) assert.ok(hasTable(store.connection, table), "缺表 " + table);
     assert.ok(columnNames(store.connection, "user_app_install_state").includes("dataset_maker_migrated_at"));
     assert.ok(columnNames(store.connection, "model_providers").includes("allow_insecure_http"), "v28 必须补上明文放行列");
@@ -201,7 +201,7 @@ test("迁移：v26 老库升到 v28 —— 补 6 表 + 1 列 + allow_insecure_ht
 
   const store = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(store.schemaVersion, 28);
+    assert.equal(store.schemaVersion, 30);
     for (const table of NEW_TABLES) assert.ok(hasTable(store.connection, table), "缺表 " + table);
     assert.ok(columnNames(store.connection, "user_app_install_state").includes("dataset_maker_migrated_at"));
     assert.ok(columnNames(store.connection, "model_providers").includes("allow_insecure_http"), "v28 必须补上明文放行列");
@@ -216,7 +216,7 @@ test("迁移：v26 老库升到 v28 —— 补 6 表 + 1 列 + allow_insecure_ht
 
   const again = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(again.schemaVersion, 28);
+    assert.equal(again.schemaVersion, 30);
     assert.ok(hasTable(again.connection, "app_exchanges"));
     assert.equal(again.connection.prepare("SELECT COUNT(*) AS c FROM app_exchanges WHERE id='exchange_v26'").get().c, 1, "重放不得丢数据");
   } finally {
@@ -225,7 +225,7 @@ test("迁移：v26 老库升到 v28 —— 补 6 表 + 1 列 + allow_insecure_ht
 
   // 高版本拒开：user_version=29 > 28
   const tooNew = new DatabaseSync(file);
-  tooNew.exec("PRAGMA user_version = 29");
+  tooNew.exec("PRAGMA user_version = 31");
   tooNew.close();
   assert.throws(
     () => new IdentityStore({ path: file }).open(),

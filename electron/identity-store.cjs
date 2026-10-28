@@ -46,6 +46,7 @@ const passwords = require("./password.cjs");
 const dxosFoundationSchema = require("./dxos-foundation-schema.cjs");
 const dxosAgentSchema = require("./dxos-agent-schema.cjs");
 const mediaStore = require("./media-store.cjs");
+const calendarStore = require("./calendar-store.cjs");
 const canvasDxosSchema = require("./canvas-dxos-schema.cjs");
 const dxTaskApprovalSchema = require("./dx-task-approval-schema.cjs");
 
@@ -99,14 +100,16 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *       默认 0 = 继续拒绝远程明文 http；只有用户在添加/编辑该服务商时显式勾选才置 1，并写授权审计。
  *       明文 scope（REMOTE_HTTP_EXPLICIT）不塞进 endpoint_scope 的既有 CHECK，由本列承载；
  *       ALTER 前查 PRAGMA table_info，可重放；只加列，不动既有表结构。
+ *   v30（2B · 日历与视频草稿账号隔离）：新增 calendar_events / video_project_drafts；
+ *       v29 已由显式任务表合并占用，因此生产下一级使用 v30。DDL 分别只有 calendar-store /
+ *       media-store 一份真值；整级原子、可重放，不改历史迁移。
  * 画布共享 · 三档角色（**不占新版本号**）：canvas_shares 需要放宽 role CHECK 到 MANAGER、补
  *       created_at、加 canvas_id → canvas_boards 的 FK ON DELETE CASCADE。SQLite 改不了 CHECK，只能重建表。
- *       为什么不做成 v29：v29 已被在途的任务表合并包按显式迁移占用（tests/migration-task-merge.test.mjs），
- *       且全仓多处"生产 SCHEMA_VERSION 仍是 28"的冻结断言不属于本包；canvas_run_facts 已有先例
+ *       v29 已被任务表合并包按显式迁移占用（tests/migration-task-merge.test.mjs）；canvas_run_facts 已有先例
  *       （CanvasStore 构造时幂等建表，不新增迁移级）。实现为 applyCanvasSharingRolesLayer(db)，
  *       由 CanvasStore 在 identity.transactSync 内调用：可重复执行、失败整级回滚。
  */
-const SCHEMA_VERSION = 28;
+const SCHEMA_VERSION = 30;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1623,6 +1626,11 @@ function applyModelProviderInsecureHttpLayer(db) {
   }
 }
 
+function applyCalendarVideoDraftLayer(db) {
+  calendarStore.applyCalendarLayer(db);
+  mediaStore.applyDxosMediaLayer(db);
+}
+
 /**
  * canvas_shares 目标形态（三档角色 + created_at + FK）。独立常量方便测试逐字核对。
  * 刻意不在这里建索引：重建顺序是 建新表 → 搬行 → 删旧表 → 改名，旧表上的索引名要等删掉后才能复用。
@@ -1707,6 +1715,7 @@ const MIGRATIONS = Object.freeze([
   { version: 26, run: applyDxTaskApprovalLayer },
   { version: 27, run: applyDxos061Layer },
   { version: 28, run: applyModelProviderInsecureHttpLayer },
+  { version: 30, run: applyCalendarVideoDraftLayer },
 ]);
 
 /**
@@ -1886,16 +1895,15 @@ class IdentityStore {
    */
   #migrate() {
     const current = this.schemaVersion;
-    if (current > SCHEMA_VERSION) {
-      // task-8 B：v29 任务表合并是显式 opt-in 迁移（不在 MIGRATIONS），成功后 user_version=29。
-      // 已合并的库（dx_tasks 已是只读视图）允许继续打开；其它超前版本仍然拒绝（fail closed）。
+    if (current > SCHEMA_VERSION) throw new SchemaTooNewError(current, SCHEMA_VERSION);
+    if (current === 29) {
+      // v29 仍是显式任务合并：只有宿主明确允许且 dx_tasks 已为视图时，才继续补生产 v30。
       let merged = false;
       try {
-        merged = current === 29 && this.allowMergedV29 === true
+        merged = this.allowMergedV29 === true
           && (this.db.prepare("SELECT type FROM sqlite_master WHERE name = 'dx_tasks'").get() || {}).type === "view";
       } catch { merged = false; }
       if (!merged) throw new SchemaTooNewError(current, SCHEMA_VERSION);
-      return;
     }
     if (current === SCHEMA_VERSION) return;
     for (const migration of MIGRATIONS) {

@@ -23,7 +23,8 @@ const { NodeChildProcessLauncher, ElectronUtilityProcessLauncher, UnavailableExe
 const { RuntimeSupervisor } = require("../electron/runtime-supervisor.cjs");
 
 const read = (p) => fs.readFileSync(p, "utf8");
-const MAIN_SRC = read(path.join(ROOT, "electron", "main.cjs"));
+const MAIN_SRC = read(path.join(ROOT, "electron", "runtime-composition.cjs"));
+const LIFECYCLE_SRC = read(path.join(ROOT, "electron", "app-lifecycle.cjs"));
 const PROBE_SRC = read(path.join(ROOT, "tests", "fixtures", "d4-04-probe", "main.cjs"));
 const BOOT_SRC = read(path.join(ROOT, "electron", "runtime-boot.cjs"));
 
@@ -55,7 +56,7 @@ test("共享 helper 的启动顺序：main / probe 都不得绕过 runtime-boot 
 test("Probe/Product Equivalence：preload / dist / launcher / Tool Facade 不得漂移", () => {
   assert.match(PROBE_SRC, /electron\/preload\.cjs/, "probe 必须使用产品 preload");
   assert.match(PROBE_SRC, /dist\/index\.html/, "probe 必须使用产品 dist Renderer");
-  assert.match(MAIN_SRC, /preload\.cjs/, "main 使用产品 preload");
+  assert.match(LIFECYCLE_SRC, /preload\.cjs/, "main 使用产品 preload");
   assert.match(PROBE_SRC, /createDefaultExecutorLauncher\(\)/, "probe 使用共享 launcher 选择");
   assert.match(MAIN_SRC, /createDefaultExecutorLauncher\(\)/, "main 使用同一个 launcher 选择");
   assert.ok(!/new RuntimeSupervisor\(/.test(PROBE_SRC), "probe 不得自建 supervisor");

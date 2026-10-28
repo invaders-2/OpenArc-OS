@@ -100,9 +100,9 @@
 .integr-field input {
   min-height: 30px;
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-md);
-  background: rgb(var(--content-rgb) / 0.5);
+  background: var(--sunken);
   color: var(--text);
   font-size: var(--fs-secondary);
 }
@@ -121,9 +121,9 @@
   max-width: 360px;
   min-height: 30px;
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-md);
-  background: rgb(var(--content-rgb) / 0.5);
+  background: var(--sunken);
   color: var(--text);
   font-size: var(--fs-secondary);
 }
@@ -181,7 +181,7 @@
 .integrations-app .integr-zone {
   min-width: 0;
   padding: var(--space-4);
-  border: 1px solid rgb(var(--text-rgb) / 0.06);
+  border: 0;
   border-radius: var(--radius-lg);
   background: rgb(var(--text-rgb) / 0.026);
 }

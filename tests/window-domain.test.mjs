@@ -9,7 +9,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import domain from "../electron/window-domain.cjs";
+import * as domain from "../electron/window-domain.ts";
 
 const { WSTATE, MIN_WINDOW_W, MIN_WINDOW_H, AREA_TOP } = domain;
 

@@ -186,6 +186,8 @@ function guessCapabilities(id) {
   const s = String(id).toLowerCase();
   if (/(image|dall-?e|flux|seedream|stable-?diffusion|sdxl|midjourney|imagen|cogview|wanx|kolors|gpt-image)/.test(s)) return ["image-generation"];
   if (/(video|seedance|kling|veo|sora|hailuo|wan2|cogvideo|vidu)/.test(s)) return ["video-generation"];
+  // 配音 / 音乐 / 音效：进画布音频节点（whisper 转写、对话类 audio-preview 不算）
+  if (/(suno|lyria|flowmusic|mureka|udio|music|(^|[-_/])tts|text-to-speech|sound-?effect)/.test(s) && !/(whisper|transcri|audio-preview|realtime)/.test(s)) return ["audio-generation"];
   if (/(embed|rerank|whisper|tts|speech|audio|moderation)/.test(s)) return [];
   const caps = ["chat"];
   if (/(vl|vision|4o|4\.1|gpt-5|gemini|claude|qwen-?vl|glm-4v|o3|o4)/.test(s)) caps.push("vision-input");
@@ -204,14 +206,26 @@ function parseChatResponse(body) {
 }
 
 /**
+ * 通用 OpenAI 兼容站点没有模型规格表：显式上报「没有 spec」，而不是返回一份猜出来的。
+ * 上层（electron/model-service.cjs#listModelsForUse）据此把 specSource 标成 'guess'，
+ * 画布才会退回「按名字的预设 + 未验证」；有规格的适配器（apimart / lovart）各自覆盖本函数。
+ */
+function uiSpec() {
+  return null;
+}
+
+/**
  * adapterType → 适配器实现。只需在新增官方协议时登记一条；
  * 未登记（含 openai-compatible / openai / 空）一律回落本模块的 OpenAI 兼容实现，
  * 保持既有服务商行为逐字不变。
  */
-function adapterFor(adapterType) {
+function adapterFor(adapterType, baseUrl) {
   const id = String(adapterType || "").trim().toLowerCase();
+  // APIMart（api.apimart.ai / apib.ai）：异步任务协议，按主机自动识别（与 NOVAI is_apimart_provider 同口径）
+  if (id === "apimart" || ((!id || id === "openai-compatible" || id === "openai") && /(^|\.)(apimart\.ai|apib\.ai)$/i.test((() => { try { return new URL(String(baseUrl || "")).hostname; } catch { return ""; } })()))) return require("./provider-adapter-apimart.cjs");
   if (id === "anthropic" || id === "anthropic-chat") return require("./provider-adapter-anthropic.cjs");
   if (id === "lovart") return require("./provider-adapter-lovart.cjs");
+  if (id === "tripo3d" || id === "tripo") return require("./provider-adapter-tripo.cjs");
   return module.exports;
 }
 
@@ -222,6 +236,12 @@ function lovartFor(protocol) {
 }
 
 /** provider.protocol → 协议引擎用的传输描述符；非 Anthropic 返回 null（调用方走既有 OpenAI 分支）。 */
+/** provider.protocol → Tripo3D 适配器；非 Tripo 返回 null。 */
+function tripoFor(protocol) {
+  const id = String(protocol || "").trim().toLowerCase();
+  return id === "tripo3d" || id === "tripo" ? require("./provider-adapter-tripo.cjs") : null;
+}
+
 function chatProtocolFor(protocol) {
   const id = String(protocol || "").trim().toLowerCase();
   if (id !== "anthropic" && id !== "anthropic-chat") return null;
@@ -229,4 +249,63 @@ function chatProtocolFor(protocol) {
   return { buildRequest: impl.buildRequest, parseResponse: impl.parseChatResponse, readSse: impl.readSse };
 }
 
-module.exports = { chat, chatStream, generateImage, listModels, guessCapabilities, mapImages, parseSseChunk, mapUsage, parseChatResponse, adapterFor, chatProtocolFor, lovartFor, ADAPTER_TYPE: "openai-compatible" };
+/**
+ * 10-23 · 通用（OpenAI 兼容）图片编辑 / 带参考图生成：工具栏的重绘、擦除、扩图、多角度、重打光、增强、抠图……
+ * 按用户选的模型走它自己的接口，不写死服务商：
+ *   1) POST /images/edits（multipart，image[] 可多张；第一张若带透明区域即为要改的部分）
+ *   2) 服务商没有 /images/edits（404/405/501）时，退回 /chat/completions 多模态对话，从回复里取图片
+ * inputs：data: URL 或 https 地址（https 先下载）。返回 { ok, images: [{ b64, mime } | { url }] } 或 { ok:false, error, detail }。
+ */
+async function editImage({ baseUrl, apiKey, model, prompt, inputs = [], size = null, signal = null, timeoutMs = 300000, fetchImpl = fetch } = {}) {
+  const files = [];
+  for (const raw of (Array.isArray(inputs) ? inputs : []).slice(0, 8)) {
+    const v = String(raw || "");
+    const m = /^data:([^;,]+)?;base64,(.*)$/is.exec(v);
+    if (m) { files.push({ buf: Buffer.from(m[2] || "", "base64"), mime: m[1] || "image/png" }); continue; }
+    if (/^https:\/\//i.test(v)) { try { const r = await fetchImpl(v, { signal }); if (r && r.ok) files.push({ buf: Buffer.from(await r.arrayBuffer()), mime: String(r.headers.get("content-type") || "image/png").split(";")[0] }); } catch { /* 跳过下载失败的参考图 */ } }
+  }
+  if (!files.length) return { ok: false, error: "INVALID_INPUT", detail: "no-input-image" };
+  const base = String(baseUrl).replace(/\/$/, "");
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(new Error("timeout")), timeoutMs);
+  const onAbort = () => ctl.abort(signal && signal.reason); if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    // 1) /images/edits
+    const form = new FormData();
+    form.append("model", String(model || ""));
+    form.append("prompt", String(prompt || "").slice(0, 4000));
+    if (size) form.append("size", String(size).slice(0, 32));
+    const key = files.length > 1 ? "image[]" : "image";
+    files.forEach((f, i) => form.append(key, new Blob([f.buf], { type: f.mime }), "input-" + i + "." + ((f.mime.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "") || "png")));
+    const res = await fetchImpl(base + "/images/edits", { method: "POST", headers: { authorization: "Bearer " + apiKey }, body: form, signal: ctl.signal, redirect: "error" });
+    if (res.ok) {
+      const body = await res.json().catch(() => null);
+      const items = mapImages(body).filter(Boolean);
+      if (items.length) return { ok: true, images: items };
+      return { ok: false, error: "PROVIDER_PROTOCOL_ERROR", detail: "edits-no-image" };
+    }
+    if (![404, 405, 501].includes(res.status)) {
+      const t = await res.text().catch(() => "");
+      return { ok: false, error: res.status === 401 || res.status === 403 ? "CREDENTIAL_INVALID" : "PROVIDER_ERROR", detail: ("HTTP " + res.status + " " + t).slice(0, 300) };
+    }
+    // 2) 多模态对话出图（Gemini 图片模型等经中转常见形态）
+    const content = [{ type: "text", text: String(prompt || "") }, ...files.map((f) => ({ type: "image_url", image_url: { url: "data:" + f.mime + ";base64," + f.buf.toString("base64") } }))];
+    const r2 = await fetchImpl(base + "/chat/completions", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + apiKey }, body: JSON.stringify({ model, messages: [{ role: "user", content }], stream: false }), signal: ctl.signal, redirect: "error" });
+    if (!r2.ok) { const t = await r2.text().catch(() => ""); return { ok: false, error: "PROVIDER_ERROR", detail: ("HTTP " + r2.status + " " + t).slice(0, 300) }; }
+    const body = await r2.json().catch(() => null);
+    const msg = body && body.choices && body.choices[0] && body.choices[0].message || {};
+    const found = [];
+    for (const im of Array.isArray(msg.images) ? msg.images : []) { const u = im && (im.image_url && im.image_url.url || im.url); if (u) found.push(u); }
+    if (Array.isArray(msg.content)) for (const part of msg.content) { const u = part && (part.image_url && part.image_url.url || (part.type === "image" && part.url)); if (u) found.push(u); }
+    const text = typeof msg.content === "string" ? msg.content : "";
+    for (const m2 of text.matchAll(/(data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+)|!\[[^\]]*\]\((https?:[^)\s]+)\)/g)) found.push(m2[1] || m2[2]);
+    const images = found.map((u) => { const d = /^data:([^;,]+);base64,(.*)$/s.exec(u); return d ? { b64: d[2], mime: d[1] } : { url: u }; });
+    if (images.length) return { ok: true, images };
+    return { ok: false, error: "PROVIDER_PROTOCOL_ERROR", detail: (text || "chat-no-image").slice(0, 300) };
+  } catch (error) {
+    if (signal && signal.aborted) return { ok: false, error: "CANCELLED" };
+    if (ctl.signal.aborted) return { ok: false, error: "MODEL_TIMEOUT" };
+    return { ok: false, error: "PROVIDER_UNAVAILABLE", detail: String((error && error.message) || error).slice(0, 200) };
+  } finally { clearTimeout(timer); if (signal) signal.removeEventListener("abort", onAbort); }
+}
+
+module.exports = { chat, chatStream, generateImage, editImage, listModels, guessCapabilities, uiSpec, mapImages, parseSseChunk, mapUsage, parseChatResponse, adapterFor, chatProtocolFor, lovartFor, tripoFor, ADAPTER_TYPE: "openai-compatible" };

@@ -99,12 +99,68 @@ function createMarketBundle(options = {}) {
     return { ok: true, value: normalized.value };
   }
 
+
+  // task-55：随包的 TapNow 导入条目（resources/market/tapnow-items.json，可缺省）。
+  function loadTapnow() {
+    const dir = resolveCatalogDir();
+    if (!dir) return null;
+    const file = path.join(dir, "tapnow-items.json");
+    try { if (!fs.statSync(file).isFile()) return null; } catch { return null; }
+    let raw;
+    try { raw = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
+    const normalized = marketDomain.normalizeTapnowManifest(raw);
+    return normalized.ok ? normalized.value : null;
+  }
+  /** 把导入条目并进 market/catalog：来源标记 + contentVersion + 分类计数（只保留有内容的分类）。 */
+  function mergeExternalCatalog(value) {
+    const tapnow = loadTapnow();
+    if (!tapnow) return value;
+    const order = value.categories.map((c) => c.id);
+    const labels = new Map(value.categories.map((c) => [c.id, c.name]));
+    const counts = new Map(value.categories.map((c) => [c.id, c.count]));
+    const icons = new Map(value.categories.map((c) => [c.id, c.icon]));
+    const descriptions = new Map(value.categories.map((c) => [c.id, c.description]));
+    for (const category of tapnow.categories) {
+      if (labels.has(category.id)) continue;
+      labels.set(category.id, category.label);
+      order.push(category.id);
+      counts.set(category.id, 0);
+    }
+    for (const item of tapnow.items) {
+      if (item.businessScenario && counts.has(item.businessScenario)) counts.set(item.businessScenario, counts.get(item.businessScenario) + 1);
+    }
+    const categories = order.filter((id) => (counts.get(id) || 0) > 0).map((id) => ({
+      id, name: labels.get(id) || id, icon: icons.get(id) || "◈", description: descriptions.get(id) || "",
+      count: counts.get(id) || 0,
+    }));
+    return {
+      ...value,
+      categories,
+      external: {
+        source: "tapnow",
+        name: tapnow.source.name,
+        url: tapnow.source.url,
+        contentVersion: tapnow.source.contentVersion,
+        importedAt: tapnow.source.importedAt,
+        note: tapnow.source.note,
+        count: tapnow.items.length,
+        skillCount: tapnow.skillCount,
+        appCount: tapnow.appCount,
+        guideCount: tapnow.guideCount,
+        delistedCount: tapnow.delistedCount,
+        missingGuideCount: tapnow.missingGuideCount,
+        rejected: tapnow.rejected,
+        items: tapnow.items,
+      },
+    };
+  }
+
   function catalogStatus() {
     const read = readRawManifest();
-    if (!read.ok) return { present: false, valid: false, manifestName, appCount: 0, skillPackCount: 0, reason: read.error.code };
+    if (!read.ok) return { present: false, valid: false, manifestName, appCount: 0, skillPackCount: 0, templateCount: 0, reason: read.error.code };
     const normalized = marketDomain.normalizeLocalManifest(read.raw, { generatedAt: clock() });
-    if (!normalized.ok) return { present: true, valid: false, manifestName, appCount: 0, skillPackCount: 0, reason: normalized.error.code };
-    return { present: true, valid: true, manifestName, appCount: normalized.value.apps.length, skillPackCount: normalized.value.skillPacks.length, reason: null };
+    if (!normalized.ok) return { present: true, valid: false, manifestName, appCount: 0, skillPackCount: 0, templateCount: 0, reason: normalized.error.code };
+    return { present: true, valid: true, manifestName, appCount: normalized.value.apps.length, skillPackCount: normalized.value.skillPacks.length, templateCount: (normalized.value.templates || []).length, reason: null };
   }
 
   function findApp(id) {
@@ -143,7 +199,9 @@ function createMarketBundle(options = {}) {
       switch (command) {
         case "market/catalog": {
           const catalog = loadCatalog();
-          return catalog.ok ? { ok: true, value: catalog.value } : { ok: false, error: catalog.error, detail: catalog.detail };
+          if (!catalog.ok) return { ok: false, error: catalog.error, detail: catalog.detail };
+          const merged = mergeExternalCatalog(catalog.value);
+          return { ok: true, value: merged };
         }
         case "market/apps/list": {
           const catalog = loadCatalog();
@@ -157,7 +215,8 @@ function createMarketBundle(options = {}) {
         case "market/skillpacks/get": return findSkillPack(payload.id != null ? payload.id : payload.skillPackId);
         case "market/health": {
           const status = catalogStatus();
-          return { ok: true, value: { ok: true, source: "local", commands: marketDomain.MARKET_COMMANDS.length, ...status } };
+          const tapnow = loadTapnow();
+          return { ok: true, value: { ok: true, source: "local", commands: marketDomain.MARKET_COMMANDS.length, externalSource: tapnow ? tapnow.source.name : "", externalItems: tapnow ? tapnow.items.length : 0, ...status } };
         }
         default:
           return marketDomain.normalizeMarketError(marketDomain.marketCommandNotAllowed(command));

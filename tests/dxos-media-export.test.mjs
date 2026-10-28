@@ -185,7 +185,7 @@ test("导出拒绝：非法 target / 非法文件名 / 未完成任务 / 未知�
 });
 
 test("main.cjs 装配契约：media bundle 注入资源库登记桥与访达 reveal（绝对路径只在主进程）", () => {
-  const main = fs.readFileSync(path.join(process.cwd(), "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(process.cwd(), "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes('require("./media-resource-registrar.cjs")'), "main.cjs 必须装配 media-resource-registrar");
   assert.ok(main.includes("createMediaResourceRegistrar({"), "登记桥必须由真实 ResourceService 构造");
   assert.ok(main.includes("resourceService: identity.resourceService || null"), "登记桥必须接到身份运行时装配的真实 resourceService");

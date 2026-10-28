@@ -10,10 +10,10 @@
  * 它们是"此刻的事实"，没有一条进持久化，也绝不跨会话复用。
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import domain from "../../electron/window-domain.cjs";
-import manager from "../../electron/window-manager.cjs";
-import type { WindowCommand, WindowStateModel } from "../../electron/window-domain.cjs";
-import type { NativeIntent } from "../../electron/window-manager.cjs";
+import * as domain from "../../electron/window-domain.ts";
+import * as manager from "../../electron/window-manager.ts";
+import type { WindowCommand, WindowStateModel } from "../../electron/window-domain.ts";
+import type { NativeIntent } from "../../electron/window-manager.ts";
 import { tabKey, type BrowserNotice, type DownloadRecord, type TabRuntimeMap } from "../browser/types";
 
 /** 持久化键：沿用既有 oa-wins 前缀，但**按用户分键**，且只能经 Window Manager 读写。 */

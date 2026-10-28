@@ -71,63 +71,88 @@ try {
   mainLoadError = err;
 }
 
-/**
- * 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应。
- * 集成后 = 核心线（identity/authorization/device/resource/governance/model/task/sideEffect/browser/canvas/mcp）
- *        + UI 线文件桥 files，共 17 个。
- * browser/canvas/mcp 是核心线 D5-01 / D5-02 / D5-03 的桥键：它们同样必须逐个登记在 REGISTERED_EXPANSIONS，
- * 并按 sec.bridgeExposesNoRawIpc 与各通道 trusted() 守卫两条否决用例一起审。
- */
-const FROZEN_BRIDGE_KEYS = ["action", "authorization", "browser", "canvas", "device", "files", "governance", "identity", "mcp", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "sync", "task"];
-/** D2-02 冻结的历史基线（5 个）：新增成员必须逐个登记在 REGISTERED_EXPANSIONS。 */
+/** D2-02 冻结的历史基线（5 个）：新增成员必须逐个登记来源。 */
 const PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
-/** 相对 D2-02 基线的全部已登记扩张（顺序与 sorted bridgeKeys 的差集一致）。 */
-const REGISTERED_EXPANSIONS = ["authorization", "browser", "canvas", "device", "files", "governance", "identity", "mcp", "model", "resource", "sideEffect", "task"];
-/**
- * 冻结的 IPC 通道。
- *
- * 注意扫描范围：identity:command / authorization:command / device:command / resource:command
- * 分别注册在各自的 *-bootstrap.cjs（与 UI 探针共用同一份装配），不在 main.cjs 里。
- * 只扫 main.cjs 会漏掉它们 —— 因此全部 bootstrap 都要扫。
- */
+/** 当前 42 个 preload 键：5 个历史键 + 37 个已登记扩张，来源与实际装配模块一一对应。 */
+const BRIDGE_EXPANSION_SOURCES = Object.freeze({
+  agent: "agent-bootstrap.cjs",
+  appExchange: "app-exchange-bootstrap.cjs",
+  authorization: "authorization-bootstrap.cjs",
+  automation: "automation-bootstrap.cjs",
+  browser: "window-browser-ipc.cjs",
+  calendar: "calendar-bootstrap.cjs",
+  canvas: "canvas-bootstrap.cjs",
+  cli: "cli-bootstrap.cjs",
+  codexCanvas: "codex-canvas-bootstrap.cjs",
+  desktop: "local-proxy-bootstrap.cjs",
+  developer: "developer-bootstrap.cjs",
+  device: "device-bootstrap.cjs",
+  fileTransfer: "file-transfer-bootstrap.cjs",
+  files: "files-ipc.cjs",
+  governance: "governance-bootstrap.cjs",
+  identity: "identity-bootstrap.cjs",
+  image: "files-ipc.cjs",
+  integration: "plugin-bootstrap.cjs",
+  market: "plugin-bootstrap.cjs",
+  marketUpdate: "plugin-bootstrap.cjs + market:command",
+  mcp: "mcp-bootstrap.cjs",
+  media: "media-bootstrap.cjs",
+  model: "model-bootstrap.cjs",
+  ocr: "ocr-bootstrap.cjs",
+  photocraft: "photocraft-bootstrap.cjs",
+  photos: "photos-bootstrap.cjs",
+  platform: "platform-bootstrap.cjs",
+  resource: "resource-bootstrap.cjs",
+  sideEffect: "side-effect-bootstrap.cjs",
+  skill: "skill-bootstrap.cjs",
+  system: "files-ipc.cjs",
+  systemFonts: "system-fonts-bootstrap.cjs",
+  task: "task-bootstrap.cjs",
+  uploadConsent: "upload-consent-bootstrap.cjs",
+  video: "files-ipc.cjs",
+  weather: "files-ipc.cjs",
+  windowControl: "window-browser-ipc.cjs",
+});
+const REGISTERED_EXPANSIONS = Object.keys(BRIDGE_EXPANSION_SOURCES).sort();
+const FROZEN_BRIDGE_KEYS = [...PREV_BRIDGE_KEYS, ...REGISTERED_EXPANSIONS].sort();
+
+/** 当前生产 IPC 全量：files/video/image/system/weather 与各 command 通道逐项冻结。 */
 const FROZEN_IPC_CHANNELS = [
-  "authorization:command",
-  "browser:action",
-  "browser:command",
-  "browser:navigate",
-  "canvas:command",
-  "device:command",
-  "files:copy",
-  "files:export",
-  "files:import",
-  "files:info",
-  "files:list",
-  "files:move",
-  "files:read",
-  "files:remove",
-  "files:rename",
-  "files:thumb",
-  "files:trash",
-  "files:trashEmpty",
-  "files:trashList",
-  "files:trashPurge",
-  "files:trashRestore",
-  "governance:command",
-  "identity:command",
-  "mcp:command",
-  "model:command",
-  "resource:command",
-  "sideeffect:command",
-  "task:command",
-  "windows:sync",
+  "agent:command", "appExchange:command", "authorization:command", "automation:command",
+  "browser:action", "browser:command", "browser:navigate", "calendar:command", "canvas:command",
+  "cli:command", "codexCanvas:command", "desktop:command", "developer:command", "device:command",
+  "fileTransfer:command", "files:copy", "files:export", "files:import", "files:info", "files:list",
+  "files:move", "files:read", "files:remove", "files:rename", "files:thumb", "files:trash",
+  "files:trashEmpty", "files:trashList", "files:trashPurge", "files:trashRestore", "files:writeText",
+  "governance:command", "identity:command", "image:declare", "integration:command", "market:command",
+  "mcp:command", "media:command", "model:command", "ocr:command", "photocraft:command", "photos:command",
+  "platform:command", "resource:command", "sideeffect:command", "skill:command", "system:info",
+  "systemFonts:command", "task:command", "uploadConsent:command", "video:cancel", "video:export",
+  "video:probe", "video:status", "weather:forecast", "weather:geocode", "window:control", "windows:sync",
 ];
-/**
- * `ipcMain.on`（fire-and-forget）面：与 handle 分开冻结。
- * 渲染层同样能打到它们，所以必须一起审 —— 不能因为"不是 invoke"就漏在清单外。
- */
 const FROZEN_IPC_ON_CHANNELS = ["files:startDrag"];
-/** 扫描范围必须覆盖所有注册 handler 的 bootstrap，否则冻结清单可以靠"漏扫"骗过。 */
-const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs", "model-bootstrap.cjs", "mcp-bootstrap.cjs", "task-bootstrap.cjs", "side-effect-bootstrap.cjs", "canvas-bootstrap.cjs"];
+/** 所有生产 bootstrap + 三个直接注册 IPC 的装配模块；不能用漏扫来通过冻结清单。 */
+const IPC_SCAN_FILES = [
+  "main.cjs", "runtime-composition.cjs", "files-ipc.cjs", "window-browser-ipc.cjs",
+  "agent-bootstrap.cjs", "app-exchange-bootstrap.cjs", "authorization-bootstrap.cjs", "automation-bootstrap.cjs",
+  "calendar-bootstrap.cjs", "canvas-bootstrap.cjs", "cli-bootstrap.cjs", "codex-canvas-bootstrap.cjs",
+  "developer-bootstrap.cjs", "device-bootstrap.cjs", "file-transfer-bootstrap.cjs", "governance-bootstrap.cjs",
+  "identity-bootstrap.cjs", "local-proxy-bootstrap.cjs", "mcp-bootstrap.cjs", "media-bootstrap.cjs",
+  "model-bootstrap.cjs", "ocr-bootstrap.cjs", "photocraft-bootstrap.cjs", "photos-bootstrap.cjs",
+  "platform-bootstrap.cjs", "plugin-bootstrap.cjs", "resource-bootstrap.cjs", "side-effect-bootstrap.cjs",
+  "skill-bootstrap.cjs", "system-fonts-bootstrap.cjs", "task-bootstrap.cjs", "upload-consent-bootstrap.cjs",
+];
+/** 常量注册也必须解析；name 是 local-proxy 的生产默认通道。 */
+const IPC_CHANNEL_CONSTANTS = Object.freeze({
+  CHANNEL: "codexCanvas:command",
+  name: "desktop:command",
+  PHOTOCRAFT_CHANNEL: "photocraft:command",
+  PHOTOS_CHANNEL: "photos:command",
+  FILE_TRANSFER_CHANNEL: "fileTransfer:command",
+  APP_EXCHANGE_CHANNEL: "appExchange:command",
+  "domain.CLI_COMMAND_CHANNEL": "cli:command",
+  "domain.SYSTEM_FONTS_COMMAND_CHANNEL": "systemFonts:command",
+});
 /** D3-02 冻结的版本（7 个，仅作历史留痕）。 */
 const D3_02_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
 /** D3-01 冻结的版本（6 个，仅作历史留痕）。 */
@@ -164,7 +189,7 @@ const waitFor = async (fn, ms, sleep, label) => {
 exports.run = async function run({ report, sleep, add, out }) {
   // ─────────────── ① 静态面 ───────────────
   const preloadSrc = fs.readFileSync(path.join(ROOT, "electron", "preload.cjs"), "utf8");
-  const mainSrc = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
+  const mainSrc = ["main.cjs", "app-lifecycle.cjs"].map((file) => fs.readFileSync(path.join(ROOT, "electron", file), "utf8")).join("\n");
 
   // preload 里 exposeInMainWorld 的键
   const expose = preloadSrc.match(/exposeInMainWorld\(\s*"openarc"\s*,\s*\{([\s\S]*?)\n\}\);/);
@@ -196,24 +221,21 @@ exports.run = async function run({ report, sleep, add, out }) {
     "preload 不得把 ipcRenderer / electron 模块本身暴露出去（只能暴露白名单函数）",
   );
 
-  // 通道扫描覆盖 main.cjs **与 identity-bootstrap.cjs** —— 后者注册了 identity:command
   const ipcSrc = IPC_SCAN_FILES.map((f) => fs.readFileSync(path.join(ROOT, "electron", f), "utf8")).join("\n");
-  const channels = sorted([...ipcSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)].map((m) => m[1]));
+  const registrations = [...ipcSrc.matchAll(/ipcMain\.handle\(\s*(?:"([^"]+)"|([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?))/g)]
+    .map((match) => ({ channel: match[1] || IPC_CHANNEL_CONSTANTS[match[2]] || null, index: match.index }));
+  const channels = sorted(registrations.map((entry) => entry.channel).filter(Boolean));
   add(
     "sec.ipcChannelsMatchFrozenList",
-    JSON.stringify(channels) === JSON.stringify(FROZEN_IPC_CHANNELS),
+    registrations.every((entry) => !!entry.channel) && JSON.stringify(channels) === JSON.stringify(FROZEN_IPC_CHANNELS),
     `注册的 IPC 通道 ${JSON.stringify(channels)}；冻结清单 ${JSON.stringify(FROZEN_IPC_CHANNELS)}`,
   );
-  // 每个 handler 的第一件事都必须是信任校验。
-  // 两条写法都要认：`!trusted(e)`（main.cjs）与 `isTrusted && !isTrusted(e)`（bootstrap，
-  // 因为信任判据由调用方注入）。判据取"handler 开头 240 字符内出现 trusted(e)"。
-  // 注意：这里**不能**让匹配本身吃掉后面 240 个字符 —— matchAll 是不重叠的，
-  // 一旦吃掉，紧挨着的下一个 handler（比如 files:* 这组短 handler）会被整段跳过，
-  // 表现为"明明写了 trusted(e) 却判 FAIL"。改为记住位置、用 slice 看窗口。
+  // e/event 两种命名都接受；handler 开头 260 字符内必须有 trusted/isTrusted 调用。
   const guarded = sorted(
-    [...ipcSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)]
-      .filter((m) => /trusted\(e\)|isTrusted\(e\)/.test(ipcSrc.slice(m.index, m.index + 260)))
-      .map((m) => m[1]),
+    registrations
+      .filter((entry) => /trusted\((?:e|event)\)|isTrusted\((?:e|event)\)/.test(ipcSrc.slice(entry.index, entry.index + 260)))
+      .map((entry) => entry.channel)
+      .filter(Boolean),
   );
   add(
     "sec.everyChannelTrustsSender",

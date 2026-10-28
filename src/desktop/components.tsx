@@ -33,8 +33,8 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import domain from "../../electron/window-domain.cjs";
-import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
+import * as domain from "../../electron/window-domain.ts";
+import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.ts";
 import { windowIdAtPoint } from "./tabGroups";
 import type { WindowTabInfo } from "./tabGroups";
 import { useDockArrange } from "./useDockArrange";
@@ -859,7 +859,7 @@ function trackPointer(
   }
 }
 
-/** 拖拽：位移量在组件里算，**clamp 在域里做**（electron/window-manager.cjs）。 */
+/** 拖拽：位移量在组件里算，**clamp 在域里做**（electron/window-manager.ts）。 */
 export function startDrag(e: React.PointerEvent, w: WinDomain, onCommand: (c: WindowCommand) => void) {
   if ((e.target as HTMLElement).closest("button,input")) return;
   if (w.state === domain.WSTATE.MAXIMIZED) return;

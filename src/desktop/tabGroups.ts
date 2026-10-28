@@ -2,15 +2,15 @@
  * 窗口标签组（task-21 后端窗口域的前端投影 / 命令规划）。
  *
  * 为什么单独一层：Vue 壳层（src-vue/stores/shell.ts）与 React 入口（src/desktop/useDesktop.ts + main.tsx）
- * 共用同一份 electron/window-manager.cjs reduce，标签组的 UI 规则也必须只有一份：
+ * 共用同一份 electron/window-manager.ts reduce，标签组的 UI 规则也必须只有一份：
  *   · 投影：哪些窗口被标签组隐藏、标签条成员、同应用窗口数、能否合并；
  *   · 命令规划：手动/自动合并、拖拽合并或拆出、关闭标签/标签组、新窗口；
  *   · 自动合并偏好（localStorage 同一键，两入口一致）。
  * 后端仍是唯一权威：本文件只生成 window/tab-group-* 命令，不直接改窗口状态；
  * 两个入口把这些命令交给各自的 reduce（与主进程 windows:sync 批处理同一套 reducer）。
  */
-import domain from "../../electron/window-domain.cjs";
-import type { WindowCommand, WindowStateModel } from "../../electron/window-domain.cjs";
+import * as domain from "../../electron/window-domain.ts";
+import type { WindowCommand, WindowStateModel } from "../../electron/window-domain.ts";
 
 export const TAB_AUTO_MERGE_KEY = "oa-tab-auto-merge";
 

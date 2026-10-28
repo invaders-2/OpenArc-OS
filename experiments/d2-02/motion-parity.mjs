@@ -23,8 +23,8 @@ import { createRequire } from "node:module";
 import { Probe, VERDICT, appUrl, serveDist, launch, sleep } from "./lib/app.mjs";
 
 const require = createRequire(import.meta.url);
-const domain = require("../../electron/window-domain.cjs");
-const manager = require("../../electron/window-manager.cjs");
+const domain = require("../../electron/window-domain.ts");
+const manager = require("../../electron/window-manager.ts");
 
 const p = new Probe("motion-parity", "Reduce Motion 三路径窗口功能状态一致性");
 const SEED_W = 1440;

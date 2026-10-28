@@ -54,13 +54,14 @@ const errorCode = ref<string | null>(null);
 const problem = ref("");
 const kind = ref<string>(PROTOCOL_KIND_ALL);
 const status = ref<"all" | "ok" | "cond" | "off">("all");
+const query = ref("");
 
 const statusOf = (it: ProtocolItem): "ok" | "cond" | "off" =>
   it.execution === "unavailable" ? "off" : it.execution === "conditional" ? "cond" : "ok";
 const STATUS_LABEL = { ok: "可执行", cond: "需要前提", off: "不可执行" } as const;
 const count = (pred: (it: ProtocolItem) => boolean) => items.value.filter(pred).length;
 const shown = computed(() =>
-  filterProtocols(items.value, kind.value, "").filter((it) => status.value === "all" || statusOf(it) === status.value),
+  filterProtocols(items.value, kind.value, query.value).filter((it) => status.value === "all" || statusOf(it) === status.value),
 );
 
 function logoFor(it: ProtocolItem | null | undefined) {
@@ -180,87 +181,88 @@ onMounted(load);
 
 <template>
   <div class="pset" data-protocol-settings>
-    <div class="pset-bar">
-      <span class="pset-filters pset-seg">
-        <button
-          v-for="k in [['all', '全部'], ['model', '模型协议'], ['provider', '服务商协议']] as const"
-          :key="k[0]"
-          type="button"
-          class="pset-chip"
-          :class="{ on: kind === k[0] }"
-          :data-protocol-settings-kind="k[0]"
-          @click="kind = k[0]"
-        >{{ t(k[1]) }} <small>{{ k[0] === "all" ? items.length : count((it) => it.kind === k[0]) }}</small></button>
-      </span>
-      <span class="pset-filters pset-seg">
-        <button
-          v-for="s in (['all', 'ok', 'cond', 'off'] as const)"
-          :key="s"
-          type="button"
-          class="pset-chip"
-          :class="{ on: status === s }"
-          :data-protocol-settings-status="s"
-          @click="status = s"
-        >{{ s === "all" ? t("全部状态") : t(STATUS_LABEL[s]) }} <small>{{ s === "all" ? items.length : count((it) => statusOf(it) === s) }}</small></button>
-      </span>
-      <span class="toolbar-spacer" />
-      <DsButton variant="ghost" size="sm" data-protocol-settings-reload :disabled="loading" @click="load">{{ loading ? t("读取中…") : t("重新读取") }}</DsButton>
-    </div>
-
-    <p v-if="errorCode" class="pset-msg pset-msg-bad" data-protocol-settings-error :data-protocol-settings-error-code="errorCode">
-      {{ modelProtocolErrorText(errorCode) }}
-    </p>
+    <p v-if="errorCode" class="pset-msg pset-msg-bad" data-protocol-settings-error :data-protocol-settings-error-code="errorCode">{{ modelProtocolErrorText(errorCode) }}</p>
     <p v-else-if="problem" class="pset-msg">{{ problem }}</p>
 
+    <!-- 原型 A：左列表（搜索 + 分段筛选） · 右详情（分组卡片） -->
     <div class="pset-body">
-      <div class="pset-list" data-protocol-settings-list>
-        <p v-if="loading && !items.length" class="set-cap">{{ t("正在读取协议…") }}</p>
-        <p v-else-if="!shown.length" class="set-cap" data-protocol-settings-empty>{{ t("没有匹配的协议。") }}</p>
-        <button
-          v-for="it in shown"
-          :key="protocolKey(it)"
-          type="button"
-          class="pset-row"
-          :class="{ on: selectedKey === protocolKey(it) }"
-          :data-protocol-settings-row="protocolKey(it)"
-          :data-protocol-settings-engine="String(it.engine || '')"
-          :data-protocol-settings-execution="String(it.execution || '')"
-          :data-protocol-settings-ported="String(it.ported)"
-          @click="select(it)"
-        >
-          <span
-            class="pset-logo"
-            :data-protocol-settings-logo="logoFor(it)?.key ?? ''"
-            :data-protocol-settings-logo-kind="logoFor(it) ? 'brand' : 'initial'"
-            :data-protocol-settings-logo-render="logoFor(it)?.render ?? 'initial'"
-            :data-protocol-settings-logo-theme="logoTheme"
+      <aside class="pset-side">
+        <label class="ds-search pset-search">
+          <input class="ds-search__input" type="search" :placeholder="t('搜索协议')" :aria-label="t('搜索协议')" v-model="query" />
+        </label>
+        <div class="pset-seg" role="tablist">
+          <button
+            v-for="k in [['all', '全部'], ['model', '模型'], ['provider', '服务商']] as const"
+            :key="k[0]"
+            type="button"
+            class="pset-chip"
+            :class="{ on: kind === k[0] }"
+            :data-protocol-settings-kind="k[0]"
+            @click="kind = k[0]"
+          >{{ t(k[1]) }}</button>
+        </div>
+        <div class="pset-status">
+          <button
+            v-for="s in (['all', 'ok', 'cond', 'off'] as const)"
+            :key="s"
+            type="button"
+            class="pset-status-btn"
+            :class="{ on: status === s }"
+            :data-protocol-settings-status="s"
+            @click="status = s"
+          >{{ s === "all" ? t("全部状态") : t(STATUS_LABEL[s]) }} {{ s === "all" ? items.length : count((it) => statusOf(it) === s) }}</button>
+        </div>
+        <div class="pset-list" data-protocol-settings-list>
+          <p v-if="loading && !items.length" class="set-cap">{{ t("正在读取协议…") }}</p>
+          <p v-else-if="!shown.length" class="set-cap" data-protocol-settings-empty>{{ t("没有匹配的协议。") }}</p>
+          <button
+            v-for="it in shown"
+            :key="protocolKey(it)"
+            type="button"
+            class="pset-row"
+            :class="{ on: selectedKey === protocolKey(it) }"
+            :data-protocol-settings-row="protocolKey(it)"
+            :data-protocol-settings-engine="String(it.engine || '')"
+            :data-protocol-settings-execution="String(it.execution || '')"
+            :data-protocol-settings-ported="String(it.ported)"
+            @click="select(it)"
           >
             <span
-              v-if="logoFor(it)?.render === 'mask'"
-              class="pset-logo-mark"
-              :style="{ maskImage: 'url(' + logoFor(it)!.url + ')', WebkitMaskImage: 'url(' + logoFor(it)!.url + ')' }"
-            />
-            <img v-else-if="logoFor(it)" :src="logoFor(it)!.url" :alt="logoFor(it)!.label" />
-            <template v-else>{{ initialsFor(it) }}</template>
-          </span>
-          <span class="pset-row-main">
-            <b>{{ it.label || it.id }}</b>
-            <small>{{ it.id }}</small>
-          </span>
-          <span class="pset-dot" :data-s="statusOf(it)">{{ t(STATUS_LABEL[statusOf(it)]) }}</span>
-        </button>
-      </div>
+              class="pset-logo"
+              :data-protocol-settings-logo="logoFor(it)?.key ?? ''"
+              :data-protocol-settings-logo-kind="logoFor(it) ? 'brand' : 'initial'"
+              :data-protocol-settings-logo-render="logoFor(it)?.render ?? 'initial'"
+              :data-protocol-settings-logo-theme="logoTheme"
+            >
+              <span
+                v-if="logoFor(it)?.render === 'mask'"
+                class="pset-logo-mark"
+                :style="{ maskImage: 'url(' + logoFor(it)!.url + ')', WebkitMaskImage: 'url(' + logoFor(it)!.url + ')' }"
+              />
+              <img v-else-if="logoFor(it)" :src="logoFor(it)!.url" :alt="logoFor(it)!.label" />
+              <template v-else>{{ initialsFor(it) }}</template>
+            </span>
+            <span class="pset-row-main">
+              <b>{{ it.label || it.id }}</b>
+              <small>{{ t(STATUS_LABEL[statusOf(it)]) }}</small>
+            </span>
+            <span class="pset-dot" :data-s="statusOf(it)" aria-hidden="true" />
+          </button>
+        </div>
+        <DsButton variant="ghost" size="sm" data-protocol-settings-reload :disabled="loading" @click="load">{{ loading ? t("读取中…") : t("重新读取") }}</DsButton>
+      </aside>
 
       <section v-if="selected" class="pset-detail" :data-protocol-settings-detail="protocolKey(selected)">
         <header class="pset-head">
           <b>{{ selected.label || selected.id }}</b>
           <span>{{ selected.id }}</span>
         </header>
+        <p v-if="detail && detail.found && detail.summary && detail.summary !== '未返回'" class="pset-summary">{{ detail.summary }}</p>
 
-        <div class="pset-facts">
-          <div v-for="f in facts(selected)" :key="f[0]" class="pset-fact">
-            <span class="pset-fact-k">{{ t(f[0]) }}</span>
-            <span class="pset-fact-v">{{ t(f[1]) }}</span>
+        <div class="pset-card">
+          <div v-for="f in facts(selected)" :key="f[0]" class="pset-line">
+            <span class="pset-line-k">{{ t(f[0]) }}</span>
+            <span class="pset-line-v" :title="t(f[1])">{{ t(f[1]) }}</span>
           </div>
         </div>
         <p v-if="statusOf(selected) !== 'ok'" class="pset-msg" data-protocol-settings-premise>
@@ -270,25 +272,34 @@ onMounted(load);
         <p v-if="detailLoading" class="set-cap">{{ t("正在读取协议定义…") }}</p>
         <p v-else-if="detailError" class="pset-msg" data-protocol-settings-detail-note>{{ detailError }}</p>
         <template v-else-if="detail && detail.found">
-          <p v-if="detail.summary && detail.summary !== '未返回'" class="pset-summary">{{ detail.summary }}</p>
-          <p class="pset-groups">
-            <span v-for="g in detail.groups" :key="g.key" class="pset-group" :class="{ on: g.declared }">
-              {{ g.label.split(" ")[0] }} {{ g.declared ? g.count : t("未声明") }}
-            </span>
-          </p>
-          <table v-if="detail.operations.length" class="pset-table" data-protocol-settings-operations>
-            <thead><tr><th>{{ t("接口") }}</th><th>{{ t("方法") }}</th><th>{{ t("路径") }}</th></tr></thead>
-            <tbody><tr v-for="op in detail.operations" :key="op.id"><td>{{ op.id }}</td><td>{{ op.method }}</td><td class="mono">{{ op.path }}</td></tr></tbody>
-          </table>
-          <table v-if="detail.workflows.length" class="pset-table" data-protocol-settings-workflows>
-            <thead><tr><th>{{ t("工作流") }}</th><th>{{ t("提交接口") }}</th></tr></thead>
-            <tbody><tr v-for="wf in detail.workflows" :key="wf.id"><td>{{ wf.id }}</td><td>{{ wf.submit }}</td></tr></tbody>
-          </table>
-          <table v-if="detail.profiles.length" class="pset-table" data-protocol-settings-profiles>
-            <thead><tr><th>{{ t("模型") }}</th><th>{{ t("名称") }}</th><th>{{ t("能力") }}</th><th>{{ t("工作流") }}</th></tr></thead>
-            <tbody><tr v-for="pf in detail.profiles" :key="pf.id"><td>{{ pf.id }}</td><td>{{ pf.label }}</td><td>{{ pf.capabilities.length ? pf.capabilities.join("、") : t("未声明") }}</td><td>{{ pf.workflowCount }}</td></tr></tbody>
-          </table>
-          <p class="set-cap">{{ t("版本 v{version} · 校验值", { version: detail.version }) }} <code>{{ String(detail.hash).slice(0, 12) }}</code></p>
+          <template v-if="detail.operations.length">
+            <h5 class="pset-sec">{{ t("接口") }} <small>{{ detail.operations.length }}</small></h5>
+            <div class="pset-card" data-protocol-settings-operations>
+              <div v-for="op in detail.operations" :key="op.id" class="pset-line">
+                <span class="pset-line-k pset-wide">{{ op.id }}</span>
+                <span class="pset-line-v"><span class="pset-method">{{ op.method }}</span> {{ op.path }}</span>
+              </div>
+            </div>
+          </template>
+          <template v-if="detail.workflows.length">
+            <h5 class="pset-sec">{{ t("工作流") }} <small>{{ detail.workflows.length }}</small></h5>
+            <div class="pset-card" data-protocol-settings-workflows>
+              <div v-for="wf in detail.workflows" :key="wf.id" class="pset-line">
+                <span class="pset-line-k pset-wide">{{ wf.id }}</span>
+                <span class="pset-line-v">{{ wf.submit }}</span>
+              </div>
+            </div>
+          </template>
+          <template v-if="detail.profiles.length">
+            <h5 class="pset-sec">{{ t("模型") }} <small>{{ detail.profiles.length }}</small></h5>
+            <div class="pset-card" data-protocol-settings-profiles>
+              <div v-for="pf in detail.profiles" :key="pf.id" class="pset-line">
+                <span class="pset-line-k pset-wide">{{ pf.label || pf.id }}</span>
+                <span class="pset-line-v">{{ pf.capabilities.length ? pf.capabilities.join("、") : t("未声明能力") }}</span>
+              </div>
+            </div>
+          </template>
+          <p class="set-cap">{{ t("版本 v{version} · 校验值 {hash}", { version: detail.version, hash: String(detail.hash).slice(0, 12) }) }}</p>
         </template>
 
         <details class="pset-editor" data-protocol-settings-editor>
@@ -338,50 +349,59 @@ onMounted(load);
         </details>
       </section>
       <section v-else class="pset-detail pset-detail-empty">
-        <p class="set-cap">{{ t("从左边选一个协议，查看它的接口、工作流与可执行性；也可以在下方直接校验、保存自定义协议。") }}</p>
+        <p class="set-cap">{{ t("从左边选一个协议，查看它的接口、工作流与可用状态。") }}</p>
       </section>
     </div>
   </div>
 </template>
 
 <style scoped>
-.pset { display: flex; flex-direction: column; gap: 12px; }
-.pset-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-/* 筛选：分段控件（sunken 轨道 + 选中项抬起），不用描边胶囊（设计语言 §3.1 选中态 / §6 DsSegmented） */
-.pset-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--sunken); }
-.pset-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--fs-caption); cursor: pointer; }
-.pset-chip small { color: var(--muted); font-size: var(--fs-micro); }
+.pset { display: flex; flex-direction: column; gap: 12px; min-height: 0; height: 100%; }
+/* 原型 A：左 260 列表 · 右详情，两侧各自滚动（弹窗本身固定高度） */
+.pset-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; min-height: 0; flex: 1; }
+.pset-side { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.pset-search { width: 100%; }
+.pset-seg { display: flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--sunken); }
+.pset-chip { flex: 1; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--fs-secondary); cursor: pointer; }
 .pset-chip:hover { color: var(--text); }
 .pset-chip.on { background: rgb(var(--content-rgb) / 1); color: var(--text); font-weight: var(--fw-medium); box-shadow: 0 0.5px 2px rgb(0 0 0 / 0.12); }
-.pset-body { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
-.pset-list { display: flex; flex-direction: column; gap: 2px; max-height: 460px; overflow: auto; scrollbar-width: none; padding: 4px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.pset-status { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 0 2px; }
+.pset-status-btn { border: 0; padding: 0; background: transparent; color: var(--muted); font-size: var(--fs-caption); cursor: pointer; }
+.pset-status-btn.on { color: var(--text); font-weight: var(--fw-medium); }
+.pset-list { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
 .pset-list::-webkit-scrollbar { display: none; }
-.pset-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: var(--radius-md); background: transparent; color: var(--text); text-align: left; }
+.pset-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border-radius: var(--radius-md); background: transparent; color: var(--text); text-align: left; }
 .pset-row:hover { background: var(--row-hover); }
 .pset-row.on { background: rgb(var(--sidebar-selected-rgb, 224 224 224)); }
-.pset-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.pset-row-main b { font-weight: var(--fw-medium); font-size: var(--fs-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pset-row-main small { color: var(--muted); font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pset-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pset-row-main b { font-weight: var(--fw-regular); font-size: var(--fs-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pset-row.on .pset-row-main b { font-weight: var(--fw-medium); }
+.pset-row-main small { color: var(--muted); font-size: var(--fs-caption); }
 .pset-logo { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--sunken); color: var(--text); font-size: var(--fs-caption); font-weight: var(--fw-medium); overflow: hidden; }
-.pset-logo[data-protocol-settings-logo-kind="brand"] { background: transparent; width: auto; min-width: 28px; max-width: 96px; padding: 0 3px; color: var(--text); }
-.pset-logo-mark { width: 18px; height: 18px; background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
-.pset-logo img { display: block; max-width: 90px; max-height: 20px; object-fit: contain; }
-.pset-dot { flex: none; font-size: var(--fs-caption); color: var(--muted); }
-.pset-dot[data-s="off"] { color: var(--failed); }
-.pset-detail { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pset-logo[data-protocol-settings-logo-kind="brand"] { background: var(--sunken); }
+.pset-logo-mark { width: 16px; height: 16px; background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
+.pset-logo img { display: block; max-width: 18px; max-height: 18px; object-fit: contain; }
+.pset-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--text-rgb) / 0.25); }
+.pset-dot[data-s="ok"] { background: #34c759; }
+.pset-dot[data-s="cond"] { background: #ff9f0a; }
+.pset-dot[data-s="off"] { background: var(--failed); }
+.pset-detail { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow: auto; scrollbar-width: none; padding-right: 2px; }
+.pset-detail::-webkit-scrollbar { display: none; }
 .pset-head { display: flex; align-items: baseline; gap: 8px; }
 .pset-head b { font-size: var(--fs-headline); font-weight: var(--fw-medium); }
 .pset-head span { color: var(--muted); font-size: var(--fs-caption); }
-.pset-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; padding: 12px 16px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
-.pset-fact { display: flex; gap: 12px; font-size: var(--fs-secondary); min-width: 0; }
-.pset-fact-k { flex: none; width: 64px; color: var(--muted); }
-.pset-fact-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pset-summary { margin: 0; font-size: var(--fs-secondary); color: var(--text); line-height: 1.6; }
-.pset-groups { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--fs-caption); color: var(--muted); }
-.pset-group.on { color: var(--text); }
-.pset-table { width: 100%; border-collapse: collapse; font-size: var(--fs-caption); }
-.pset-table th, .pset-table td { text-align: left; padding: 6px 8px; box-shadow: inset 0 -0.5px 0 var(--line); }
-.pset-table th { color: var(--muted); font-weight: var(--fw-regular); }
+.pset-summary { margin: -4px 0 0; font-size: var(--fs-secondary); color: var(--muted); line-height: 1.6; }
+.pset-sec { margin: 8px 0 -4px; font-size: var(--fs-secondary); font-weight: var(--fw-medium); color: var(--muted); }
+.pset-sec small { font-weight: var(--fw-regular); margin-left: 4px; }
+/* 分组卡片：无描边，行间 0.5px 分隔只在卡片内部 */
+.pset-card { border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.pset-line { display: flex; align-items: center; gap: 16px; min-height: 40px; padding: 8px 16px; font-size: var(--fs-secondary); }
+.pset-line + .pset-line { box-shadow: inset 0 0.5px 0 var(--line); }
+.pset-line-k { flex: none; width: 88px; color: var(--muted); }
+.pset-line-k.pset-wide { flex: 1; width: auto; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pset-line-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pset-wide + .pset-line-v { flex: none; max-width: 55%; color: var(--muted); text-align: right; }
+.pset-method { display: inline-block; min-width: 38px; font-size: var(--fs-caption); color: var(--muted); }
 .pset-msg { margin: 0; font-size: var(--fs-caption); color: var(--text); }
 .pset-msg-bad { color: var(--failed); }
 .pset-editor { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
@@ -394,6 +414,6 @@ onMounted(load);
 .pset-draft:focus { outline: none; background: rgb(var(--text-rgb) / 0.1); }
 .pset-editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pset-issues { margin: 0; padding-left: 18px; font-size: var(--fs-caption); color: var(--failed); }
-.pset-detail-empty { padding: 10px; }
-@media (max-width: 720px) { .pset-body { grid-template-columns: 1fr; } }
+.pset-detail-empty { justify-content: center; align-items: center; }
+@container (max-width: 640px) { .pset-body { grid-template-columns: 1fr; } }
 </style>

@@ -38,7 +38,7 @@ const { createMediaError, MEDIA_ERR_INVALID_INPUT, MEDIA_ERR_NOT_FOUND, MEDIA_ER
 const MEDIA_UNAVAILABLE = MEDIA_ERR_DEPENDENCY_UNAVAILABLE;
 
 // ---------------------------------------------------------------------------
-// 表结构（唯一真值；v24 迁移只负责执行）
+// 表结构（唯一真值；v24 建媒体三表，v30 追加草稿表）
 // 源 videoStore.ts:16-58 的 CREATE TABLE / CREATE INDEX 原样搬运，全部 IF NOT EXISTS 可重放。
 // video_assets / video_render_jobs 指向 video_projects 的外键保留（三张表同属本层新建，
 // 不涉及 P1 跳过的 OpenArc 既有表，见 dxos-foundation-schema.cjs:26-35 的 FK 判据）。
@@ -51,6 +51,16 @@ const MEDIA_DDL = Object.freeze([
   "CREATE INDEX IF NOT EXISTS idx_video_jobs_queue ON video_render_jobs(status, lease_until, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_video_jobs_project ON video_render_jobs(project_id, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_video_jobs_owner ON video_render_jobs(owner_id, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS video_project_drafts (
+    project_id TEXT NOT NULL REFERENCES video_projects(id) ON DELETE CASCADE,
+    owner_id TEXT NOT NULL,
+    quick_json TEXT NOT NULL,
+    timeline_json TEXT NOT NULL,
+    sources_json TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (project_id, owner_id)
+  )`,
 ]);
 
 /** @returns {string[]} DDL 语句副本（调用方修改不影响模块内常量）。 */
@@ -58,7 +68,7 @@ function mediaDdl() {
   return MEDIA_DDL.slice();
 }
 
-/** v24 迁移实现：全部语句是 IF NOT EXISTS，这一级可重放；失败随外层事务整级回滚。 */
+/** v24/v30 共用幂等媒体 DDL；失败随对应外层迁移事务整级回滚。 */
 function applyDxosMediaLayer(db) {
   for (const statement of MEDIA_DDL) db.exec(statement);
 }
@@ -266,6 +276,68 @@ function ensureOwnedProject(projectId, ownerId) {
   const row = db.prepare("SELECT id FROM video_projects WHERE id=? AND owner_id=?").get(projectId, ownerId);
   if (!row) throw createMediaError(MEDIA_ERR_NOT_FOUND, "视频项目不存在或无权访问");
   return row.id;
+}
+
+function videoDraftView(row) {
+  if (!row) return null;
+  return {
+    projectId: row.project_id,
+    quick: JSON.parse(row.quick_json),
+    timeline: JSON.parse(row.timeline_json),
+    sources: JSON.parse(row.sources_json),
+    version: row.version,
+    updatedAt: row.updated_at,
+  };
+}
+function getVideoProjectDraft(projectId, ownerId) {
+  ensureOwnedProject(projectId, ownerId);
+  return videoDraftView(getMediaDb().prepare("SELECT * FROM video_project_drafts WHERE project_id=? AND owner_id=?").get(projectId, ownerId));
+}
+function latestVideoProjectDraft(ownerId) {
+  return videoDraftView(getMediaDb().prepare("SELECT * FROM video_project_drafts WHERE owner_id=? ORDER BY updated_at DESC,project_id DESC LIMIT 1").get(ownerId));
+}
+function draftParts(input) {
+  const quick = input && input.quick && typeof input.quick === "object" && !Array.isArray(input.quick) ? input.quick : {};
+  const timeline = input && input.timeline;
+  const sources = input && input.sources;
+  if (!timeline || typeof timeline !== "object" || Array.isArray(timeline)) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "草稿 timeline 必须是对象");
+  if (!sources || typeof sources !== "object" || Array.isArray(sources)) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "草稿 sources 必须是对象");
+  const parts = { quick: json(quick), timeline: json(timeline), sources: json(sources) };
+  if ((parts.quick.length + parts.timeline.length + parts.sources.length) > 8 * 1024 * 1024) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "视频草稿超过 8 MB 上限");
+  return parts;
+}
+function saveVideoProjectDraft(input) {
+  const projectId = ensureOwnedProject(input.projectId, input.ownerId);
+  const parts = draftParts(input);
+  return writeTransaction(() => {
+    const db = getMediaDb();
+    const current = db.prepare("SELECT version FROM video_project_drafts WHERE project_id=? AND owner_id=?").get(projectId, input.ownerId);
+    const expectedVersion = input.expectedVersion;
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 0 || (current ? current.version !== expectedVersion : expectedVersion !== 0)) {
+      throw createMediaError(MEDIA_ERR_CONFLICT, "视频草稿版本冲突，请重新读取", { expectedVersion, currentVersion: current ? current.version : 0 });
+    }
+    const ts = now();
+    if (current) {
+      const changed = db.prepare("UPDATE video_project_drafts SET quick_json=?,timeline_json=?,sources_json=?,version=version+1,updated_at=? WHERE project_id=? AND owner_id=? AND version=?")
+        .run(parts.quick, parts.timeline, parts.sources, ts, projectId, input.ownerId, expectedVersion).changes;
+      if (!changed) throw createMediaError(MEDIA_ERR_CONFLICT, "视频草稿版本冲突，请重新读取");
+    } else {
+      db.prepare("INSERT INTO video_project_drafts(project_id,owner_id,quick_json,timeline_json,sources_json,version,updated_at) VALUES (?,?,?,?,?,1,?)")
+        .run(projectId, input.ownerId, parts.quick, parts.timeline, parts.sources, ts);
+    }
+    return getVideoProjectDraft(projectId, input.ownerId);
+  });
+}
+function importVideoProjectDraft(input) {
+  const projectId = ensureOwnedProject(input.projectId, input.ownerId);
+  const parts = draftParts(input);
+  return writeTransaction(() => {
+    const existing = getVideoProjectDraft(projectId, input.ownerId);
+    if (existing) return { imported: false, draft: existing };
+    const inserted = getMediaDb().prepare("INSERT INTO video_project_drafts(project_id,owner_id,quick_json,timeline_json,sources_json,version,updated_at) VALUES (?,?,?,?,?,1,?) ON CONFLICT(project_id,owner_id) DO NOTHING")
+      .run(projectId, input.ownerId, parts.quick, parts.timeline, parts.sources, now()).changes;
+    return { imported: inserted > 0, draft: getVideoProjectDraft(projectId, input.ownerId) };
+  });
 }
 
 /**
@@ -555,6 +627,10 @@ module.exports = {
   deleteVideoAsset,
   videoAssetView,
   ensureOwnedProject,
+  getVideoProjectDraft,
+  latestVideoProjectDraft,
+  saveVideoProjectDraft,
+  importVideoProjectDraft,
   mediaAssetAbsolutePath,
   createVideoRenderJob,
   getVideoRenderJob,

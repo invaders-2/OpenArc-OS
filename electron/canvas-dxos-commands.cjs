@@ -42,6 +42,14 @@ const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
  */
 const DXOS_CANVAS_COMMANDS = Object.freeze([
   // ---- 素材库（源 canvasAssetLibrary.ts 全部入口） ----
+  { command: "canvas/assetLibrary/characterCreate", risk: "write", credential: "none", summary: "新建 AI 角色（名称/描述/提示词/参考图）" },
+  { command: "canvas/assetLibrary/characterList", risk: "read", credential: "none", summary: "列出 AI 角色" },
+  { command: "canvas/assetLibrary/characterUpdate", risk: "write", credential: "none", summary: "更新 AI 角色" },
+  { command: "canvas/assetLibrary/characterDelete", risk: "write", credential: "none", summary: "删除 AI 角色" },
+  { command: "canvas/assetLibrary/folderList", risk: "read", credential: "none", summary: "列出素材库文件夹（复用条目 group_name）" },
+  { command: "canvas/assetLibrary/folderCreate", risk: "write", credential: "none", summary: "新建素材库文件夹" },
+  { command: "canvas/assetLibrary/folderRename", risk: "write", credential: "none", summary: "重命名素材库文件夹" },
+  { command: "canvas/assetLibrary/folderMove", risk: "write", credential: "none", summary: "把素材条目移动到文件夹" },
   { command: "canvas/assetLibrary/list", risk: "read", credential: "none", summary: "列举当前用户可见的素材库（本人 + 组织可见）" },
   { command: "canvas/assetLibrary/ensure", risk: "write", credential: "none", summary: "取得或创建默认素材库，并补齐系统提示词" },
   { command: "canvas/assetLibrary/create", risk: "write", credential: "none", summary: "新建一个素材库" },
@@ -109,6 +117,20 @@ function packageTempDir(dir) {
   return dir || path.join(os.tmpdir(), "openarc-canvas-dxos");
 }
 
+/** 异步节点执行的失败细节 → 一句可读文案（校验错误列出前 3 条 path + message）。 */
+function asyncFailureDetail(detail) {
+  if (!detail) return "";
+  if (typeof detail === "string") return "：" + detail.slice(0, 300);
+  if (typeof detail !== "object") return "";
+  const errors = Array.isArray(detail.errors) ? detail.errors : [];
+  if (errors.length) {
+    const text = errors.slice(0, 3).map((e) => (e && e.path ? String(e.path) + " " : "") + ((e && e.message) || "")).filter(Boolean).join("；");
+    return "：" + text.slice(0, 300);
+  }
+  const reason = detail.reason || detail.executorId || detail.capability || "";
+  return reason ? "：" + String(reason).slice(0, 200) : "";
+}
+
 /**
  * A03 默认生成执行器：image-generator / llm 接既有 canvas/run → modelCall 链路（真实 Task 预算与停止归属）。
  * task-55：video-generator 接 model 域的协议引擎（legacyExecute action=videos：提交/轮询/产物落库由引擎完成）。
@@ -120,7 +142,7 @@ function createCanvasGenerationPort(canvasService) {
     if (type !== "builtin.image-generator" && type !== "builtin.llm") return fail("CANVAS_NODE_EXECUTOR_UNAVAILABLE", { type, capability: "model-generation", reason: "unsupported-model-kind" });
     if (!canvasId) return fail("INVALID_INPUT", "canvasId");
     const kind = type === "builtin.llm" ? "chat" : "image";
-    const started = canvasService.startRun({ context, canvasId, nodeId, kind });
+    const started = canvasService.startRun({ context, canvasId, nodeId, kind, configId: (params && params.configId) || null });
     if (!started || started.ok !== true) return started && started.ok === false ? started : fail("RUN_UNAVAILABLE");
     const runId = started.runId;
     let terminal = "FAILED";
@@ -161,17 +183,56 @@ function createCanvasVideoGenerationPort(canvasService) {
     if (!protocol || typeof protocol.legacyExecute !== "function") return fail("CANVAS_NODE_EXECUTOR_UNAVAILABLE", { type, capability: "video-generation", reason: "video-provider-unavailable" });
     const resolved = modelService.resolveModel({ context, capability: "video-generation", configId: params.configId });
     if (!resolved.ok) return fail(resolved.error || "MODEL_CONFIG_UNAVAILABLE", { capability: "video-generation", configId: params.configId || null });
-    const started = canvasService.startRun({ context, canvasId, nodeId, kind: "video" });
+    const started = canvasService.startRun({ context, canvasId, nodeId, kind: "video", configId: params.configId || null });
     if (!started || started.ok !== true) return started && started.ok === false ? started : fail("RUN_UNAVAILABLE");
     const runId = started.runId;
     let terminal = "FAILED";
     try {
+      // 10-23：图生视频 / 首尾帧 / 参考 —— 输入素材按角色排好，优先用资源库原始引用读字节（服务商可能只认自家上传的附件）
+      const list = (key) => (Array.isArray(params[key]) ? params[key] : []);
+      const media = (urls, refs, roles, preferUrl = false) => urls.map((url, i) => {
+        const ref = typeof refs[i] === "string" ? refs[i] : "";
+        // 音视频已有公网临时链接时直接用（几十上百 MB 不该转成 data URL 塞进请求）
+        if (preferUrl && typeof url === "string" && /^https:\/\//i.test(url)) return { value: url, role: roles[i] || null };
+        if (ref.startsWith("openarc-asset:") && typeof canvasService.readAsset === "function") {
+          const r = canvasService.readAsset({ context, ref });
+          if (r && r.ok && r.dataUrl) return { value: r.dataUrl, role: roles[i] || null };
+        }
+        return typeof url === "string" && url ? { value: url, role: roles[i] || null } : null;
+      }).filter(Boolean);
+      const images = media(list("images"), list("imageRefs"), list("imageRoles"));
+      const order = { first_frame: 0, last_frame: 1 };
+      images.sort((a, b) => (order[a.role] ?? 2) - (order[b.role] ?? 2));
+      const videos = media(list("videos"), list("videoRefs"), [], true);
+      const audios = media(list("audios"), list("audioRefs"), [], true);
+      const inputsAll = [...images, ...videos, ...audios].map((x) => x.value);
+      const vparams = {
+        size: params.size, ratio: params.ratio, resolution: params.resolution, count: params.count,
+        duration: params.duration, modelType: params.modelType, generateAudio: params.generateAudio, multiShot: params.multiShot,
+        imageRoles: images.map((x) => x.role),
+        mediaKinds: [...images.map(() => "image"), ...videos.map(() => "video"), ...audios.map(() => "audio")],
+      };
+      // 优先走模型配置自带凭据的视频出口（Lovart 等）；适配器没有时再回落协议引擎
+      if (typeof modelService.generateVideo === "function") {
+        const direct = await modelService.generateVideo({ context, configId: params.configId, prompt: String(params.prompt || ""), inputs: inputsAll, params: vparams, requestId: "canvas_video_" + runId });
+        if (!(direct && direct.ok === false && direct.detail === "adapter-no-video")) {
+          if (!direct || direct.ok !== true) return direct && direct.ok === false ? direct : fail("VIDEO_GENERATION_FAILED");
+          terminal = "DONE";
+          return ok({ outputs: { videos: direct.videos }, modelResult: direct });
+        }
+      }
       const result = await protocol.legacyExecute({
         providerId: resolved.snapshot.providerId,
         action: "videos",
         model: resolved.snapshot.modelId,
         prompt: String(params.prompt || ""),
-        params: { size: params.size, ratio: params.ratio, resolution: params.resolution, count: params.count },
+        params: {
+          size: params.size, ratio: params.ratio, resolution: params.resolution, count: params.count,
+          duration: params.duration, modelType: params.modelType, generateAudio: params.generateAudio, multiShot: params.multiShot,
+          imageRoles: images.map((x) => x.role),
+        },
+        input: images[0] ? images[0].value : null,
+        inputs: [...images, ...videos, ...audios].map((x) => x.value),
         requestId: "canvas_video_" + runId,
         timeoutMs: 600000,
       });
@@ -183,6 +244,57 @@ function createCanvasVideoGenerationPort(canvasService) {
     }
   };
   port.supports = (type) => type === "builtin.video-generator" && !!(canvasService.modelService && canvasService.modelService.providerProtocol && canvasService.modelService.providerProtocol.service);
+  return port;
+}
+
+/** task-55 同构：音频节点 → model 协议引擎 legacyExecute action=audio（提交/产物落库由引擎完成）。 */
+function createCanvasAudioGenerationPort(canvasService) {
+  const port = async ({ type, params, context, canvasId, nodeId }) => {
+    if (!canvasService || !canvasService.modelService) return fail("CANVAS_NODE_EXECUTOR_UNAVAILABLE", { type, capability: "audio-generation", reason: "model-service-unavailable" });
+    const modelService = canvasService.modelService;
+    const protocol = modelService.providerProtocol && modelService.providerProtocol.service;
+    if (!protocol || typeof protocol.legacyExecute !== "function") return fail("CANVAS_NODE_EXECUTOR_UNAVAILABLE", { type, capability: "audio-generation", reason: "audio-provider-unavailable" });
+    const resolved = modelService.resolveModel({ context, capability: "audio-generation", configId: params.configId });
+    if (!resolved.ok) return fail(resolved.error || "MODEL_CONFIG_UNAVAILABLE", { capability: "audio-generation", configId: params.configId || null });
+    const started = canvasService.startRun({ context, canvasId, nodeId, kind: "audio", configId: params.configId || null });
+    if (!started || started.ok !== true) return started && started.ok === false ? started : fail("RUN_UNAVAILABLE");
+    const runId = started.runId;
+    let terminal = "FAILED";
+    try {
+      // 优先走模型配置自带凭据的音频出口（APIMart：配音 / Suno / Flow Music）；适配器没有时再回落协议引擎
+      if (typeof modelService.generateAudio === "function") {
+        const direct = await modelService.generateAudio({ context, configId: params.configId, prompt: String(params.prompt || ""), params: { kind: params.kind, duration: params.duration }, requestId: "canvas_audio_" + runId });
+        if (!(direct && direct.ok === false && direct.detail === "adapter-no-audio")) {
+          if (!direct || direct.ok !== true) return direct && direct.ok === false ? direct : fail("AUDIO_GENERATION_FAILED");
+          // 配音是直接返回的音频数据：存进画布资源，节点里只放引用
+          const audios = [];
+          for (const a of direct.audios) {
+            if (a.dataUrl && typeof canvasService.importAsset === "function") {
+              const saved = await canvasService.importAsset({ context, canvasId, name: "生成音频", dataUrl: a.dataUrl });
+              audios.push(saved && saved.ok && saved.ref ? { url: saved.ref } : a);
+            } else audios.push(a);
+          }
+          terminal = "DONE";
+          return ok({ outputs: { audios }, modelResult: { ...direct, audios } });
+        }
+      }
+      const result = await protocol.legacyExecute({
+        providerId: resolved.snapshot.providerId,
+        action: "audio",
+        model: resolved.snapshot.modelId,
+        prompt: String(params.prompt || ""),
+        params: { size: params.size, ratio: params.ratio, resolution: params.resolution, count: params.count, kind: params.kind, duration: params.duration },
+        requestId: "canvas_audio_" + runId,
+        timeoutMs: 600000,
+      });
+      if (!result || result.ok !== true) return result && result.ok === false ? result : fail("AUDIO_GENERATION_FAILED");
+      terminal = "DONE";
+      return ok({ outputs: { audios: Array.isArray(result.audios) ? result.audios : [] }, modelResult: result });
+    } finally {
+      try { canvasService.finishRun({ context, canvasId, runId, status: terminal }); } catch { /* run 已终态时幂等 */ }
+    }
+  };
+  port.supports = (type) => type === "builtin.audio-generator" && !!(canvasService.modelService && canvasService.modelService.providerProtocol && canvasService.modelService.providerProtocol.service);
   return port;
 }
 
@@ -200,6 +312,9 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
   }
   if (typeof resolvedNodePorts.videoGeneration !== "function" && canvasService) {
     resolvedNodePorts.videoGeneration = createCanvasVideoGenerationPort(canvasService);
+  }
+  if (typeof resolvedNodePorts.audioGeneration !== "function" && canvasService) {
+    resolvedNodePorts.audioGeneration = createCanvasAudioGenerationPort(canvasService);
   }
   const nodeRegistry = createCanvasNodeRegistry({ extraDefinitions: Array.isArray(nodeDefinitions) ? nodeDefinitions : [], ports: resolvedNodePorts, canvasService });
   const events = new Map(); // "canvasId\u0000clientId" → array
@@ -254,6 +369,14 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
 
   const handlers = {
     "canvas/assetLibrary/list": (payload, context) => assetLibrary.listLibraries({ context }),
+    "canvas/assetLibrary/characterCreate": (payload, context) => assetLibrary.characterCreate({ context, libraryId: asStr(payload.libraryId, 120), name: asStr(payload.name, 80), description: asStr(payload.description, 500) || "", prompt: asStr(payload.prompt, 4000) || "", referenceUrls: Array.isArray(payload.referenceUrls) ? payload.referenceUrls : [] }),
+    "canvas/assetLibrary/characterList": (payload, context) => assetLibrary.characterList({ context, libraryId: asStr(payload.libraryId, 120) }),
+    "canvas/assetLibrary/characterUpdate": (payload, context) => assetLibrary.characterUpdate({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.id, 80), name: payload.name, description: payload.description, prompt: payload.prompt, referenceUrls: payload.referenceUrls }),
+    "canvas/assetLibrary/characterDelete": (payload, context) => assetLibrary.characterDelete({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.id, 80) }),
+    "canvas/assetLibrary/folderList": (payload, context) => assetLibrary.folderList({ context, libraryId: asStr(payload.libraryId, 120) }),
+    "canvas/assetLibrary/folderCreate": (payload, context) => assetLibrary.folderCreate({ context, libraryId: asStr(payload.libraryId, 120), name: asStr(payload.name, 60) }),
+    "canvas/assetLibrary/folderRename": (payload, context) => assetLibrary.folderRename({ context, libraryId: asStr(payload.libraryId, 120), from: asStr(payload.from, 60), to: asStr(payload.to, 60) }),
+    "canvas/assetLibrary/folderMove": (payload, context) => assetLibrary.folderMove({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 80), folder: asStr(payload.folder, 60) }),
     "canvas/assetLibrary/ensure": (payload, context) => assetLibrary.ensureDefaultLibrary({ context }),
     "canvas/assetLibrary/create": (payload, context) => assetLibrary.createLibrary({ context, name: asStr(payload.name, 120), visibility: asStr(payload.visibility, 20) }),
     "canvas/assetLibrary/get": (payload, context) => assetLibrary.getLibrary({ context, libraryId: asStr(payload.libraryId, 120) }),
@@ -398,14 +521,55 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
       if (payload.ports && typeof payload.ports === "object") return nodeRegistry.validatePorts(type, payload.ports);
       return nodeRegistry.validateParams(type, payload.params == null ? {} : payload.params);
     },
-    "canvas/nodes/execute": (payload, context) => {
+    "canvas/nodes/execute": async (payload, context) => {
       const user = actorOf(context);
       if (!user) return fail("NOT_FOUND_OR_FORBIDDEN");
-      return nodeRegistry.execute({
+      const canvasId = asStr(payload.canvasId, 120);
+      const type = asStr(payload.type, 120);
+      if (payload.async === true && canvasService && typeof canvasService.startRun === "function" && /video-generator|audio-generator|model3d/.test(String(type || ""))) {
+        const kind = String(type).includes("video") ? "video" : String(type).includes("audio") ? "audio" : "3d";
+        // 10-23：带上节点选的模型（不带时按「默认视频模型」解析，没设默认就会 MODEL_CONFIG_UNAVAILABLE）
+        const started = canvasService.startRun({ context, canvasId, nodeId: asStr(payload.nodeId, 120) || null, kind, configId: payload.params && typeof payload.params.configId === "string" ? payload.params.configId.slice(0, 120) : null });
+        if (!started || started.ok !== true) return started || fail("RUN_UNAVAILABLE");
+        const runId = started.runId;
+        canvasService.asyncRuns.set(runId, { status: "RUNNING", result: null, error: null, startedAt: Date.now(), finishedAt: null, canvasId });
+        void (async () => {
+          try {
+            const result = await nodeRegistry.execute({ type, params: payload.params, context, canvasId, nodeId: asStr(payload.nodeId, 120), writeBack: payload.writeBack === true, node: payload.node && typeof payload.node === "object" ? payload.node : null });
+            const current = canvasService.asyncRuns.get(runId);
+            if (current && current.status === "STOPPED") return;
+            if (result && result.ok === true) canvasService.asyncRuns.set(runId, { ...(canvasService.asyncRuns.get(runId) || {}), status: "DONE", result, finishedAt: Date.now() });
+            // 失败原因要带出来：只给错误码（如 CANVAS_NODE_PARAMS_INVALID）时，画布只能显示一个裸 code，
+            // 参数校验的 errors[] 会整条丢掉（真机就是这样丢了"params.images[0] 长度超过 400"）。
+            else canvasService.asyncRuns.set(runId, { ...(canvasService.asyncRuns.get(runId) || {}), status: "FAILED", error: String((result && result.error) || "NODE_EXECUTION_FAILED") + asyncFailureDetail(result && result.detail), finishedAt: Date.now() });
+          } catch (error) { canvasService.asyncRuns.set(runId, { ...(canvasService.asyncRuns.get(runId) || {}), status: "FAILED", error: String((error && error.message) || "NODE_EXECUTION_FAILED"), finishedAt: Date.now() }); }
+          finally { const entry = canvasService.asyncRuns.get(runId); if (entry && entry.status !== "STOPPED") { try { canvasService.finishRun({ context, canvasId, runId, status: entry.status === "DONE" ? "DONE" : "FAILED" }); } catch { /* ignore */ } } }
+        })();
+        return { ok: true, async: true, runId, taskId: started.taskId || null };
+      }
+      const result = await nodeRegistry.execute({
         type: asStr(payload.type, 120), params: payload.params, context,
-        canvasId: asStr(payload.canvasId, 120), nodeId: asStr(payload.nodeId, 120),
+        canvasId, nodeId: asStr(payload.nodeId, 120),
         writeBack: payload.writeBack === true, node: payload.node && typeof payload.node === "object" ? payload.node : null,
       });
+      if (!result || result.ok !== true || !canvasService || typeof canvasService.importAsset !== "function") return result;
+      let importError = null;
+      const resourceType = String(payload.type || "").includes("video") ? "video" : String(payload.type || "").includes("audio") ? "audio" : String(payload.type || "").includes("model3d") ? "model" : "image";
+      const visit = async (value) => {
+        if (Array.isArray(value)) { const out = []; for (const item of value) out.push(await visit(item)); return out; }
+        if (!value || typeof value !== "object") return value;
+        const copy = { ...value };
+        const dataUrl = typeof copy.dataUrl === "string" && copy.dataUrl.startsWith("data:") ? copy.dataUrl : (typeof copy.url === "string" && copy.url.startsWith("data:") ? copy.url : null);
+        if (dataUrl) {
+          const imported = await canvasService.importAsset({ context, canvasId, name: "节点产物-" + Date.now().toString(36), dataUrl, resourceType });
+          if (imported && imported.ok && imported.ref) { copy.url = imported.ref; copy.ref = imported.ref; copy.dataUrl = null; }
+          else importError = String((imported && (imported.error || imported.detail)) || "ASSET_IMPORT_FAILED");
+        }
+        for (const key of Object.keys(copy)) { if (key !== "url" && key !== "dataUrl" && copy[key] && typeof copy[key] === "object") copy[key] = await visit(copy[key]); }
+        return copy;
+      };
+      const outputs = await visit(result.outputs);
+      return { ...result, outputs, result: outputs, ...(importError ? { assetFallback: "base64", assetImportError: importError } : {}) };
     },
 
     "canvas/agentAttachments/list": (payload, context) => attachments.list({ context, canvasId: asStr(payload.canvasId, 120), includeRemoved: !!payload.includeRemoved }),
@@ -568,5 +732,5 @@ function describeCommands() { return DXOS_CANVAS_COMMANDS.map((entry) => ({ ...e
 module.exports = {
   CHANNEL, MAX_INLINE_PACKAGE_BYTES, DXOS_CANVAS_COMMANDS, REGISTRY,
   extendRendererCommands, createCanvasDxosExtension, combineCanvasCommandHandlers, registerCanvasDxosIpc, describeCommands,
-  createCanvasGenerationPort, createCanvasVideoGenerationPort,
+  createCanvasGenerationPort, createCanvasVideoGenerationPort, createCanvasAudioGenerationPort,
 };

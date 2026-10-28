@@ -636,6 +636,7 @@ function saveCustomSkill(obj) {
       origin: input.origin || (existing && existing.origin) || (source ? "imported" : "user"),
       exposure: "slash",
       visibleInApp: input.visibleInApp !== undefined ? input.visibleInApp : (existing ? existing.visibleInApp : true),
+      ownerUserId: input.ownerUserId || (existing && existing.ownerUserId) || null,
       systemPrompt: systemPrompt,
       inputSchema: INSTRUCTION_SCHEMA(String(input.description || name)),
       allowImplicitInvocation: false,
@@ -664,6 +665,15 @@ function updateCustomSkillDisplay(id, name, description) {
   if (skill.source) skill.source.metadata = Object.assign({}, skill.source.metadata, { displayOverride: true });
   persistStore(store);
   return Object.assign({}, skill, { builtin: false, enabled: store.enabled[id] !== false });
+}
+
+function setSkillOwner(id, ownerUserId) {
+  const store = loadStore();
+  const skill = store.custom.find((item) => item.id === id);
+  if (!skill) return null;
+  skill.ownerUserId = String(ownerUserId || "") || null;
+  persistStore(store);
+  return Object.assign({}, skill, { enabled: store.enabled[id] !== false });
 }
 
 /** skills.ts:602-611 删除自定义技能（内置技能只能停用，不能删除）。 */
@@ -853,6 +863,7 @@ module.exports = {
   listFunctionalSkills,
   listSystemCapabilities,
   setSkillEnabled,
+  setSkillOwner,
   saveCustomSkill,
   updateCustomSkillDisplay,
   deleteCustomSkill,

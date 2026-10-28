@@ -252,8 +252,9 @@ test("⑦ 未知应用 / 缺公钥：结构化不可用，不退化成任意目�
 });
 
 test("⑧ main.cjs 装配契约：scheme / resolver / market bundle / protocol", () => {
-  const main = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
-  assert.ok(main.includes('scheme: "openarc-app"'), "必须注册 openarc-app 协议 scheme");
+  const main = fs.readFileSync(path.join(ROOT, "electron", "runtime-composition.cjs"), "utf8");
+  const security = fs.readFileSync(path.join(ROOT, "electron", "security-policies.cjs"), "utf8");
+  assert.ok(security.includes('scheme: "openarc-app"'), "必须注册 openarc-app 协议 scheme");
   assert.ok(main.includes('require("./app-package-resolver.cjs")'), "main.cjs 必须装配通用解析器");
   assert.ok(main.includes("createAppPackageResolver({"), "必须创建真实解析器实例");
   assert.ok(main.includes("packageResolver: appPackageResolver"), "market install 必须注入同一份解析器做加载复核");

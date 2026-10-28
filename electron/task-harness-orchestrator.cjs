@@ -50,7 +50,7 @@ function sha256(text) { return crypto.createHash("sha256").update(String(text)).
 function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEnabled = false } = {}) {
   const lines = [];
   lines.push(toolsEnabled
-    ? "You are an OpenArc reasoning runtime. Only the OpenArc-controlled read-only tools exposed to you may be used; never assume shell, filesystem or network access."
+    ? "You are an OpenArc reasoning runtime. Use only the OpenArc-controlled tools exposed to you; write tools only create proposals that require trusted user approval. Never assume shell, filesystem or network access."
     : "You are an OpenArc reasoning runtime. Tools are disabled; answer in text only.");
   lines.push("Task goal: " + String(goal == null ? "" : goal));
   if (stepInput != null) lines.push("Step input: " + (typeof stepInput === "string" ? stepInput : JSON.stringify(stepInput)).slice(0, 4000));
@@ -248,6 +248,7 @@ class TaskHarnessOrchestrator {
       this.registry.set(run.runId, { taskId, stepId, capabilityId: null, adapter, bridge: facade ? facade.bridge : null, starting: true });
       info = await adapter.start({ context, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }) });
     } catch (e) {
+      try { this.logger?.log?.({ event: "task.harness.start_failed", error_code: String((e && e.code) || "UNCLASSIFIED"), detail: String((e && e.message) || e).slice(0, 300) }); } catch { /* ignore */ }
       // 启动段失败：立刻注销登记，避免把 adapter 留在 registry 里被重复收尾。
       this.registry.delete(run.runId);
       if (adapter) { try { adapter.revokeToolCapability(); } catch { /* ignore */ } try { adapter.revokeModelCapability(); } catch { /* ignore */ } try { await adapter.dispose(); } catch { /* ignore */ } }
@@ -798,6 +799,7 @@ class TaskHarnessOrchestrator {
 
   async #finalizeCancelled({ context, taskId, runId, expectedRevision, callUsage = null }) {
     const svc = this.#service();
+    try { this.sideEffectRuntime?.abandonPendingForTask(taskId); } catch { /* 取消 Task 仍继续收敛 */ }
     let runCancel = svc.cancelHarnessRun({ context, taskId, runId, expectedRevision });
     // D5-03 第十二批：用户取消后账本必须与事实一致 —— 本任务里仍为 STARTED 的 model call
     // 收敛成 CANCELLED（带 completed_at + 安全事件，已观测到的真实用量原样保留）；
@@ -836,6 +838,7 @@ class TaskHarnessOrchestrator {
     const svc = this.#service();
     const req = svc.requestCancel({ context, taskId, expectedRevision });
     if (!req.ok) return req;
+    try { this.sideEffectRuntime?.abandonPendingForTask(taskId); } catch { /* 取消 Task 仍继续收敛 */ }
     let rev = req.task.revision;
     const entries = [...this.registry.entries()].filter(([, entry]) => entry.taskId === taskId);
     for (const [runId, entry] of entries) {

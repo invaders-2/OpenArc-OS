@@ -171,6 +171,12 @@ class SideEffectRuntime {
     return out;
   }
 
+  abandonPendingForTask(taskId) {
+    const calls = this.pendingApprovalsOfRun(taskId);
+    for (const call of calls) this.#blockPending(call.callId, SIDE_EFFECT_ERROR.TASK_CANCELLED);
+    return { ok: true, count: calls.length };
+  }
+
   // ------------------------------------------------------------------ Approval gateway
   /** 只读安全投影：给 Approval UI 的唯一数据来源。绝不含 secret / 绝对路径 / store root。 */
   approvalSnapshot({ approvalRequestId, context = null } = {}) {

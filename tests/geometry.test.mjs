@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import geometry from "../electron/geometry.cjs";
+import * as geometry from "../electron/geometry.ts";
 
 // A05：多窗口多屏，移除一个屏幕后重启，所有恢复窗口必须可见。
 test("A05: windows restored after a display is removed must land in a visible work area", () => {

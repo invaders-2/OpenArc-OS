@@ -31,7 +31,7 @@ const { IdentityStore } = require("../electron/identity-store.cjs");
 const { AuthorizationStore } = require("../electron/authorization-store.cjs");
 const { writeZip } = require("../electron/canvas-dxos-zip.cjs");
 
-const MAIN_PATH = path.join(process.cwd(), "electron", "main.cjs");
+const MAIN_PATH = path.join(process.cwd(), "electron", "runtime-composition.cjs");
 const SERVICE_PATH = path.join(process.cwd(), "electron", "developer-service.cjs");
 const DOMAIN_PATH = path.join(process.cwd(), "electron", "developer-domain.cjs");
 

@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { buildDshSpawn } = require("../electron/harness-adapter.cjs");
 
-test("buildDshSpawn：Electron 用 process.execPath + ELECTRON_RUN_AS_NODE；Node 不加该变量", () => {
+test("buildDshSpawn：Electron 在解释器位置注入 --expose-internals；Node/随包 Node 不加", () => {
   const electron = buildDshSpawn({
     bin: "/app/node_modules/.bin/dsh",
     args: ["--profile", "acp"],
@@ -19,7 +19,8 @@ test("buildDshSpawn：Electron 用 process.execPath + ELECTRON_RUN_AS_NODE；Nod
     versions: { electron: "44.3.0", node: "22.22.3" },
   });
   assert.equal(electron.command, "/app/Contents/MacOS/Electron");
-  assert.deepEqual(electron.args, ["/app/node_modules/.bin/dsh", "--profile", "acp"]);
+  assert.deepEqual(electron.args, ["--expose-internals", "/app/node_modules/.bin/dsh", "--profile", "acp"]);
+  assert.equal(electron.args.at(-1), "acp", "--expose-internals 必须是解释器参数，不能成为 DSH args 尾部的 profile 参数");
   assert.equal(electron.env.ELECTRON_RUN_AS_NODE, "1");
   assert.equal(electron.env.PATH, "/usr/bin:/bin");
   assert.equal(electron.interpreter, "electron-node");
@@ -49,6 +50,8 @@ test("buildDshSpawn：Electron 用 process.execPath + ELECTRON_RUN_AS_NODE；Nod
   assert.equal(bundled.env.PATH, "/app/node_modules/.bin" + path.delimiter + "/usr/bin:/bin");
   assert.equal(Object.prototype.hasOwnProperty.call(bundled.env, "ELECTRON_RUN_AS_NODE"), false);
   assert.equal(bundled.interpreter, "bundled-node");
+  const direct = buildDshSpawn({ bin: "/app/node_modules/.bin/native-dsh", args: ["--version"], versions: { electron: "44.3.0" }, jsBin: false });
+  assert.deepEqual(direct.args, ["--version"], "直接二进制不是 JS 解释器，不得接收 --expose-internals");
 });
 
 test("resolveDshNode：随包 .bin/node 存在则使用，缺失回退 null", () => {

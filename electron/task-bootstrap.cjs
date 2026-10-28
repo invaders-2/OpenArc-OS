@@ -105,7 +105,25 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */
 const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume", "task/appendStep", "task/recovery", "task/acknowledgeUnknownEffect"]);
 
-function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai" } = {}) {
+function normalizeCanvasTaskContext(raw) {
+  if (raw == null) return { ok: true, context: null };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.schemaVersion !== 1) return { ok: false, error: "INVALID_INPUT" };
+  const canvasId = typeof raw.canvasId === "string" ? raw.canvasId : "";
+  if (!/^[A-Za-z0-9_.#:-]{1,120}$/.test(canvasId)) return { ok: false, error: "INVALID_INPUT" };
+  const strings = (value, max, pattern) => Array.isArray(value) && value.length <= max && value.every((item) => typeof item === "string" && pattern.test(item));
+  if (!strings(raw.selectedNodeIds, 16, /^[A-Za-z0-9_.#:-]{1,120}$/)) return { ok: false, error: "INVALID_INPUT" };
+  if (!strings(raw.resourceRefs, 16, /^(?:openarc-asset:|resource:\/\/)[A-Za-z0-9_.#:-]{1,160}$/)) return { ok: false, error: "INVALID_INPUT" };
+  if (!strings(raw.completionConditions, 4, /^[^\u0000-\u001f]{1,160}$/)) return { ok: false, error: "INVALID_INPUT" };
+  const context = {
+    type: "canvas.task.v1", schemaVersion: 1, canvasId,
+    selectedNodeIds: [...new Set(raw.selectedNodeIds)], resourceRefs: [...new Set(raw.resourceRefs)],
+    completionConditions: raw.completionConditions.slice(),
+  };
+  if (JSON.stringify(context).length > 3500) return { ok: false, error: "INVALID_INPUT" };
+  return { ok: true, context };
+}
+
+function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai", canvasService = null } = {}) {
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("task:command"); } catch { /* not registered */ } }
   ipcMain.handle("task:command", async (e, raw) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
@@ -139,6 +157,13 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
         case "task/run": {
           const goal = typeof payload.goal === "string" ? payload.goal.slice(0, 2000) : "";
           if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
+          const canvasInput = normalizeCanvasTaskContext(payload.canvasContext);
+          if (!canvasInput.ok) return { ok: false, error: canvasInput.error };
+          if (canvasInput.context) {
+            if (!canvasService || typeof canvasService.getCanvas !== "function") return { ok: false, error: "CANVAS_UNAVAILABLE" };
+            const target = canvasService.getCanvas({ context, canvasId: canvasInput.context.canvasId });
+            if (!target || !target.ok) return { ok: false, error: "CANVAS_NOT_FOUND_OR_FORBIDDEN" };
+          }
           // D4-03：产品任务的 model config 一律由**后端**按可信 context 解析后冻结（createTask 内再按当时
           // version 落库）；renderer 自报的 modelConfigId / modelConfigVersion 一概忽略。解析不出来就明确
           // 拒绝，绝不静默回退、绝不建未绑定任务（旧任务的懒绑定见 TaskService.startHarnessRun）。
@@ -151,7 +176,7 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           if (!created.ok) return created;
           const taskId = created.task.taskId;
           // 不等待整条 Harness 链：立即返回，进度经 send 推送；approval 由 sideeffect:event 推送。
-          const running = orchestrator.runTask({ context, taskId, expectedRevision: created.task.revision, verify: { type: "SCHEMA_VALID" } });
+          const running = orchestrator.runTask({ context, taskId, expectedRevision: created.task.revision, stepInput: canvasInput.context, verify: { type: "SCHEMA_VALID" } });
           running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
           return { ok: true, taskId, status: created.task.status };
         }
@@ -243,4 +268,4 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
   });
 }
 
-module.exports = { createTaskBundle, registerTaskIpc, TASK_COMMANDS, TOOL_FACADE_CONFIG };
+module.exports = { createTaskBundle, registerTaskIpc, normalizeCanvasTaskContext, TASK_COMMANDS, TOOL_FACADE_CONFIG };

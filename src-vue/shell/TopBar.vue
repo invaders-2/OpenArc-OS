@@ -205,7 +205,7 @@ function select(id: string) {
       if (w) shell.windows.filter((x) => x.appId === w.appId).forEach((x) => shell.closeWindow(x.id));
       return;
     case "new-finder":
-      return shell.dispatch({ type: "window/open", appId: "files", meta: { title: t("访达"), icon: "finder" } });
+      return shell.dispatch({ type: "window/open", appId: "files", meta: { title: t("访达"), icon: appById("files")?.icon || "finder" } });
     case "close":
       return w && shell.closeWindow(w.id);
     case "undo":

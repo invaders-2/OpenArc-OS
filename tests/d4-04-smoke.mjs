@@ -47,7 +47,7 @@ child.stderr.on("data", (d) => (stderr += d));
 const exitCode = await new Promise((resolve) => { const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* ignore */ } }, 600000); child.on("exit", (c) => { clearTimeout(t); resolve(c); }); });
 await provider.close().catch(() => {});
 
-for (const line of stdout.split("\n")) if (line.includes("DIAG")) console.log(line);
+for (const line of stdout.split("\n")) if (/DIAG|RUNTIME_LOG|HARNESS_ERROR/.test(line)) console.log(line);
 for (const line of stderr.split("\n")) if (line.includes("D4DIAG")) console.log(line);
 console.log("PROVIDER_HISTORY " + JSON.stringify(provider.state.history));
 const m = stdout.match(/RESULT (\{[\s\S]*\})\s*$/);

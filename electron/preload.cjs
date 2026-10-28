@@ -201,6 +201,12 @@ contextBridge.exposeInMainWorld("openarc", {
       return () => ipcRenderer.removeListener("media:event", listener);
     },
   },
+  calendar: {
+    command: (command) => ipcRenderer.invoke("calendar:command", command),
+  },
+  uploadConsent: {
+    command: (command) => ipcRenderer.invoke("uploadConsent:command", command),
+  },
   /**
    * D4-03C4 Trusted Approval Gateway 桥。
    *

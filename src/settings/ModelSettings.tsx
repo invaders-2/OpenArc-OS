@@ -63,10 +63,13 @@ const CAPABILITY_CHOICES = [
   { id: "chat", label: "文本对话" },
   { id: "image-generation", label: "生图" },
   { id: "vision-input", label: "图片输入" },
+  { id: "video-generation", label: "视频生成" },
+  { id: "audio-generation", label: "音频生成" },
+  { id: "3d-generation", label: "3D 生成" },
 ] as const;
 
 /** 能力的中文名：只用于"已配置的默认为什么不可用"的选项文案（取值与 CAPABILITY_CHOICES 同一套）。 */
-const CAPABILITY_LABEL: Record<string, string> = { chat: "文本对话", "image-generation": "生图", "tool-calling": "工具调用", "vision-input": "图片输入" };
+const CAPABILITY_LABEL: Record<string, string> = { chat: "文本对话", "image-generation": "生图", "tool-calling": "工具调用", "vision-input": "图片输入", "video-generation": "视频生成", "audio-generation": "音频生成", "3d-generation": "3D 生成" };
 
 /** P2：OpenArc 现有模型面统一走 OpenAI 兼容 wire format，manifest 也按 openai-images 协议解析。 */
 const OPENAI_COMPATIBLE_PROTOCOL = "openai-images";
@@ -161,9 +164,22 @@ export function ModelSettings({ role }: { role: string | null }) {
   const toggleCap = (list: string[], cap: string) => (list.includes(cap) ? list.filter((c) => c !== cap) : [...list, cap]);
   const draftCaps = (m: any) => capsDraft[m.configId] || m.capabilities || [];
   const saveCaps = async (configId: string) => { const r = await cmd("model/update", { configId, capabilities: capsDraft[configId] || [] }); if (!r.ok) setError(r.error); else { setNotice("Model capabilities updated"); setCapsDraft((prev) => { const next = { ...prev }; delete next[configId]; return next; }); await load(); } };
+  const autoDefaultAfterCreate = async (providerId: string, capabilities: string[]) => {
+    const wanted = ["chat", "image-generation", "video-generation", "audio-generation", "3d-generation"].filter((capability) => capabilities.includes(capability));
+    if (!wanted.length) return;
+    const current = await cmd("defaults/get");
+    const personal = current && current.ok && current.value && current.value.personal ? current.value.personal : {};
+    for (const capability of wanted) {
+      if (personal[capability]) continue;
+      const list = await cmd("model/list");
+      const models = list && list.ok && Array.isArray(list.value) ? list.value : [];
+      const candidate = models.find((model: any) => model.providerId === providerId && model.status === "enabled" && Array.isArray(model.capabilities) && model.capabilities.includes(capability));
+      if (candidate) await cmd("defaults/set", { capability, configId: candidate.configId, scope: "PERSONAL" });
+    }
+  };
   const createModel = async () => {
     const r = await cmd("model/create", { providerId: mForm.providerId, remoteModelId: mForm.remoteModelId, displayName: mForm.displayName, capabilities: mForm.capabilities, scope: mForm.scope });
-    if (r.ok) { setNotice("Model registered"); await load(); } else setError(r.error);
+    if (r.ok) { setNotice("Model registered"); await load(); await autoDefaultAfterCreate(mForm.providerId, mForm.capabilities); await load(); } else setError(r.error);
   };
   const setModelStatus = async (configId: string, status: string) => { const r = await cmd("model/setStatus", { configId, status }); if (!r.ok) setError(r.error); await load(); };
   /** 注册表单里输入了新模型就按它取；否则退回清单里第一个已存在的模型，进页面即自动呈现参数表单。 */
@@ -828,15 +844,18 @@ export function ModelSettings({ role }: { role: string | null }) {
             <label>Chat <select data-d4-01-default-personal-chat value={defaults.personal.chat || ""} onChange={(e) => void setDefault("chat", e.target.value, "PERSONAL")}>{defaultOpts("chat", defaults.personal.chat)}</select></label>
             <label>Tool Calling <select data-d4-01-default-personal-tool value={defaults.personal["tool-calling"] || ""} onChange={(e) => void setDefault("tool-calling", e.target.value, "PERSONAL")}>{defaultOpts("tool-calling", defaults.personal["tool-calling"])}</select></label>
             <label>Image Generation <select data-d4-01-default-personal-image value={defaults.personal["image-generation"] || ""} onChange={(e) => void setDefault("image-generation", e.target.value, "PERSONAL")}>{defaultOpts("image-generation", defaults.personal["image-generation"])}</select></label>
-            {/* 视频没有传输：这里是"不可选"的事实位，不是可配置项（选中也不会被 ModelService 解析）。 */}
-            <label>Video Generation <select data-d4-01-default-personal-video disabled aria-disabled="true"><option value="">无可用传输（未接通）</option></select></label>
+            <label>Video Generation <select data-d4-01-default-personal-video value={defaults.personal["video-generation"] || ""} onChange={(e) => void setDefault("video-generation", e.target.value, "PERSONAL")}>{defaultOpts("video-generation", defaults.personal["video-generation"])}</select></label>
+            <label>Audio Generation <select data-d4-01-default-personal-audio value={defaults.personal["audio-generation"] || ""} onChange={(e) => void setDefault("audio-generation", e.target.value, "PERSONAL")}>{defaultOpts("audio-generation", defaults.personal["audio-generation"])}</select></label>
+            <label>3D Generation <select data-d4-01-default-personal-3d value={defaults.personal["3d-generation"] || ""} onChange={(e) => void setDefault("3d-generation", e.target.value, "PERSONAL")}>{defaultOpts("3d-generation", defaults.personal["3d-generation"])}</select></label>
           </div>
           <div className="d401-defaults" data-d4-01-defaults-organization>
             <h4>Organization Defaults {defaults.canManageOrganization ? null : <span className="muted">(read-only)</span>}</h4>
             <label>Chat <select data-d4-01-default-org-chat value={defaults.organization.chat || ""} onChange={(e) => void setDefault("chat", e.target.value, "ORGANIZATION")}>{defaultOpts("chat", defaults.organization.chat)}</select></label>
             <label>Tool Calling <select data-d4-01-default-org-tool value={defaults.organization["tool-calling"] || ""} onChange={(e) => void setDefault("tool-calling", e.target.value, "ORGANIZATION")}>{defaultOpts("tool-calling", defaults.organization["tool-calling"])}</select></label>
             <label>Image Generation <select data-d4-01-default-org-image value={defaults.organization["image-generation"] || ""} onChange={(e) => void setDefault("image-generation", e.target.value, "ORGANIZATION")}>{defaultOpts("image-generation", defaults.organization["image-generation"])}</select></label>
-            <label>Video Generation <select data-d4-01-default-org-video disabled aria-disabled="true"><option value="">无可用传输（未接通）</option></select></label>
+            <label>Video Generation <select data-d4-01-default-org-video value={defaults.organization["video-generation"] || ""} onChange={(e) => void setDefault("video-generation", e.target.value, "ORGANIZATION")}>{defaultOpts("video-generation", defaults.organization["video-generation"])}</select></label>
+            <label>Audio Generation <select data-d4-01-default-org-audio value={defaults.organization["audio-generation"] || ""} onChange={(e) => void setDefault("audio-generation", e.target.value, "ORGANIZATION")}>{defaultOpts("audio-generation", defaults.organization["audio-generation"])}</select></label>
+            <label>3D Generation <select data-d4-01-default-org-3d value={defaults.organization["3d-generation"] || ""} onChange={(e) => void setDefault("3d-generation", e.target.value, "ORGANIZATION")}>{defaultOpts("3d-generation", defaults.organization["3d-generation"])}</select></label>
           </div>
           {role !== "ADMIN" ? <p className="muted" data-d4-01-org-hint>Organization defaults require an authorized admin.</p> : null}
         </section>

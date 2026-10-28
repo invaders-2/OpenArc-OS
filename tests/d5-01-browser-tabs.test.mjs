@@ -8,8 +8,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const domain = require("../electron/window-domain.cjs");
-const manager = require("../electron/window-manager.cjs");
+const domain = require("../electron/window-domain.ts");
+const manager = require("../electron/window-manager.ts");
 
 const HOST = { width: 1440, height: 940 };
 const boot = (cmds) => manager.applyAll(domain.createState(), cmds);

@@ -43,6 +43,11 @@ function seededCopy(dir) {
 }
 
 const count = (db, table) => db.prepare("SELECT COUNT(*) AS c FROM " + table).get().c;
+function openV28(options) {
+  const store = new IdentityStore(options).open();
+  store.connection.exec("PRAGMA user_version = 28");
+  return store;
+}
 
 test("反例护栏：FK=ON 时 DROP TABLE tasks 会按 CASCADE 清空全部 9 张子表", () => {
   const dir = freshDir();
@@ -95,7 +100,7 @@ test("失败回滚：迁移体抛错 → user_version 停在 28、dx_tasks 仍�
   const backupDir = path.join(dir, "backup");
   const pre = snapshotV28(copy);
 
-  const store = new IdentityStore({
+  const store = openV28({
     path: copy,
     backupDir,
     hooks: {
@@ -103,7 +108,7 @@ test("失败回滚：迁移体抛错 → user_version 停在 28、dx_tasks 仍�
         if (version === 29) throw new Error("boom-v29");
       },
     },
-  }).open();
+  });
   try {
     assert.throws(() => store.applyExplicitMigration(merge.taskMergeMigration), /boom-v29/);
     const db = store.connection;
@@ -131,7 +136,7 @@ test("备份恢复：真的用备份覆盖回滚，数据与迁移前逐表一�
   const backupDir = path.join(dir, "backup");
   const pre = snapshotV28(copy);
 
-  const store = new IdentityStore({
+  const store = openV28({
     path: copy,
     backupDir,
     hooks: {
@@ -139,7 +144,7 @@ test("备份恢复：真的用备份覆盖回滚，数据与迁移前逐表一�
         if (version === 29) throw new Error("boom-v29");
       },
     },
-  }).open();
+  });
   assert.throws(() => store.applyExplicitMigration(merge.taskMergeMigration), /boom-v29/);
   const backupPath = store.migrationBackups[0].path;
   store.close();
@@ -149,7 +154,7 @@ test("备份恢复：真的用备份覆盖回滚，数据与迁移前逐表一�
   fs.copyFileSync(backupPath, copy);
   assert.deepEqual(snapshotV28(copy), pre, "备份恢复后的库必须与迁移前一致");
 
-  const restored = new IdentityStore({ path: copy, backupDir }).open();
+  const restored = openV28({ path: copy, backupDir });
   try {
     assert.equal(restored.schemaVersion, 28, "恢复出的仍是 v28");
     assert.equal(restored.connection.prepare("SELECT COUNT(*) AS c FROM tasks").get().c, pre.counts.tasks);
@@ -185,7 +190,7 @@ test("冲突预检：core 与 dx 同名 task/step id fail closed，库保持 v28
 
   const copy = path.join(dir, "copy.db");
   fs.copyFileSync(dbPath, copy);
-  const store = new IdentityStore({ path: copy, backupDir: path.join(dir, "backup") }).open();
+  const store = openV28({ path: copy, backupDir: path.join(dir, "backup") });
   try {
     assert.throws(
       () => store.applyExplicitMigration(merge.taskMergeMigration),
@@ -208,7 +213,7 @@ test("冲突预检：core 与 dx 同名 task/step id fail closed，库保持 v28
 test("执行器自检：事务内 foreign_key_check 非空 → 整体回滚，临时表与 user_version 都不留", () => {
   const dir = freshDir();
   const { copy } = seededCopy(dir);
-  const store = new IdentityStore({ path: copy }).open();
+  const store = openV28({ path: copy });
   try {
     const probe = {
       version: 99,

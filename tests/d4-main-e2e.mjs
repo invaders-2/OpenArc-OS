@@ -61,6 +61,7 @@ import { startD4Provider } from "./fixtures/d4-04-provider.mjs";
 
 const require = createRequire(import.meta.url);
 const electronPath = require("electron");
+const { ALL_TOOL_ACTIONS: BUILTIN_AI_TOOL_ACTIONS } = require("../electron/builtin-app-grants.cjs");
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, "..");
 const CDP_PORT = Number(process.env.OA_MAIN_CDP_PORT || 9788);
@@ -323,7 +324,12 @@ async function main() {
   const taskBridgeKeys = await js("return window.openarc && window.openarc.task ? Object.keys(window.openarc.task).sort().join(',') : 'missing'");
   record("setup", "A6 · 真实 preload Task 桥只有 command,onEvent", taskBridgeKeys === "command,onEvent", taskBridgeKeys, "command,onEvent");
   record("setup", "A7 · Renderer 拿不到主进程 Domain", await js("return typeof window.openarc.taskService === 'undefined' && typeof window.openarc.resourceService === 'undefined'"), "hidden", "hidden");
-  record("setup", "A8 · 无 test-only 播种：起始 app TOOL grant 为 0", toolGrantRows().length === 0, toolGrantRows().length, 0);
+  const baselineAccess = await getToolAccess();
+  const baselineActions = (baselineAccess && baselineAccess.grantedActions || []).slice().sort();
+  const expectedBaseline = BUILTIN_AI_TOOL_ACTIONS.slice().sort();
+  record("setup", "A8 · 起始 AI TOOL grant 精确等于内置权威基线（无额外 test-only 权限）",
+    !!(baselineAccess && baselineAccess.ok) && toolGrantRows().length === 1 && JSON.stringify(baselineActions) === JSON.stringify(expectedBaseline) && new Set(baselineActions).size === baselineActions.length,
+    JSON.stringify({ rows: toolGrantRows().length, granted: baselineActions }), JSON.stringify(expectedBaseline));
 
   // ---------------------------------------------------------------- 真实 UI：Settings → Models
   await click('[data-dock-id="settings"]');
@@ -971,7 +977,10 @@ async function main() {
   }
   record("flow5", "F5.1 · 刷新后产品身份 / 桌面状态正确恢复（gate=ready）", gateAfterReload === "ready", gateAfterReload, "ready");
   const grantAfterReload = await getToolAccess();
-  record("flow5", "F5.2 · 刷新后 TOOL 权限从后端一致恢复", !!(grantAfterReload && grantAfterReload.ok) && JSON.stringify((grantAfterReload.grantedActions || []).slice().sort()) === JSON.stringify(beforeSnapshot.grants.slice().sort()), JSON.stringify({ before: beforeSnapshot.grants, after: grantAfterReload && grantAfterReload.grantedActions }), "unchanged");
+  const afterReloadActions = (grantAfterReload && grantAfterReload.grantedActions || []).slice().sort();
+  record("flow5", "F5.2 · 刷新后 TOOL 权限精确恢复内置权威基线，刷新前无越界动作",
+    !!(grantAfterReload && grantAfterReload.ok) && beforeSnapshot.grants.every((action) => BUILTIN_AI_TOOL_ACTIONS.includes(action)) && JSON.stringify(afterReloadActions) === JSON.stringify(expectedBaseline) && new Set(afterReloadActions).size === afterReloadActions.length,
+    JSON.stringify({ before: beforeSnapshot.grants, after: afterReloadActions }), JSON.stringify(expectedBaseline));
   const flow1GetAfter = await taskGet(R.taskIds.flow1);
   record("flow5", "F5.3 · 刷新后 flow1 任务/产物/验证从 task/get 权威恢复", flow1GetAfter && flow1GetAfter.task && flow1GetAfter.task.status === "SUCCEEDED" && (flow1GetAfter.artifacts || []).length === 1 && (flow1GetAfter.verifications || []).length === 1, JSON.stringify({ status: flow1GetAfter && flow1GetAfter.task && flow1GetAfter.task.status, artifacts: (flow1GetAfter && flow1GetAfter.artifacts || []).length, verifications: (flow1GetAfter && flow1GetAfter.verifications || []).length }), "SUCCEEDED + 1 artifact + 1 verification");
   const flow3GetAfter = await taskGet(R.taskIds.flow3);

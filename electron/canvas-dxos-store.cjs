@@ -142,6 +142,7 @@ class CanvasDxosStore {
       bytes: "bytes", coverRef: "cover_ref",
       relationId: "relation_id", relationName: "relation_name", relationRole: "relation_role",
       relationPrompt: "relation_prompt",
+      workflowJson: "workflow_json",
     };
     const sets = [];
     const values = [];

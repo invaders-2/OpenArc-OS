@@ -804,3 +804,29 @@ DESIGN_SYSTEM.md 定义语义设计值、浅深主题、四级玻璃材质、字
 MOTION_SYSTEM.md 定义时长曲线、窗口与应用栏、菜单浮层、画布、流式输出和任务反馈，并规定中断、反向、减少动态效果与性能测量，验收编号 MS-A01 至 MS-A09。
 D1-04 核验材质与动效在两平台的可行性及 Spectrum 使用条件；D2-01 交付语义设计值和组件规范；D2-02、D2-04 按规范实现；D6-03 汇总 DS/MS 验收证据。
 设计参数是 OpenArc 初始提案，不是 Apple 官方值或已完成实现。最终合成背景的对比、原生浏览器遮挡及连续中断操作均须实测。
+
+### 42.1 应用中心、模板与 Skill 对齐验收（2026-10-27）
+
+- 规范基线：`DESIGN_SYSTEM.md` 0.2、`MOTION_SYSTEM.md` 0.1；规范文件本轮未修改。参考基准为 Chrome 中 TapNow 2.21.35 的应用市场、技能详情与模板库；不是历史截图推断。
+- 页面与状态：应用市场发现/分类/搜索/详情、Skill 列表/详情/启停/来源配置、画布 Agent 草稿、模板公共/我的/最近使用/创建/再次应用/搜索空态。内容验收统一 1728×822 内容视口、原始缩放、默认浅色外壳；TapNow 为深色页面，比较以布局和交互为准，不宣称逐像素一致。
+- 复用：`DsDialog`、`DsBadge`、窗口分栏、语义色/间距/圆角 token、画布现有浮层；抽屉 220ms、标签/反馈 100–160ms，减少动态时关闭位移。保留中性灰阶和受控权限，不复制 TapNow 彩色操作按钮。
+- 实现边界：个人模板存为账号资产库 workflow；Skill 与画布 Agent 共用后端清单；外部市场封面随包本地化。TapNow「创建」实测直接创建默认工作流，OpenArc 为保存当前画布，不能宣称创建语义完全相同。
+- 验收：全量测试 3912/3912、完整构建与类型检查通过；应用中心真实 Electron 34/34 功能检查、63/63 视觉检查；内容链路 17 项检查通过；模板 2→4 节点且全部新 ID，删除模板保留原画布；Skill 搜索只剩 `writing`，新建/启停通过；非法来源被真实后端拒绝；连续录屏 `artifacts/canvas-tapnow-compare-20261027/apps-templates-skills/openarc-content-motion.webm`。
+- 未验证：TapNow 云端全部内容、第三方连接器与付费生成；ModelScope 实际联网安装未执行；探针壁纸协议未注册产生 CORS，单列为环境项，不计入产品控制台错误。逐项截图与差异见 `artifacts/canvas-tapnow-compare-20261027/apps-templates-skills/index.html`。
+
+### 42.2 对话式 Skill 与默认工作流补齐（2026-10-28）
+
+- 规范与基准未变。新增 `SkillCreatorDialog.vue`：真实 `skill/analyze` → 可编辑步骤与执行说明 → 继续迭代 → `skill/save`。消息区只放真实用户输入和分析结果，保存前不写技能目录；无模型时明确显示依赖缺失。
+- 模板「创建工作流」调用既有 Text → Video 流程；「保存当前画布为模板」写入个人资产库 workflow。两个动作独立，默认工作流不增加个人模板数量。
+- 实测：首版 3 步，迭代版 2 步，后端详情与版本同步；默认工作流 2 节点、1 连线。内容链路 23/23 通过，后端 `skill/get` 版本确实递增为 2；连续录屏与逐组截图在同一证据目录。
+- 临时模型适配器只用于测试真实分析与保存链路，未消耗在线额度；在线模型输出质量、云端内容全集、连接器全集与 ModelScope 联网安装仍未验证。
+- preload 探针补齐既有 `calendar`、`uploadConsent` 两域，当前 42 个受控顶层键逐项校验成员与原始能力禁用边界；未通过删除接口来迎合旧数量断言。
+- 最终独立单进程全量回归 3938/3938 通过、0 失败；最终构建与类型检查通过。日志：`artifacts/canvas-tapnow-compare-20261027/apps-templates-skills/final-test.log`、`final-build.log`。
+
+### 42.3 Agent 受控安装 GitHub Skill（2026-10-28）
+
+- Agent 识别单独 GitHub 仓库地址、明确安装/导入意图和 `npx skills add <仓库>`，先显示固定 commit、Skill 清单、脚本风险与 SHA-256 的确认卡；普通终端文本不获得 shell 权限，模型与 Harness 不自动确认。
+- 主进程仅访问 GitHub 白名单主机，预览和安装复用同一份固定版本 ZIP；一次性令牌绑定账号、15 分钟过期，导入默认停用，用户手动启用后才进入 Agent 可用清单。不执行 npx、仓库脚本或安装命令。
+- 真实生产构建 Electron 验收 12/12 通过，定向测试 67/67 通过；覆盖预览不安装、确认导入、默认停用、手动启用、npx 预览取消、无 SKILL.md 错误与控制台无产品错误。公开仓库 `DavidVeksler/agent-skills` 只读预览成功，返回固定 commit 和 3 个 Skill，未调用安装。
+- 证据：`artifacts/canvas-skill-github-agent/index.html`、`agent-github-motion.webm`、`verification.json`、`live-github-check.json`。私有仓库、凭据托管、任意 Git 服务和自动更新不在本轮范围。
+- 最终独立单进程全量回归 3947/3947 通过、0 失败；生产构建和类型检查通过。日志：`artifacts/canvas-skill-github-agent/final-test.log`、`build.log`。

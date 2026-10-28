@@ -280,9 +280,9 @@ onMounted(() => {
 .ocr-provider select {
   min-height: 28px;
   padding: 2px var(--space-2);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-md);
-  background: rgb(var(--content-rgb) / 0.5);
+  background: var(--sunken);
   color: var(--text);
   font-size: var(--fs-caption);
 }

@@ -2289,3 +2289,15 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 **续（同日）**：窗口拖动 / 缩放补齐（Vue 壳层此前缺手势：标题栏拖动、双击最大化、右下角缩放、分栏工具条拖动，口径同 React `startDrag/startResize`）；系统设置按原型重排（侧栏账户行 + 分组导航、顶栏小标题、分组卡片 + 小节标题；新拆「账户」页；「模型 / AI」中文化并改为卡片式，`data-d4-01-*` 钩子全部保留）；各应用首开尺寸取原型 w/h。新增：
 * Skill 中心 —— 「我的技能」= 桌面「Skill」文件夹里的 SKILL.md（Agent Skills frontmatter 格式），新建 / 编辑 / 移到回收站 / 从访达导入；「已安装」启停（只影响新任务）；「试运行」以技能内容发起普通任务；市场目录未接入，如实空态。
 * 图片声明 —— `electron/xmp-service.cjs` 为 PNG（iTXt）/ JPEG（APP1）写入 IPTC DigitalSourceType（XMP），原图不动、另存副本；新增 `tests/xmp-service.test.mjs`(3)；图标 `image-tag.png` 取 WhiteSur `eog.svg`（已登记 ICONS-SOURCE.md）。
+
+# 前后端优化交付（2026-10-28）
+
+本轮完成画布 Agent、账号隔离、上传与网络、主进程装配、市场和共享窗口领域的结构整理，未改变既有产品范围。
+
+- **画布 Agent 与数据隔离**：Agent 统一走 Task / Tool / Approval / CanvasControl 正式链，修复 Electron DSH `--expose-internals` 启动兼容；真实 `canvas-agent-electron` 首进程 **20/20**、重启 **4/4**。记忆、Skill、Task、Calendar、Video 按账号隔离，生产 schema 为 **v30**；Calendar/Video 首进程 **12/12**、重启 **3/3**。
+- **上传与网络**：第三方上传须用户明确授权；保留 SSRF / DNS / 重定向限制和流式大小上限，模型代理兼容 HTTP CONNECT。上传设置 **8/8**，代理与直连测试通过；未向公网或真实 Litterbox 发送测试数据。
+- **工程与生命周期**：统一 React + Vue typecheck、生产 build 和 `verify.yml` 配置；Canvas `dispose` 生命周期覆盖事件退订、任务与资源清理。
+- **结构拆分**：Market 抽出 composable / commandClient / normalize；`electron/main.cjs` 收敛为 **90 行组合根**，runtime composition、security policies、files IPC、window/browser IPC、app lifecycle 五模块保持共享实例和原启动/退出顺序。geometry、window-domain、window-manager、folder-trash 迁为原生 TS 单一实现，Node 22 / Electron 44 无需额外构建；Vite `devCjs` 已收窄至非窗口的 `image-params.cjs`。
+- **真实验收**：真实 main **138/138**、安全面 **17/17**、D4 smoke **94/94**、真实退出 **86/86**、市场 **35/35 + 视觉 63/63**。最终全量 `npm test`：**3947 tests / 3947 pass / 0 fail**；typecheck、build、`git diff --check` 均通过。
+
+**续接限制**：未运行 GitHub 远端 CI；Windows 未验证；未向真实 Litterbox 或其它公网服务发送测试数据；未做全部页面连续录屏（市场已有正常轮播时序与 reduced-motion 验证）。本轮未 commit / push，不据此宣称整个 OpenArc 项目或双平台已经完成。

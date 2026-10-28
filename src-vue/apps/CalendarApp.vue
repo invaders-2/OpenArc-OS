@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { t } from "../i18n";
 /**
- * 日历（0.6.1）：月视图 + 本机日程 + 农历/黄历 + 提醒 + 本地规则建日程。
+ * 日历（0.6.1）：月视图 + 账号日程 + 农历/黄历 + 提醒 + 本地规则建日程。
  *
  * 三个来源，边界写在界面上：
- *   1) 本机日程：localStorage「oa-calendar-events」（沿用旧键，旧条目不丢），可加时间与提前提醒；
+ *   1) 账号日程：calendar 域 SQLite（旧 localStorage 仅由用户显式导入），可加时间与提前提醒；
  *   2) 农历 / 黄历：integration/plugins/list → integration/plugins/enable（黄历插件默认关闭）→
  *      integration/almanac/years（在线万年历，按年缓存；离线 / 未启用 / 未注入 fetch 时结构化不可用）；
  *   3) 提醒：定时器 + 浏览器 Notification + 壳层通知中心；提醒记录持久化到日程条目，
@@ -21,7 +21,7 @@ import { parseSchedule, REMINDER_OPTIONS, reminderOptionLabel } from "./schedule
 import type { ParsedSchedule } from "./scheduleParse";
 
 /* ══════════════════════════════════════════════════════════════════════════
-   本机日程（localStorage，旧格式兼容）
+   账号日程：calendar 域为权威；旧 localStorage 仅在显式导入时读取
    ══════════════════════════════════════════════════════════════════════════ */
 type CalEvent = {
   id: string;
@@ -31,37 +31,61 @@ type CalEvent = {
   reminderMinutes?: number | null;
   remindedAt?: number | null;
   missed?: boolean;
+  version: number;
+  updatedAt?: number;
 };
-const KEY = "oa-calendar-events";
-function readEvents(): CalEvent[] {
+type CalendarResult = { ok?: boolean; value?: any; error?: string; message?: string };
+const events = ref<CalEvent[]>([]);
+const eventsLoading = ref(true);
+const eventsError = ref("");
+const importBusy = ref(false);
+let generation = 0;
+let identityOff: (() => void) | null = null;
+function calendarBridge() { return window.openarc?.calendar || null; }
+async function calendarCommand(command: string, payload: Record<string, unknown> = {}): Promise<CalendarResult> {
+  const bridge = calendarBridge();
+  if (!bridge) return { ok: false, error: "CALENDAR_UNAVAILABLE", message: "当前环境没有日历服务" };
+  try { return await bridge.command({ command, payload }) as CalendarResult; }
+  catch (error) { return { ok: false, error: "CALENDAR_INTERNAL", message: String((error as Error)?.message || error) }; }
+}
+function calendarError(result: CalendarResult): string {
+  return result.message || (result.error === "CALENDAR_CONFLICT" ? "日程已被其他窗口修改，请重新读取" : "日程服务暂时不可用");
+}
+async function loadEvents() {
+  const current = generation;
+  eventsLoading.value = true;
+  eventsError.value = "";
+  const result = await calendarCommand("calendar/event/list");
+  if (current !== generation) return;
+  eventsLoading.value = false;
+  if (!result.ok) { eventsError.value = calendarError(result); return; }
+  events.value = Array.isArray(result.value?.items) ? result.value.items : [];
+  window.setTimeout(() => { if (current === generation) collectDue(true); }, 0);
+}
+function readLegacyEvents(): CalEvent[] {
+  const KEY = "oa-calendar-events";
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) || "[]");
     if (!Array.isArray(raw)) return [];
-    return raw
-      .filter((event) => event && typeof event.title === "string" && /^\d{4}-\d{2}-\d{2}$/.test(event.date))
-      .map((event) => ({
-        id: String(event.id || "ev" + Math.random().toString(36).slice(2, 8)),
-        date: String(event.date),
-        time: typeof event.time === "string" ? event.time : "",
-        title: String(event.title),
-        reminderMinutes:
-          typeof event.reminderMinutes === "number" && Number.isFinite(event.reminderMinutes)
-            ? Math.max(0, Math.round(event.reminderMinutes))
-            : null,
-        remindedAt: typeof event.remindedAt === "number" ? event.remindedAt : null,
-        missed: event.missed === true,
-      }));
-  } catch {
-    return [];
-  }
+    return raw.filter((event) => event && typeof event.title === "string" && /^\d{4}-\d{2}-\d{2}$/.test(event.date)).map((event) => ({
+      id: String(event.id || ""), date: String(event.date), time: typeof event.time === "string" ? event.time : "", title: String(event.title),
+      reminderMinutes: typeof event.reminderMinutes === "number" && Number.isFinite(event.reminderMinutes) ? Math.max(0, Math.round(event.reminderMinutes)) : null,
+      remindedAt: typeof event.remindedAt === "number" ? event.remindedAt : null, missed: event.missed === true, version: 0,
+    }));
+  } catch { return []; }
 }
-const events = ref<CalEvent[]>(readEvents());
-function persist() {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(events.value));
-  } catch {
-    /* 存储不可用：本次会话仍可用，界面上不假装已持久化 */
-  }
+async function importLegacy() {
+  if (importBusy.value) return;
+  const current = generation;
+  importBusy.value = true;
+  eventsError.value = "";
+  const legacy = readLegacyEvents();
+  const result = await calendarCommand("calendar/event/import-legacy", { events: legacy });
+  if (current !== generation) return;
+  importBusy.value = false;
+  if (!result.ok) { eventsError.value = "旧数据导入未完成：" + calendarError(result) + "。旧数据未删除，可重试。"; return; }
+  events.value = Array.isArray(result.value?.items) ? result.value.items : events.value;
+  notice.value = `已导入 ${Number(result.value?.imported || 0)} 条旧日程，${Number(result.value?.skipped || 0)} 条已存在；旧数据未删除。`;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -71,7 +95,7 @@ const todayKey = ymd(new Date());
 const cursor = ref(new Date());
 const selected = ref(todayKey);
 const WEEK = ["一", "二", "三", "四", "五", "六", "日"];
-const monthLabel = computed(() => cursor.value.getFullYear() + " 年 " + (cursor.value.getMonth() + 1) + " 月");
+const monthLabel = computed(() => cursor.value.getFullYear() + "年" + (cursor.value.getMonth() + 1) + "月");
 
 const byDate = computed(() => {
   const map = new Map<string, CalEvent[]>();
@@ -410,22 +434,23 @@ async function systemNotify(title: string, body: string): Promise<SystemNotifySt
 
 async function deliverReminder(event: CalEvent, late: boolean) {
   if (event.remindedAt != null || delivering.has(event.id)) return;
+  const current = generation;
   delivering.add(event.id);
-  const title = "日程提醒：" + event.title;
-  const body = [event.date, event.time].filter(Boolean).join(" ") + (late ? "（应用未运行时到点，现补发）" : "");
-  const system = await systemNotify(title, body);
-  event.remindedAt = Date.now();
-  if (late) {
-    event.missed = true;
-    missedCount.value += 1;
-  }
-  persist();
-  shell.notify({ appId: "calendar", title, body });
-  reminderLog.value = [
-    { id: "rl" + Math.random().toString(36).slice(2, 8), title: event.title, at: Date.now(), system, late },
-    ...reminderLog.value,
-  ].slice(0, 20);
-  delivering.delete(event.id);
+  try {
+    const title = "日程提醒：" + event.title;
+    const body = [event.date, event.time].filter(Boolean).join(" ") + (late ? "（应用未运行时到点，现补发）" : "");
+    const system = await systemNotify(title, body);
+    const result = await calendarCommand("calendar/event/update", { id: event.id, expectedVersion: event.version, patch: { remindedAt: Date.now(), missed: late || event.missed === true } });
+    if (current !== generation) return;
+    if (!result.ok) { eventsError.value = "提醒状态保存失败：" + calendarError(result); return; }
+    Object.assign(event, result.value.event);
+    if (late) missedCount.value += 1;
+    shell.notify({ appId: "calendar", title, body });
+    reminderLog.value = [
+      { id: "rl" + Math.random().toString(36).slice(2, 8), title: event.title, at: Date.now(), system, late },
+      ...reminderLog.value,
+    ].slice(0, 20);
+  } finally { delivering.delete(event.id); }
 }
 
 function collectDue(late: boolean) {
@@ -452,11 +477,26 @@ function formatDue(ts: number): string {
 
 onMounted(() => {
   void initAlmanac();
-  /* 先补发「应用没运行时到点」的提醒，再启动定时器处理未来的提醒。 */
-  collectDue(true);
+  void loadEvents();
+  let account = "";
+  identityOff = window.openarc?.identity?.onEvent((event) => {
+    const snapshot = (event.snapshot || {}) as { userId?: string; sessionRef?: string };
+    const next = String(snapshot.userId || snapshot.sessionRef || "");
+    if (account && next === account) return;
+    account = next;
+    generation += 1;
+    shell.clearNotices();
+    events.value = [];
+    eventsError.value = "";
+    missedCount.value = 0;
+    notice.value = "";
+    void loadEvents();
+  }) || null;
   timer = window.setInterval(() => collectDue(false), 15_000);
 });
 onBeforeUnmount(() => {
+  generation += 1;
+  identityOff?.();
   if (timer !== undefined) window.clearInterval(timer);
   timer = undefined;
 });
@@ -469,36 +509,39 @@ const draftTime = ref("");
 const draftReminder = ref<number | null>(10);
 const titleInput = ref<HTMLInputElement | null>(null);
 const notice = ref("");
+const eventSaving = ref(false);
 
-function add() {
+async function add() {
   const title = draftTitle.value.trim();
-  if (!title) return;
+  if (!title || eventSaving.value) return;
+  const current = generation;
   const time = draftTime.value;
-  events.value.push({
-    id: "ev" + Date.now().toString(36),
-    date: selected.value,
-    time,
-    title,
-    reminderMinutes: time ? draftReminder.value : null,
-    remindedAt: null,
-    missed: false,
-  });
-  persist();
+  eventSaving.value = true;
+  eventsError.value = "";
+  const result = await calendarCommand("calendar/event/create", { event: { date: selected.value, time, title, reminderMinutes: time ? draftReminder.value : null, remindedAt: null, missed: false } });
+  if (current !== generation) return;
+  eventSaving.value = false;
+  if (!result.ok) { eventsError.value = "日程保存失败：" + calendarError(result); return; }
+  events.value.push(result.value.event);
   draftTitle.value = "";
   draftTime.value = "";
   notice.value = time
-    ? "已加入本机日程" + (draftReminder.value != null ? "，提醒：" + reminderOptionLabel(draftReminder.value) : "，不提醒") + "。"
-    : "已加入本机日程（全天，不设提醒）。";
+    ? "已加入账号日程" + (draftReminder.value != null ? "，提醒：" + reminderOptionLabel(draftReminder.value) : "，不提醒") + "。"
+    : "已加入账号日程（全天，不设提醒）。";
   window.setTimeout(() => collectDue(false), 0);
 }
-function remove(id: string) {
-  events.value = events.value.filter((event) => event.id !== id);
-  persist();
+async function remove(id: string) {
+  const current = generation;
+  const event = events.value.find((item) => item.id === id);
+  if (!event) return;
+  const result = await calendarCommand("calendar/event/delete", { id, expectedVersion: event.version });
+  if (current !== generation) return;
+  if (!result.ok) { eventsError.value = "日程删除失败：" + calendarError(result); return; }
+  events.value = events.value.filter((item) => item.id !== id);
 }
-async function quickAdd(key: string) {
+function quickAdd(key: string) {
   selected.value = key;
-  await nextTick();
-  titleInput.value?.focus();
+  openNew();
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -529,191 +572,170 @@ function parseAi() {
   aiReminder.value = parsed.time ? parsed.reminderMinutes : null;
   aiNotice.value = "";
 }
-function addAi() {
+async function addAi() {
   const title = aiTitle.value.trim();
-  if (!title) {
-    aiError.value = "预览里的标题不能为空。";
-    return;
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(aiDate.value)) {
-    aiError.value = "预览里的日期格式不对，请填 YYYY-MM-DD。";
-    return;
-  }
-  events.value.push({
-    id: "ev" + Date.now().toString(36),
-    date: aiDate.value,
-    time: aiTime.value,
-    title,
-    reminderMinutes: aiTime.value ? aiReminder.value : null,
-    remindedAt: null,
-    missed: false,
-  });
-  persist();
-  aiNotice.value = "已加入本机日程（来自本地规则解析，可继续修改）。";
+  if (!title) { aiError.value = "预览里的标题不能为空。"; return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(aiDate.value)) { aiError.value = "预览里的日期格式不对，请填 YYYY-MM-DD。"; return; }
+  if (eventSaving.value) return;
+  const current = generation;
+  eventSaving.value = true;
+  const result = await calendarCommand("calendar/event/create", { event: { date: aiDate.value, time: aiTime.value, title, reminderMinutes: aiTime.value ? aiReminder.value : null, remindedAt: null, missed: false } });
+  if (current !== generation) return;
+  eventSaving.value = false;
+  if (!result.ok) { aiError.value = "日程保存失败：" + calendarError(result); return; }
+  events.value.push(result.value.event);
+  aiNotice.value = "已加入账号日程（来自本地规则解析，可继续修改）。";
   aiDraft.value = null;
   aiText.value = "";
   window.setTimeout(() => collectDue(false), 0);
 }
+const view = ref<"month" | "week">("month");
+const newOpen = ref(false);
+const weekCells = computed(() => {
+  const index = cells.value.findIndex((cell) => cell.key === selected.value);
+  const start = Math.max(0, index - ((index % 7 + 7) % 7));
+  return cells.value.slice(start, start + 7);
+});
+function openNew() {
+  draftTitle.value = "";
+  draftTime.value = "";
+  draftReminder.value = null;
+  newOpen.value = true;
+  void nextTick(() => (document.querySelector("[data-cal-new-title]") as HTMLInputElement | null)?.focus());
+}
+
 </script>
 
 <template>
   <div class="split cal-app" data-calendar-app="1" :data-cal-almanac="almanacState">
-    <nav class="split-side" :aria-label="t('日历')">
-      <div class="split-section">{{ t("日历") }}</div>
-      <button type="button" class="split-nav" aria-current="true">
-        <CalendarClock :size="15" aria-hidden="true" />
-        <span class="split-nav-label">{{ t("本机日历") }}</span><small class="planned-count">{{ events.length }}</small>
-      </button>
-      <div class="split-section">{{ selectedLabel }}</div>
-      <div class="cal-agenda" data-cal-agenda>
-        <div v-for="event in agenda" :key="event.id" class="cal-agenda-item">
-          <span class="cal-agenda-time">{{ event.time || t("全天") }}</span>
-          <span class="cal-agenda-title" :title="event.title">{{ event.title }}</span>
-          <span v-if="reminderStatus(event)" class="cal-reminder-chip" :data-cal-reminder-status="event.id">
-            <Bell :size="10" aria-hidden="true" /> {{ reminderStatus(event) }}
-          </span>
-          <button class="cal-agenda-del" :aria-label="'删除 ' + event.title" @click="remove(event.id)"><X :size="12" /></button>
-        </div>
-        <p v-if="!agenda.length" class="planned-note">{{ t("这一天没有日程。") }}</p>
+    <div class="pane-toolbar cal-toolbar">
+      <strong class="cal-title">{{ monthLabel }}</strong>
+      <span class="cal-calendar-badge" data-cal-local><CalendarClock :size="13" /> {{ t("账号日历") }} · {{ events.length }}</span>
+      <span class="toolbar-spacer" />
+      <button class="icon-button" :aria-label="t('上个月')" data-cal-prev @click="shift(-1)"><ChevronLeft :size="15" /></button>
+      <button class="planned-today cal-today" data-cal-today @click="goToday">{{ t("今天") }}</button>
+      <button class="icon-button" :aria-label="t('下个月')" data-cal-next @click="shift(1)"><ChevronRight :size="15" /></button>
+      <div class="segmented text cal-view" role="group" aria-label="视图" data-cal-view>
+        <button type="button" :aria-pressed="view === 'month'" data-cal-view-month @click="view = 'month'">{{ t("月") }}</button>
+        <button type="button" :aria-pressed="view === 'week'" data-cal-view-week @click="view = 'week'">{{ t("周") }}</button>
       </div>
-      <form class="cal-add" @submit.prevent="add">
-        <input ref="titleInput" v-model="draftTitle" class="cal-add-title" :placeholder="t('新日程')" :aria-label="t('日程标题')" />
-        <div class="cal-add-row">
-          <input v-model="draftTime" type="time" class="cal-add-time" :aria-label="t('时间（留空为全天）')" />
-          <select v-model="draftReminder" class="cal-add-select" :disabled="!draftTime" :aria-label="t('提前提醒')">
-            <option v-for="option in REMINDER_OPTIONS" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
-          </select>
-        </div>
-        <button type="submit" class="planned-today cal-add-btn" :disabled="!draftTitle.trim()"><Plus :size="12" /> {{ t("添加") }}</button>
-      </form>
-      <p v-if="notice" class="planned-note" role="status" data-cal-notice>{{ notice }}</p>
-      <p class="planned-note">{{ t("日程和提醒只保存在这台电脑上；应用没打开时到点的提醒，会在下次打开时补发并标记「错过」。") }}</p>
-    </nav>
+      <DsButton variant="ghost" size="sm" :disabled="importBusy || eventsLoading" data-cal-legacy-import @click="importLegacy">{{ importBusy ? t("正在导入…") : t("导入旧版本机数据") }}</DsButton>
+      <DsButton variant="primary" size="sm" data-cal-new @click="openNew"><Plus :size="13" /> {{ t("新建日程") }}</DsButton>
+    </div>
+    <div v-if="eventsLoading" class="cal-missed" role="status" data-cal-loading>{{ t("正在读取当前账号的日程…") }}</div>
+    <div v-else-if="eventsError" class="cal-missed" role="alert" data-cal-error>{{ eventsError }} <DsButton size="sm" variant="ghost" @click="loadEvents">{{ t("重试") }}</DsButton></div>
 
-    <div class="split-main cal-main">
-      <div class="pane-toolbar">
-        <strong class="pane-title">{{ monthLabel }}</strong>
-        <div class="toolbar-spacer" />
-        <button class="icon-button" :aria-label="t('上个月')" @click="shift(-1)"><ChevronLeft :size="15" /></button>
-        <button class="planned-today" @click="goToday">{{ t("今天") }}</button>
-        <button class="icon-button" :aria-label="t('下个月')" @click="shift(1)"><ChevronRight :size="15" /></button>
-      </div>
-
-      <div class="cal-almanac-banner" :data-cal-almanac-banner="almanacState">
-        <span class="cal-almanac-text">{{ almanacStateText }}</span>
-        <template v-if="almanacState === 'disabled'">
-          <DsButton size="sm" variant="secondary" :status="enableBusy ? 'loading' : 'idle'" @click="enableAlmanac" data-cal-enable-almanac>
-            <Sparkles :size="13" :stroke-width="1.5" /> {{ t("启用黄历插件") }}
-          </DsButton>
-          <span v-if="enableFailure" class="cal-almanac-error" role="alert">{{ integrationErrorText(enableFailure) }}</span>
-        </template>
-        <DsButton v-else-if="almanacState === 'check-failed' || almanacState === 'error'" size="sm" variant="secondary" :status="almanacLoading ? 'loading' : 'idle'" @click="initAlmanac(); ensureVisibleAlmanac()">
-          <RefreshCw :size="13" :stroke-width="1.5" /> {{ t("重新读取") }}
-        </DsButton>
-      </div>
-
-      <p v-if="missedCount > 0 && !missedDismissed" class="cal-missed" role="status" data-cal-missed>
-        检测到 {{ missedCount }} 条在应用未运行时到点的提醒，已补发应用内通知并标记为「错过」；系统通知可能没有弹出。
-        <button type="button" class="cal-missed__close" :aria-label="t('知道了')" @click="missedDismissed = true"><X :size="12" /></button>
-      </p>
-
-      <div class="cal-grid" role="grid" :aria-label="monthLabel">
-        <div v-for="week in WEEK" :key="week" class="cal-head">周{{ week }}</div>
-        <div
-          v-for="cell in cells"
-          :key="cell.key"
-          class="cal-cell"
-          :class="{ out: !cell.inMonth, today: cell.today, selected: cell.key === selected, 'is-rest': cell.rest, 'is-work': cell.workAdjust }"
-          role="gridcell"
-          :aria-selected="cell.key === selected"
-          :data-cal-date="cell.key"
-          @click="selected = cell.key"
-          @dblclick="quickAdd(cell.key)"
-        >
-          <span class="cal-day">{{ cell.day }}</span>
-          <span v-if="cell.lunar" class="cal-lunar" :class="{ 'is-term': !!cell.almanac?.solar_term, 'is-holiday': !!cell.almanac?.legal_holiday_name }" :data-cal-lunar="cell.key">{{ cell.lunar }}</span>
-          <span v-for="event in cell.list.slice(0, 1)" :key="event.id" class="cal-chip" :title="event.title">{{ event.time ? event.time + " " : "" }}{{ event.title }}</span>
-          <span v-if="cell.list.length > 1" class="cal-more">还有 {{ cell.list.length - 1 }} 项</span>
-        </div>
-      </div>
+    <div class="cal-missed" v-if="missedCount > 0 && !missedDismissed" role="status" data-cal-missed>
+      检测到 {{ missedCount }} 条在应用未运行时到点的提醒，已补发应用内通知并标记为「错过」；系统通知可能没有弹出。
+      <button type="button" class="cal-missed__close" :aria-label="t('知道了')" @click="missedDismissed = true"><X :size="12" /></button>
     </div>
 
-    <aside class="cal-side" :aria-label="t('当天详情与提醒')">
-      <section class="cal-panel" data-cal-day-detail>
-        <div class="cal-panel-head">
-          <strong>{{ selectedLabel }}</strong>
-          <span v-if="selectedAlmanac" class="cal-panel-sub">{{ selectedAlmanac.lunar_month_name || "" }}{{ selectedAlmanac.lunar_day_name || "" }}</span>
-        </div>
-        <dl v-if="selectedRows.length" class="cal-kv">
-          <template v-for="row in selectedRows" :key="row.key">
-            <dt>{{ row.label }}</dt>
-            <dd>{{ row.value }}</dd>
-          </template>
-        </dl>
-        <p v-else class="cal-hint" data-cal-day-detail-empty>
-          {{ almanacState === "ready" ? t("这一天没有返回农历字段。") : t("农历 / 黄历数据未加载；本机日程与提醒不受影响。") }}
-        </p>
-      </section>
-
-      <section class="cal-panel" data-cal-reminders>
-        <div class="cal-panel-head"><strong>{{ t("提醒") }}</strong><DsButton size="sm" variant="ghost" @click="collectDue(false)">{{ t("检查一次") }}</DsButton></div>
-        <p class="cal-hint" data-cal-permission>{{ permissionText }}</p>
-        <ul v-if="upcomingReminders.length" class="cal-upcoming" data-cal-upcoming>
-          <li v-for="row in upcomingReminders" :key="row.event.id" class="cal-upcoming-row">
-            <BellRing :size="12" aria-hidden="true" />
-            <span class="cal-upcoming-title" :title="row.event.title">{{ row.event.title }}</span>
-            <span class="cal-upcoming-time">{{ formatDue(row.due) }}</span>
-          </li>
-        </ul>
-        <p v-else class="cal-hint" data-cal-upcoming-empty>{{ t("没有待触发的提醒。给日程设时间并选择「提前 N 分钟」即可。") }}</p>
-        <div v-if="reminderLog.length" class="cal-reminder-log" data-cal-reminder-log>
-          <div v-for="row in reminderLog" :key="row.id" class="cal-reminder-log-row">
-            <span class="cal-reminder-log-title">{{ row.title }}{{ row.late ? t("（错过补发）") : "" }}</span>
-            <span class="cal-reminder-log-status">{{ SYSTEM_NOTIFY_LABEL[row.system] }} · 应用内已入队</span>
+    <div class="cal-body">
+      <div class="cal-main">
+        <div class="cal-grid" :class="{ 'is-week': view === 'week' }" role="grid" :aria-label="monthLabel" data-cal-grid>
+          <div v-for="week in WEEK" :key="week" class="cal-head cal-head-cell" data-cal-header>周{{ week }}</div>
+          <div
+            v-for="cell in view === 'week' ? weekCells : cells"
+            :key="cell.key"
+            class="cal-cell"
+            :class="{ out: !cell.inMonth, today: cell.today, selected: cell.key === selected, 'is-rest': cell.rest, 'is-work': cell.workAdjust }"
+            role="gridcell"
+            :aria-selected="cell.key === selected"
+            :data-cal-date="cell.key"
+            @click="selected = cell.key"
+            @dblclick="quickAdd(cell.key)"
+          >
+            <span class="cal-day">{{ cell.day }}</span>
+            <span v-if="cell.lunar" class="cal-lunar" :class="{ 'is-term': !!cell.almanac?.solar_term, 'is-holiday': !!cell.almanac?.legal_holiday_name }" :data-cal-lunar="cell.key">{{ cell.lunar }}</span>
+            <span v-for="event in cell.list.slice(0, 1)" :key="event.id" class="cal-chip" :title="event.title" data-cal-event>{{ event.time ? event.time + " " : "" }}{{ event.title }}</span>
+            <span v-if="cell.list.length > 1" class="cal-more">还有 {{ cell.list.length - 1 }} 项</span>
           </div>
         </div>
-      </section>
+      </div>
 
-      <section class="cal-panel" data-cal-ai>
-        <div class="cal-panel-head"><strong>{{ t("AI 建日程") }}</strong><span class="cal-panel-sub">{{ t("离线识别") }}</span></div>
-        <p class="cal-hint">{{ t("用一句话描述日程，这里会识别日期、时间、提醒和标题；先预览、可修改，确认后才加入日程。不调用模型。") }}</p>
-        <div class="cal-ai-input">
-          <input v-model="aiText" type="text" :aria-label="t('用一句话描述日程')" :placeholder="t('例如：明天下午 3 点开会，提前 10 分钟提醒')" @keydown.enter.prevent="parseAi" />
-          <DsButton size="sm" @click="parseAi"><Sparkles :size="13" :stroke-width="1.5" /> {{ t("解析") }}</DsButton>
-        </div>
-        <p v-if="aiError" class="cal-error" role="alert" data-cal-ai-error>{{ aiError }}</p>
-        <template v-if="aiDraft">
-          <ul v-if="aiDraft.notes.length" class="cal-ai-notes" data-cal-ai-notes>
-            <li v-for="note in aiDraft.notes" :key="note">{{ note }}</li>
+      <aside class="cal-side" :aria-label="t('当天详情与提醒')" data-cal-inspector>
+        <div class="cal-almanac-banner" v-if="almanacState !== 'ready'" :data-cal-almanac-banner="almanacState">
+      <span class="cal-almanac-text">{{ almanacStateText }}</span>
+      <DsButton v-if="almanacState === 'disabled'" size="sm" variant="secondary" :status="enableBusy ? 'loading' : 'idle'" @click="enableAlmanac" data-cal-enable-almanac>
+        <Sparkles :size="13" :stroke-width="1.5" /> {{ t("启用黄历插件") }}
+      </DsButton>
+      <DsButton v-else-if="almanacState === 'check-failed' || almanacState === 'error'" size="sm" variant="secondary" :status="almanacLoading ? 'loading' : 'idle'" @click="initAlmanac(); ensureVisibleAlmanac()">
+        <RefreshCw :size="13" :stroke-width="1.5" /> {{ t("重新读取") }}
+      </DsButton>
+    </div>
+
+        <section class="cal-panel" data-cal-day-detail>
+          <div class="cal-panel-head">
+            <strong>{{ selectedLabel }}</strong>
+            <span v-if="selectedAlmanac" class="cal-panel-sub">{{ selectedAlmanac.lunar_month_name || "" }}{{ selectedAlmanac.lunar_day_name || "" }}</span>
+          </div>
+          <div class="cal-agenda" data-cal-agenda>
+            <div v-for="event in agenda" :key="event.id" class="cal-agenda-item">
+              <span class="cal-agenda-time">{{ event.time || t("全天") }}</span>
+              <span class="cal-agenda-title" :title="event.title">{{ event.title }}</span>
+              <span v-if="reminderStatus(event)" class="cal-reminder-chip" :data-cal-reminder-status="event.id"><Bell :size="10" aria-hidden="true" /> {{ reminderStatus(event) }}</span>
+              <button class="cal-agenda-del" :aria-label="'删除 ' + event.title" @click="remove(event.id)"><X :size="12" /></button>
+            </div>
+            <p v-if="!agenda.length" class="cal-hint" data-cal-day-detail-empty>{{ t("这一天没有日程。") }}</p>
+          </div>
+          <dl v-if="selectedRows.length" class="cal-kv">
+            <template v-for="row in selectedRows" :key="row.key"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></template>
+          </dl>
+        </section>
+
+        <section class="cal-panel" data-cal-reminders>
+          <div class="cal-panel-head"><strong>{{ t("提醒") }}</strong><DsButton size="sm" variant="ghost" @click="collectDue(false)">{{ t("检查一次") }}</DsButton></div>
+          <p class="cal-hint" data-cal-permission>{{ permissionText }}</p>
+          <ul v-if="upcomingReminders.length" class="cal-upcoming" data-cal-upcoming>
+            <li v-for="row in upcomingReminders" :key="row.event.id" class="cal-upcoming-row">
+              <BellRing :size="12" aria-hidden="true" /><span class="cal-upcoming-title" :title="row.event.title">{{ row.event.title }}</span><span class="cal-upcoming-time">{{ formatDue(row.due) }}</span>
+            </li>
           </ul>
-          <div class="cal-ai-preview" data-cal-ai-preview>
-            <label class="cal-ai-field">
-              <span>{{ t("标题") }}</span>
-              <input v-model="aiTitle" type="text" :aria-label="t('解析后的日程标题')" />
-            </label>
-            <label class="cal-ai-field">
-              <span>{{ t("日期") }}</span>
-              <input v-model="aiDate" type="date" :aria-label="t('解析后的日期')" />
-            </label>
-            <label class="cal-ai-field">
-              <span>{{ t("时间（留空全天）") }}</span>
-              <input v-model="aiTime" type="time" :aria-label="t('解析后的时间')" />
-            </label>
-            <label class="cal-ai-field">
-              <span>{{ t("提醒") }}</span>
-              <select v-model="aiReminder" :disabled="!aiTime" :aria-label="t('解析后的提醒')">
-                <option v-for="option in REMINDER_OPTIONS" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
-              </select>
-            </label>
+          <p v-else class="cal-hint" data-cal-upcoming-empty>{{ t("没有待触发的提醒。") }}</p>
+        </section>
+
+        <section class="cal-panel" data-cal-ai>
+          <div class="cal-panel-head"><strong>{{ t("让助理建日程") }}</strong><span class="cal-panel-sub">{{ t("离线识别") }}</span></div>
+          <div class="cal-ai-input">
+            <input v-model="aiText" type="text" :aria-label="t('用一句话描述日程')" :placeholder="t('例如：明天下午 3 点开会')" @keydown.enter.prevent="parseAi" />
+            <DsButton size="sm" @click="parseAi"><Sparkles :size="13" :stroke-width="1.5" /> {{ t("解析") }}</DsButton>
           </div>
-          <div class="cal-ai-actions">
-            <DsButton size="sm" @click="addAi">{{ t("加入日程") }}</DsButton>
-            <DsButton size="sm" variant="ghost" @click="aiDraft = null; aiError = ''">{{ t("取消") }}</DsButton>
-          </div>
-        </template>
-        <p v-if="aiNotice" class="cal-hint" data-cal-ai-notice>{{ aiNotice }}</p>
-      </section>
-    </aside>
+          <p v-if="aiError" class="cal-error" role="alert" data-cal-ai-error>{{ aiError }}</p>
+          <template v-if="aiDraft">
+            <ul v-if="aiDraft.notes.length" class="cal-ai-notes" data-cal-ai-notes><li v-for="note in aiDraft.notes" :key="note">{{ note }}</li></ul>
+            <div class="cal-ai-preview" data-cal-ai-preview>
+              <label class="cal-ai-field"><span>{{ t("标题") }}</span><input v-model="aiTitle" type="text" :aria-label="t('解析后的日程标题')" /></label>
+              <label class="cal-ai-field"><span>{{ t("日期") }}</span><input v-model="aiDate" type="date" :aria-label="t('解析后的日期')" /></label>
+              <label class="cal-ai-field"><span>{{ t("时间（留空全天）") }}</span><input v-model="aiTime" type="time" :aria-label="t('解析后的时间')" /></label>
+              <label class="cal-ai-field"><span>{{ t("提醒") }}</span>
+                <select v-model="aiReminder" :disabled="!aiTime" :aria-label="t('解析后的提醒')"><option v-for="option in REMINDER_OPTIONS" :key="String(option.value)" :value="option.value">{{ option.label }}</option></select>
+              </label>
+            </div>
+            <div class="cal-ai-actions">
+              <DsButton size="sm" @click="addAi">{{ t("加入日程") }}</DsButton>
+              <DsButton size="sm" variant="ghost" @click="aiDraft = null; aiError = ''">{{ t("取消") }}</DsButton>
+            </div>
+          </template>
+          <p v-if="aiNotice" class="cal-hint" data-cal-ai-notice>{{ aiNotice }}</p>
+        </section>
+      </aside>
+    </div>
+
+    <div v-if="newOpen" class="cal-modal" data-cal-new-dialog>
+      <form class="cal-modal-card" role="dialog" aria-modal="true" aria-label="新建日程" @submit.prevent="add(); newOpen = false">
+        <header class="cal-modal-head"><b>{{ t("新建日程") }}</b><button type="button" aria-label="关闭" @click="newOpen = false"><X :size="14" /></button></header>
+        <label class="cal-field"><span>{{ t("标题") }}</span><input ref="titleInput" v-model="draftTitle" data-cal-new-title :placeholder="t('日程标题')" /></label>
+        <label class="cal-field"><span>{{ t("时间") }}</span><input v-model="draftTime" type="time" /></label>
+        <label class="cal-field"><span>{{ t("提前提醒") }}</span>
+          <select v-model="draftReminder" :disabled="!draftTime"><option v-for="option in REMINDER_OPTIONS" :key="String(option.value)" :value="option.value">{{ option.label }}</option></select>
+        </label>
+        <footer class="cal-modal-foot">
+          <DsButton variant="secondary" size="sm" @click="newOpen = false">{{ t("取消") }}</DsButton>
+          <DsButton type="submit" variant="primary" size="sm" :disabled="!draftTitle.trim() || eventSaving" data-cal-new-submit>{{ eventSaving ? t("正在保存…") : t("添加") }}</DsButton>
+        </footer>
+      </form>
+    </div>
+    <p v-if="notice" class="cal-notice" role="status" data-cal-notice>{{ notice }}</p>
   </div>
 </template>
 
@@ -1001,4 +1023,65 @@ function addAi() {
     max-height: 42%;
   }
 }
+
+/* task-9：无侧栏 + 52 工具条 + 7×6 网格 + 250 检查器 */
+.cal-app { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 0; gap: 0; }
+.cal-app.split { flex-direction: column; }
+.cal-toolbar { height: 52px; min-height: 52px; margin: 0; padding: 0 20px 0 92px; flex: none; border-bottom: 0.5px solid var(--line); }
+.cal-title { font-size: 15px; font-weight: var(--fw-medium); }
+.cal-calendar-badge { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.06); color: var(--muted); font-size: var(--fs-micro); }
+.cal-today { height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: rgb(var(--text-rgb) / 0.07); font-size: var(--fs-caption); }
+.cal-view { flex: none; }
+.cal-body { flex: 1; min-height: 0; display: flex; gap: 0; padding: 0; }
+.cal-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 0; }
+.cal-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: 30px repeat(6, minmax(0, 1fr)); border-top: 0.5px solid var(--line); }
+.cal-grid.is-week { grid-template-rows: 28px minmax(0, 1fr); }
+.cal-head-cell { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: var(--fs-micro); border-bottom: 0.5px solid var(--line); }
+.cal-cell { min-height: 0; min-width: 0; padding: 5px 7px; display: flex; flex-direction: column; gap: 2px; border-right: 0.5px solid var(--line); border-bottom: 0.5px solid var(--line); overflow: hidden; cursor: default; }
+.cal-cell:nth-child(7n + 7) { border-right: 0; }
+.cal-cell.out { opacity: 0.45; }
+.cal-cell.today .cal-day { display: inline-grid; place-items: center; width: 20px; height: 20px; margin: -2px 0 0 -4px; border-radius: 50%; background: var(--accent); color: var(--on-accent); }
+.cal-cell.selected { background: rgb(var(--text-rgb) / 0.06); box-shadow: inset 0 0 0 1px var(--line); }
+.cal-day { font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.cal-lunar { font-size: 10px; line-height: 1.2; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-chip { display: block; padding: 1px 5px; border-radius: 4px; background: rgb(var(--text-rgb) / 0.08); font-size: 10px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-more { font-size: 10px; color: var(--muted); }
+.cal-side { flex: 0 0 250px; width: 250px; box-sizing: border-box; min-height: 0; overflow: auto; padding: 10px 14px 16px; border-left: 0.5px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.cal-side .cal-panel { padding: 0; }
+.cal-side .cal-panel-head { margin: 0 0 6px; }
+.cal-agenda { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.cal-agenda-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: var(--fs-caption); min-width: 0; }
+.cal-agenda-time { flex: none; color: var(--muted); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.cal-agenda-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-reminder-chip { flex: none; color: var(--muted); font-size: 10px; }
+.cal-agenda-del { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); }
+.cal-kv { display: grid; grid-template-columns: 64px 1fr; gap: 3px 8px; margin: 0; font-size: var(--fs-caption); }
+.cal-kv dt { color: var(--muted); }
+.cal-kv dd { margin: 0; overflow-wrap: anywhere; }
+.cal-almanac-banner { flex: none; margin: 6px 20px 0; }
+.cal-missed { flex: none; margin: 6px 20px 0; }
+.cal-notice { position: absolute; left: 24px; bottom: 16px; padding: 6px 10px; border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.98); box-shadow: var(--elevation-2); font-size: var(--fs-caption); }
+.cal-modal { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: rgb(0 0 0 / 0.18); }
+.cal-modal-card { width: min(380px, calc(100% - 32px)); padding: 16px; border-radius: var(--radius-lg); background: rgb(var(--content-rgb) / 0.98); box-shadow: var(--elevation-3); display: flex; flex-direction: column; gap: 10px; }
+.cal-modal-head { display: flex; align-items: center; justify-content: space-between; }
+.cal-modal-head b { font-weight: var(--fw-medium); font-size: var(--fs-secondary); }
+.cal-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-caption); }
+.cal-field > span { color: var(--muted); }
+.cal-field input, .cal-field select { height: 30px; padding: 0 10px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.06); color: var(--text); font: inherit; font-size: var(--fs-caption); }
+.cal-modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+@container (max-width: 860px) {
+  .cal-side { flex-basis: 230px; width: 230px; }
+  .cal-body { padding-left: 12px; }
+}
+
+.cal-side .cal-almanac-banner { margin: 0 0 8px; padding: 6px 8px; }
+.cal-side .cal-almanac-banner .ds-btn { margin-top: 2px; }
+
+.cal-side { min-width: 0; }
+.cal-cell { padding: 6px; gap: 3px; position: relative; }
+.cal-day { align-self: flex-end; display: grid; place-items: center; width: 24px; height: 24px; margin-top: -4px; border-radius: 50%; font-size: var(--fs-secondary); }
+.cal-lunar { position: absolute; left: 6px; bottom: 3px; max-width: calc(100% - 12px); }
+
+.cal-cell .cal-chip { margin-top: 6px; }
+
 </style>

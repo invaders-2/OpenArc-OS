@@ -529,7 +529,7 @@ test("真实资源与接线：app-update-keys.json / main.cjs / preload.cjs / �
   assert.equal(typeof keys.canvas, "string");
   assert.ok(keys.canvas.length >= 40, "canvas 公钥必须是非空 base64");
 
-  const main = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(ROOT, "electron", "runtime-composition.cjs"), "utf8");
   assert.ok(main.includes('require("./market-update-service.cjs")'));
   assert.ok(main.includes("createMarketUpdateBundle({"));
   assert.ok(main.includes("updateService: marketUpdateBundle"));

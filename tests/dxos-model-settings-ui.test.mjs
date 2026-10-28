@@ -578,13 +578,13 @@ test("分类映射：文本=chat（含 tool-calling/vision-input）、图像=ima
   assert.equal(filtered.counts.text, 1);
 });
 
-test("音频口径：模型域没有音频能力枚举 → 音频组恒空 + 明确说明；只有协议域声明 audio.* 才归入", () => {
-  assert.ok(REMOTE_GROUP_META.audio.note.includes("模型域当前没有音频能力枚举"));
+test("音频口径：audio-generation 与协议 audio.* 都归入音频组，转写不冒充生成", () => {
+  assert.ok(REMOTE_GROUP_META.audio.note.includes("audio-generation"));
   assert.ok(REMOTE_GROUP_META.audio.note.includes("audio.*"));
   assert.ok(REMOTE_CLASSIFY_NOTE.includes("suggestedCapabilities"));
 
   const byName = groupRemoteModels([{ id: "whisper-1", suggestedCapabilities: [] }]);
-  assert.equal(byName.counts.audio, 0, "不许凭模型名把未知塞进音频组");
+  assert.equal(byName.counts.audio, 0, "转写模型不能凭名称塞进音频生成组");
   assert.equal(byName.counts.unknown, 1);
   const whisper = byName.groups.find((g) => g.id === "unknown").items[0];
   assert.ok(whisper.reasons.join("").includes("音频"));
@@ -595,7 +595,7 @@ test("音频口径：模型域没有音频能力枚举 → 音频组恒空 + 明
   assert.equal(byProtocol.groups.find((g) => g.id === "audio").items[0].id, "some-audio-model");
 
   const noProtocol = groupRemoteModels([{ id: "tts-1", protocolIntents: [] }]);
-  assert.equal(noProtocol.counts.audio, 0);
+  assert.equal(noProtocol.counts.audio, 1);
 });
 
 test("未识别兜底：suggestedCapabilities 缺省才回落到本地镜像；空 id / 非对象不计数", () => {
@@ -603,8 +603,8 @@ test("未识别兜底：suggestedCapabilities 缺省才回落到本地镜像；�
   assert.equal(fromMirror.group, "text");
   assert.deepEqual(fromMirror.capabilities, ["chat", "vision-input"]);
   const emptyMirror = classifyRemoteModel({ id: "tts-1" });
-  assert.equal(emptyMirror.group, "unknown");
-  assert.deepEqual(emptyMirror.capabilities, []);
+  assert.equal(emptyMirror.group, "audio");
+  assert.deepEqual(emptyMirror.capabilities, ["audio-generation"]);
   const grouping = groupRemoteModels([{ id: "" }, null, {}, { id: "x" }, "raw-string"]);
   assert.equal(grouping.total, 1, "只有有 id 的对象才计数");
   assert.equal(grouping.groups.find((g) => g.id === "text").items[0].id, "x");
@@ -620,7 +620,8 @@ test("防漂移：本地镜像逐条等于 electron 的 guessCapabilities / infe
   // 能力枚举必须与模型域一致（多一个少一个都算漂移）
   const domain = require(path.join(ROOT, "electron", "model-domain.cjs"));
   assert.deepEqual([...MODEL_CAPABILITIES], [...domain.CAPABILITIES]);
-  assert.equal(MODEL_CAPABILITIES.includes("audio-generation"), false, "模型域没有音频能力枚举");
+  assert.equal(MODEL_CAPABILITIES.includes("audio-generation"), true, "模型域原生支持音频生成");
+  assert.equal(MODEL_CAPABILITIES.includes("3d-generation"), true, "模型域原生支持 3D 生成");
   assert.equal(normalizeModelCapabilities(["chat", "chat", "nope", "", null]).join(","), "chat");
 });
 
@@ -797,5 +798,39 @@ test("界面接线：添加与编辑复用同一个 ProviderForm；四类面板�
   assert.ok(settings.includes("adapterType: current.adapterType"), "编辑态当前协议传给表单，不被预设误改");
   assert.ok(panel.includes("data-d4-01-remote-group") && panel.includes("data-d4-01-remote-add-item"), "四类分组与单条加入按钮");
   assert.ok(panel.includes("groupRemoteModels"), "分类只来自纯函数模块");
+});
+
+test("拉取模型：默认不加入、勾选才加、已加入可取消勾选＝移除（接线）", () => {
+  const settings = stripComments(read("src-vue/settings/ModelSettings.vue"));
+  const panel = stripComments(read("src-vue/settings/RemoteModelsPanel.vue"));
+  // 已加入的行不再是 disabled 勾选框：取消勾选＝本次移除
+  assert.equal(/:disabled="m\.registered"/.test(panel), false, "已加入的行必须能取消勾选");
+  assert.ok(panel.includes("curateRowChecked"), "行内勾选状态来自纯逻辑（已加入默认勾上、未加入默认不勾）");
+  assert.ok(panel.includes("buildCuratePlan"), "差异计算只来自纯逻辑模块");
+  for (const attr of ["data-d4-01-remote-remove-item", "data-d4-01-remote-register", "data-d4-01-remote-plan"]) {
+    assert.ok(panel.includes(attr), "缺少 " + attr);
+  }
+  assert.ok(panel.includes('t("移除")') && panel.includes('t("加入")'), "已加入行给「移除」，未加入行给「加入」");
+  assert.ok(panel.includes("将添加 {a} 个 / 将移除 {r} 个"), "底部按差异给出动作");
+  assert.ok(panel.includes("拉取到的模型默认都不加入"), "底部如实说明默认不加入");
+  // 事件：勾选/取消勾选/单个加入/单个移除/保存差异
+  for (const ev of ['"toggle-drop"', '"toggle-pick"', '"add-one"', '"remove-one"', "save"]) {
+    assert.ok(panel.includes(ev), "RemoteModelsPanel 缺少事件 " + ev);
+  }
+  // ModelSettings 接线：model/delete 真的被调用，部分失败如实报数
+  assert.ok(settings.includes("model/delete"), "ModelSettings 必须真正调用 model/delete");
+  assert.ok(settings.includes(':dropped="dropped[remoteOpenFor] || {}"'), "取消勾选的状态由 ModelSettings 持有并下传");
+  for (const ev of ["@toggle-drop=", "@remove-one=", "@save="]) assert.ok(settings.includes(ev), "ModelSettings 缺少接线 " + ev);
+  assert.equal(settings.includes("@register="), false, "旧的 register 事件已被勾选差异保存取代");
+  assert.ok(settings.includes("已添加 {a} 个 / 已移除 {r} 个（失败 {f}）"), "部分失败必须如实报数");
+  assert.ok(settings.includes('cmd("model/delete", { configId: target.configId })'), "按 providerId + remoteModelId 找到 configId 再删");
+  assert.ok(settings.includes("registerEntries") === false, "旧的批量注册函数已由 applyCurate 取代");
+  // 320 行时逐个点勾选框会丢点击：每个分类页给「全选本类 / 清空本类」，顶部给「清空已选」，一次整体写状态
+  for (const sel of ["data-d4-01-remote-select-section", "data-d4-01-remote-clear-section", "data-d4-01-remote-clear-all"]) {
+    assert.ok(panel.includes(sel), "缺少批量操作入口 " + sel);
+  }
+  assert.ok(panel.includes('t("全选本类")') && panel.includes('t("清空本类")') && panel.includes('t("清空已选")'), "批量按钮文案");
+  assert.ok(panel.includes("buildBulkPick") && panel.includes('emit("set-picks"'), "批量勾选走纯逻辑并整体回传");
+  assert.ok(settings.includes(':picked="picked[remoteOpenFor] || {}"') && settings.includes("@set-picks="), "ModelSettings 接批量状态");
 });
 
