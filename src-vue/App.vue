@@ -39,6 +39,7 @@ let disposeSystemTheme: (() => void) | null = null;
 let disposeIdentityEvent: (() => void) | null = null;
 let disposeNativeSync: (() => void) | null = null;
 let disposeAutomation: (() => void) | null = null;
+let disposeTaskNotice: (() => void) | null = null;
 let disposeBrowserRuntime: (() => void) | null = null;
 
 /**
@@ -131,6 +132,18 @@ onMounted(() => {
       if (!p || !p.runId || p.command || (p.phase !== "completed" && p.phase !== "failed")) return;
       shell.notify({ appId: "automation", title: p.phase === "completed" ? "自动化已完成" : "自动化运行失败", body: p.phase === "failed" && p.error ? String(p.error).slice(0, 120) : "" });
     }) ?? null;
+  // 全局 AI 后台任务：一轮跑完时，如果你没在看这个对话，就在通知中心留一条（点它回到对话）；
+  // 系统通知（窗口不在前台时）由主进程发，点了会推 task/focus 过来。
+  disposeTaskNotice =
+    window.openarc?.task?.onEvent?.((ev: any) => {
+      if (!ev) return;
+      if (ev.type === "task/focus" && ev.taskId) { shell.openTask(String(ev.taskId)); return; }
+      if (ev.type !== "task/result" || !ev.taskId || ev.status === "CANCELLED") return;
+      const watching = shell.focusedWindow?.appId === "chat" && shell.viewingTaskId === ev.taskId;
+      if (watching) return;
+      const title = ev.status === "SUCCEEDED" || (ev.ok && !ev.status) ? "AI 任务已完成" : ev.status === "WAITING" ? "AI 任务在等你确认" : ev.status === "BLOCKED" ? "AI 任务停下了，需要你看一下" : "AI 任务没有完成";
+      shell.notify({ appId: "chat", title, body: String(ev.goal || "").slice(0, 80), taskId: String(ev.taskId) });
+    }) ?? null;
   void identity.boot();
 });
 onBeforeUnmount(() => {
@@ -139,6 +152,7 @@ onBeforeUnmount(() => {
   if (disposeNativeSync) disposeNativeSync();
   if (disposeBrowserRuntime) disposeBrowserRuntime();
   if (disposeAutomation) disposeAutomation();
+  if (disposeTaskNotice) disposeTaskNotice();
 });
 </script>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, Circle, CircleAlert, CircleDot, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Paperclip, RotateCcw, ShieldQuestion, Sparkles, Square, SquarePen, Wrench } from "lucide-vue-next";
 import ResourcePicker from "./ResourcePicker.vue";
 import { useShellStore } from "../stores/shell";
@@ -531,7 +531,11 @@ onMounted(async () => {
   offApproval = sideEffectBridge?.onEvent?.((ev: any) => { if (ev?.type === "sideEffect/approvalRequested") { if (ev.request) approvals.value = [ev.request, ...approvals.value.filter((a) => a.approvalRequestId !== ev.request.approvalRequestId)]; else void loadApprovals(); } }) ?? null;
   poll = window.setInterval(() => { if (detail.value && (running(detail.value.task.status) || sending.value)) void loadDetail(); if (running(detail.value?.task.status) || approvals.value.length) void loadApprovals(); }, 700);
 });
-onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); });
+/* 后台任务：点通知时外壳把要打开的对话放在 taskFocus；当前看着哪段对话告诉外壳，避免对正在看的对话再弹通知 */
+const shellStore = useShellStore();
+watch(() => shellStore.taskFocus, (id) => { if (!id) return; if (id !== currentId.value) select(id); shellStore.taskFocus = null; void loadList(); }, { immediate: true });
+watch(currentId, (id) => { shellStore.viewingTaskId = id; }, { immediate: true });
+onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); shellStore.viewingTaskId = null; });
 </script>
 
 <template>

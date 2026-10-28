@@ -159,7 +159,7 @@ function normalizeCanvasTaskContext(raw) {
   return { ok: true, context };
 }
 
-function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai", canvasService = null } = {}) {
+function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai", canvasService = null, onResult = null } = {}) {
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("task:command"); } catch { /* not registered */ } }
   // 全局 AI 运行中进度（计划 / 正在用的工具 / 流式文字）：只推给可信窗口，不落库。
   if (send && orchestrator && typeof orchestrator.setProgressSink === "function") {
@@ -183,6 +183,7 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
       if (!send) return;
       send({
         type: "task/result", taskId,
+        goal: r && r.task && typeof r.task.goal === "string" ? r.task.goal.slice(0, 120) : null,
         ok: !!(r && r.ok),
         status: r && r.task ? r.task.status : null,
         stepStatus: r && r.step ? r.step.status : null,
@@ -190,6 +191,10 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
         verification: r && r.verification ? { type: r.verification.type, status: r.verification.status } : null,
         error: r && r.error ? String(r.error).slice(0, 120) : null,
       });
+      // 后台任务：一轮跑完（成功 / 停下 / 失败）交给宿主决定要不要发系统通知（窗口不在前台时）。
+      if (typeof onResult === "function") {
+        try { onResult({ taskId, ok: !!(r && r.ok), status: r && r.task ? r.task.status : null, goal: r && r.task && typeof r.task.goal === "string" ? r.task.goal : "" }); } catch { /* 通知失败不影响结果推送 */ }
+      }
       // task-52：运行结束后把步骤/模型/工具事件一次性推给对话 UI（safeEvent/safeCall，不含密钥）。
       if (taskId && typeof taskService.getEvents === "function") {
         const events = taskService.getEvents({ context, taskId });

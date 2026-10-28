@@ -18,6 +18,7 @@ const time = (n: ShellNotice) =>
 
 function openFrom(n: ShellNotice) {
   shell.dismissToast(n.id);
+  if (n.taskId) { shell.openTask(n.taskId); return; }
   if (appById(n.appId)) shell.activateApp(n.appId);
 }
 </script>
