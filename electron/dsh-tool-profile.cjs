@@ -16,7 +16,7 @@
  * 全局 AI 联网：`web.search` / `web.fetch`（广播名 web_search / web_fetch）同理是受控只读工具，
  * 走 OpenArc 自己的出网代理 + SSRF 防护 + 工具审计；FORBIDDEN 里的 `web` 仍禁 Harness 内置联网。
  */
-const READ_TOOL_IDS = Object.freeze(["resource.search", "resource.read.metadata", "resource.read.content", "browser.read.page", "canvas.read", "canvas.list", "web.search", "web.fetch", "skill.list", "skill.load", "workspace.list", "workspace.read", "workspace.search"]);
+const READ_TOOL_IDS = Object.freeze(["resource.search", "resource.read.metadata", "resource.read.content", "browser.read.page", "canvas.read", "canvas.list", "web.search", "web.fetch", "skill.list", "skill.load", "memory.save", "memory.search", "workspace.list", "workspace.read", "workspace.search"]);
 /**
  * 唯一允许进入 SIDE_EFFECT_PROPOSAL route 的 tool；由 Registry 的 riskClass + executionPolicy 二次确认。
  *

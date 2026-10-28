@@ -10,6 +10,7 @@
  * Harness event 永远不能自己改 Task/Step status；终态只由这里显式决定。
  */
 "use strict";
+const { memoryNotes, rememberedNote } = require("./agent-memory.cjs");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -81,8 +82,9 @@ function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEn
 }
 
 /** 全局 AI 第 2 期：工作文件夹与技能说明（只在对应能力打开时出现）。 */
-function buildAgentNotes({ workspace = false, skillCatalog = "" } = {}) {
+function buildAgentNotes({ workspace = false, skillCatalog = "", memory = null } = {}) {
   const parts = [];
+  if (typeof memory === "string" && memory.trim()) parts.push(memory.trim());
   if (workspace) {
     parts.push("You have an AI workspace folder; all workspace paths are relative to it. workspace_list, workspace_read and workspace_search read it freely. "
       + "workspace_write (create/overwrite a file) and workspace_exec (run a shell command with the workspace as working directory) each need the user's approval for that exact call. "
@@ -174,7 +176,7 @@ function classifyHarnessError(e) {
 }
 
 class TaskHarnessOrchestrator {
-  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null, maxToolRounds = MAX_TOOL_ROUNDS, sessionRoot = null, persona = null, modelTtlMs = null, planTool = false, workspaceTools = false } = {}) {
+  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null, maxToolRounds = MAX_TOOL_ROUNDS, sessionRoot = null, persona = null, modelTtlMs = null, planTool = false, workspaceTools = false, agentMemory = null } = {}) {
     if (!taskService) throw new Error("TaskHarnessOrchestrator 需要 TaskService");
     // 全局 AI 会话化：给了 sessionRoot 时，每个任务（= 一个对话）有自己的持久 dsh 会话目录，下一轮接着上一轮。
     this.sessionRoot = typeof sessionRoot === "string" && sessionRoot ? path.resolve(sessionRoot) : null;
@@ -185,6 +187,8 @@ class TaskHarnessOrchestrator {
     this.progressSink = null;
     // 第 2 期：工作文件夹工具已装配时，在首轮提示里说明它；技能目录晚绑定（技能中心在任务装配之后才起来）。
     this.workspaceTools = workspaceTools === true;
+    // 全局 AI 长期记忆（第 3 期）：首轮提示附上已有记忆；本轮成功收尾时把 memory_save 排的队写进资源库。
+    this.agentMemory = agentMemory && typeof agentMemory.flush === "function" ? agentMemory : null;
     this.skillCatalog = null;
     this.taskService = taskService;
     // D4-05 S4 / A36：可选受控记忆装配。null → 不接线，行为完全不变。
@@ -236,11 +240,17 @@ class TaskHarnessOrchestrator {
   /** 技能目录（userId → 文字目录）。没有接上时提示模型用 skill_list。 */
   setSkillCatalog(fn) { this.skillCatalog = typeof fn === "function" ? fn : null; }
 
-  #agentNotes(task) {
-    if (!this.planTool && !this.workspaceTools && !this.skillCatalog) return null;
+  async #agentNotes(task, context) {
+    if (!this.planTool && !this.workspaceTools && !this.skillCatalog && !this.agentMemory) return null;
     let catalog = "";
     try { catalog = this.skillCatalog ? String(this.skillCatalog(task && task.userId) || "") : ""; } catch { catalog = ""; }
-    return buildAgentNotes({ workspace: this.workspaceTools, skillCatalog: catalog.slice(0, 6000) });
+    let memory = null;
+    if (this.agentMemory) {
+      let items = [];
+      try { items = await this.agentMemory.recall({ context }); } catch { items = []; }
+      memory = memoryNotes(items);
+    }
+    return buildAgentNotes({ workspace: this.workspaceTools, skillCatalog: catalog.slice(0, 6000), memory });
   }
 
   #watchProgress(adapter, taskId) {
@@ -340,7 +350,7 @@ class TaskHarnessOrchestrator {
     const usedKinds = [BUDGET_KIND.MODEL_CALLS];
     if (toolsEnabled) usedKinds.push(BUDGET_KIND.TOOL_CALLS);
     if (readLoopUsed || sideEffectLoopUsed) usedKinds.push(BUDGET_KIND.TOOL_ROUNDS);
-    let promptText = buildPrompt({ goal: task.goal, stepInput: effectiveInput, toolsEnabled, agentNotes: this.#agentNotes(task) });
+    let promptText = buildPrompt({ goal: task.goal, stepInput: effectiveInput, toolsEnabled, agentNotes: await this.#agentNotes(task, context) });
 
     // D4-06 Closure：新 capability 额度 ≤ 任务剩余。任一 "会用到的" kind remaining==0 →
     // 不创建 run、不消耗，直接 BUDGET_EXHAUSTED（保持停止，用户需显式追加该 kind）。
@@ -591,7 +601,7 @@ class TaskHarnessOrchestrator {
       }
 
       // §24/§32：只有 turn 完成 + artifact 持久 + verification PASS 才算成功。
-      const text = typeof res.text === "string" ? res.text : "";
+      let text = typeof res.text === "string" ? res.text : "";
       const verification = this.#verify({ text, verify });
       await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision, task });
 
@@ -637,6 +647,13 @@ class TaskHarnessOrchestrator {
         }
       }
 
+      // 全局 AI 长期记忆：本轮已经确定成功，这时才把 memory_save 排的队写进资源库，并在回复末尾告诉用户。
+      if (this.agentMemory) {
+        let saved = [];
+        try { saved = await this.agentMemory.flush({ context, taskId }); } catch { saved = []; }
+        const note = rememberedNote(saved);
+        if (note && (!verify || !verify.type || verify.type === VERIFICATION_TYPE.SCHEMA_VALID)) text += note;
+      }
       const fresh = svc.getTask({ context, taskId });
       const rev = fresh.ok ? fresh.task.revision : task.revision;
       let commit;
@@ -683,6 +700,8 @@ class TaskHarnessOrchestrator {
       try { await adapter.dispose(); } catch { /* ignore */ }
       if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
       this.resolvedSideEffectCalls.delete(run.runId);
+      // 没走到成功收尾（失败 / 阻塞 / 取消）时，本轮排队的记忆一律丢弃。
+      if (this.agentMemory) { try { this.agentMemory.discard(taskId); } catch { /* ignore */ } }
     }
   }
 
