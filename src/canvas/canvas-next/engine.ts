@@ -115,7 +115,10 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
       else if (e.type === "started") store.patchRun(id, { runId: e.runId });
       else if (e.type === "text") store.patchRun(id, { stream: e.text });
     }, abort.signal);
+    // 生成期间节点被删除 / 撤销掉：结果无处可写，按「已停止」记录，不当成报错
+    if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
     const outs = await persistOutputs(store, res.outputs, genOf(node).title);
+    if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
     applyOutputs(store, id, outs);
     store.setRun(id, null);
     const cur = store.node(id)!;
@@ -126,7 +129,7 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
     const stopped = err instanceof GenError && err.code === "STOPPED";
     // 主行只写人话；原始码留给 gen.errCode（弹层里以「代码：…」展示，便于排查）
     const { err: msg, errCode } = nodeError(err);
-    if (!stopped) store.patchGen(id, { err: msg, errCode });
+    if (!stopped && store.node(id)) store.patchGen(id, { err: msg, errCode });
     store.logRun({ node: id, title: label || genOf(node).title, type: node.kind as GenKind, model: req.model.name, status: stopped ? "stopped" : "error", secs: Math.round((performance.now() - t0) / 1000), error: errCode ? errCode + " " + msg : msg });
     return false;
   }

@@ -374,7 +374,7 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           try {
             // 10-23：优先走模型配置自带凭据的编辑出口（Lovart：重绘 / 擦除 / 扩图 / 多角度 / 重打光 / 增强 / 抠图 / 图生图）
             if (typeof service.modelService.editImage === "function") {
-              const inputs = (Array.isArray(payload.inputDataUrls) ? payload.inputDataUrls : []).filter((x) => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 12 * 1024 * 1024));
+              const inputs = (Array.isArray(payload.inputDataUrls) ? payload.inputDataUrls : []).filter((x) => typeof x === "string").slice(0, 16).map((x) => x.slice(0, 12 * 1024 * 1024));
               let sourceDataUrl = typeof payload.sourceDataUrl === "string" ? payload.sourceDataUrl.slice(0, 12 * 1024 * 1024) : "";
               // 局部重绘 / 擦除：挖空图之外再带一张原图（支持遮罩的模型按「原图 + 遮罩」发，才看得到要改的东西）
               const originalDataUrl = typeof payload.originalDataUrl === "string" && payload.originalDataUrl.startsWith("data:image/") ? payload.originalDataUrl.slice(0, 12 * 1024 * 1024) : "";

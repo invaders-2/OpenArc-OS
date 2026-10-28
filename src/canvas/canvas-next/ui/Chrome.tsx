@@ -74,7 +74,8 @@ export function Chrome() {
     </div>
     {showMini ? <Minimap /> : null}
     {ui.sel.size > 1 ? <MultiBar /> : null}
-    <div id="hint" className="float">滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点</div>
+    {/* Agent 展开后画布区变窄，提示会压到左下工具栏上：此时不显示 */}
+    {ui.agentOpen ? null : <div id="hint" className="float">滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点</div>}
     <BackToNodes />
     {!nodes.length ? <div id="empty" className="float">
       <div className="l1"><span className="kbd"><Icon name="cursor" size="s" />双击</span>画布自由生成，或从下面开始一条工作流</div>

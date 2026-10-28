@@ -128,3 +128,38 @@ test("backend 根 dispose 退订 model/stream/focus/task watcher，后台 Task �
     globalThis.window = previousWindow; globalThis.document = previousDocument;
   }
 });
+
+test("保存途中又改了文档：保存结束后补存最新文档，不会停在旧版本却显示已保存", async () => {
+  const backend = storeBackend();
+  const gate = deferred();
+  const original = backend.saveDoc;
+  let first = true;
+  backend.saveDoc = async (...args) => { if (first) { first = false; await gate.promise; } return original(...args); };
+  const store = new CanvasStore(backend, "canvas-save-again");
+  await store.load();
+  const node = (x) => ({ id: "n1", kind: "text", x, y: 0, w: 100, h: 100, data: {} });
+  store.mutate((doc) => ({ ...doc, nodes: [node(111)] }));
+  const saving = store.saveNow();
+  store.mutate((doc) => ({ ...doc, nodes: [node(222)] }));
+  await new Promise((resolve) => setTimeout(resolve, 900)); // 防抖在保存途中到点
+  gate.resolve();
+  await saving; await flush();
+  assert.equal(backend.saves.length, 2);
+  assert.equal(backend.saves.at(-1).doc.nodes[0].x, 222);
+  assert.equal(store.state.saving, "saved");
+  await store.dispose();
+  assert.equal(backend.saves.length, 2);
+});
+
+test("撤销掉正在生成的节点会中止它的生成", async () => {
+  const backend = storeBackend();
+  const store = new CanvasStore(backend, "canvas-undo-run");
+  await store.load();
+  store.mutate((doc) => ({ ...doc, nodes: [{ id: "gen", kind: "text", x: 0, y: 0, w: 100, h: 100, data: {} }] }), { history: true });
+  const abort = new AbortController();
+  store.state = { ...store.state, runtime: { gen: { status: "running", progress: 0, abort, startedAt: Date.now() } } };
+  store.undo();
+  assert.equal(store.state.doc.nodes.length, 0);
+  assert.equal(abort.signal.aborted, true);
+  await store.dispose();
+});

@@ -29,6 +29,8 @@ const modelCmd = (): Cmd | null => { const c = oa()?.model?.command || oa()?.can
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errText = (res: any, fallback: string) => String((res && (res.detail || res.error)) || fallback);
+/** 参考图上限：与主进程 canvas/modelImageEdit 的截断一致（模型能力表里最多 16 张） */
+const MAX_REFS = 16;
 const CAP: Record<GenKind, string> = { image: "image-generation", video: "video-generation", audio: "audio-generation", text: "chat" };
 
 /**
@@ -286,7 +288,15 @@ export function createBridgeBackend(): CanvasBackend {
       // 有参考图且模型支持图生图：走 canvas/modelImageEdit（目前只收 1 张参考图）；素材已在 linkInputs 换成链接
       let result: Record<string, any>;
       // 参考图生图：参考图作为附件，提示词原样（主进程把链接下载后传成服务商附件）
-      if (refs.length && req.model.i2i) result = await cmd({ type: "canvas/modelImageEdit", ...common, mode: "prompt", prompt: req.resolvedPrompt + (p.ratio && !/自适应|auto/i.test(p.ratio) ? `\n\n画面比例 ${p.ratio}` : ""), inputDataUrls: refs.slice(0, 8) });
+      if (refs.length && req.model.i2i) {
+        // 参考图生图走 canvas/modelImageEdit：比例 / 清晰度由主进程按字段处理；这条命令一次只出 1 张，
+        // 风格 / 摄影机也没有字段，所以：风格与摄影机写进提示词，张数按 count 并发请求后合并。
+        const extra = [common.style ? `画面风格：${common.style}` : "", camera ? `摄影机：${camera.body}，${camera.lens}，焦距 ${camera.focal}，光圈 ${camera.aperture}` : ""].filter(Boolean).join("；");
+        const editPrompt = req.resolvedPrompt + (extra ? `\n\n${extra}` : "");
+        const shots = await Promise.all(Array.from({ length: Math.max(1, common.count) }, () => cmd({ type: "canvas/modelImageEdit", ...common, mode: "prompt", prompt: editPrompt, inputDataUrls: refs.slice(0, Math.min(MAX_REFS, req.model.maxRefs || MAX_REFS)) }).catch((e): Record<string, any> => ({ ok: false, error: "IMAGE_EDIT_FAILED", detail: String(e && e.message || e) }))));
+        const good = shots.filter((x) => x && x.ok === true);
+        result = good.length ? { ok: true, images: good.flatMap((x) => (Array.isArray(x.images) ? x.images : [])) } : shots[0];
+      }
       else result = await cmd({ type: "canvas/modelImage", ...common, async: true });
       if (result && result.async === true && result.runId) result = await poll(req.canvasId, String(result.runId), signal, onEvent, req.model.secs);
       if (result && result.ok !== true && /NODE_CONFLICT|TARGET_MISSING|RUN_STOPPED/.test(String(result.error || "")) && !signal.aborted) result = (await kept(req.canvasId, run.runId)) || result;

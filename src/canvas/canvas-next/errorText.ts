@@ -15,7 +15,7 @@ const clean = (raw: unknown): string => String(raw == null ? "" : raw).trim();
 
 /** 已知码（从长到短匹配，避免 MODEL_TIMEOUT 被 TIMEOUT 抢先命中） */
 const KNOWN_CODES = [
-  "MODEL_CONFIG_UNAVAILABLE", "CAPABILITY_UNAVAILABLE", "PROXY_UNAUTHORIZED", "CREDENTIAL_MISSING", "ENDPOINT_BLOCKED",
+  "MODEL_CONFIG_UNAVAILABLE", "UPLOAD_CONSENT_REQUIRED", "CAPABILITY_UNAVAILABLE", "PROXY_UNAUTHORIZED", "CREDENTIAL_MISSING", "ENDPOINT_BLOCKED",
   "MODEL_NOT_FOUND", "MODEL_TIMEOUT", "RATE_LIMITED", "CANCELLED", "STOPPED", "ECONNRESET", "ENOTFOUND", "TIMEOUT", "NETWORK",
 ] as const;
 
@@ -41,6 +41,7 @@ const CANVAS_TEXT: Record<string, string> = {
   CAPABILITY_UNAVAILABLE: "该模型不支持这种生成（OpenArc 不会用别的接口顶替）",
   ENDPOINT_BLOCKED: "该供应商地址不在允许范围内",
   STOPPED: "生成已停止",
+  UPLOAD_CONSENT_REQUIRED: "该模型需要把参考素材上传到临时图床，请先到 设置 → 网络 里允许上传",
 };
 
 /**

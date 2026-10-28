@@ -29,6 +29,7 @@ const CASES = [
   ["PROXY_UNAUTHORIZED", "没有权限使用该模型（授权可能已被撤销）"],
   ["CAPABILITY_UNAVAILABLE", "该模型不支持这种生成（OpenArc 不会用别的接口顶替）"],
   ["ENDPOINT_BLOCKED", "该供应商地址不在允许范围内"],
+  ["UPLOAD_CONSENT_REQUIRED", "该模型需要把参考素材上传到临时图床，请先到 设置 → 网络 里允许上传"],
   ["CANCELLED", "生成已停止"],
   ["STOPPED", "生成已停止"],
   ["RATE_LIMITED", "请求太频繁被限流，请稍后重试"],

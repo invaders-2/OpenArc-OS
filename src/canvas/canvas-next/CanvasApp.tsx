@@ -7,7 +7,7 @@
  */
 import { TextDocLayer } from "./ui/TextDoc";
 import { useEffect, useMemo, useRef } from "react";
-import { addFiles, copySelection, deleteSelection, duplicate, paste } from "./actions";
+import { addFiles, copySelection, deleteSelection, duplicate, pasteFromSystem } from "./actions";
 import { AgentPanel } from "../tapnow/AgentPanel";
 import type { CanvasBackend } from "./backend/types";
 import { CanvasStore } from "./store";
@@ -62,7 +62,7 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
   }, []);
   // 粘贴图片
   useEffect(() => {
-    const on = (e: ClipboardEvent) => { if (isTyping()) return; const files = [...(e.clipboardData?.files || [])]; if (files.length) { e.preventDefault(); void addFiles(store, files, ctl.center()); } else if (!isTyping()) paste(store); };
+    const on = (e: ClipboardEvent) => { if (isTyping()) return; const files = [...(e.clipboardData?.files || [])]; if (files.length) { e.preventDefault(); void addFiles(store, files, ctl.center()); } else if (!isTyping()) pasteFromSystem(store, e.clipboardData?.getData("text/plain") || "", ctl.center()); };
     addEventListener("paste", on); return () => removeEventListener("paste", on);
   }, [store, ctl]);
 

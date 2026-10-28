@@ -31,8 +31,11 @@ export function SelectionUI() {
   useLayoutEffect(() => {
     if (!node) return; const sr = ctl.rect(); const a = ctl.toScreen(node.x, node.y), b = ctl.toScreen(node.x + node.w, node.y + 24 + node.h);
     const cx = (a.x + b.x) / 2 - sr.left; let tb = null, gp = null;
-    if (tbRef.current) { const tw = tbRef.current.offsetWidth; const ty = a.y - sr.top - 52; tb = ty > sr.height - 60 || b.y < sr.top ? { left: -9999, top: -9999 } : { left: clamp(cx - tw / 2, 8, sr.width - tw - 8), top: Math.max(8, ty) }; }
-    if (gpRef.current) { const gw = gpRef.current.offsetWidth, gh = gpRef.current.offsetHeight; let top = b.y - sr.top + 14; const safeB = gpRef.current.closest(".cn-root.in-win") ? 76 : 8; /* 嵌在系统窗口里：底部给会弹出的 Dock 让位 */ if (top + gh > sr.height - safeB) top = Math.max(8, sr.height - gh - safeB); gp = { left: clamp(cx - gw / 2, 8, sr.width - gw - 8), top }; }
+    // 左侧竖排工具栏（#lb）所在的高度范围内，浮层不压到它上面：左边界让到工具栏右侧
+    const lb = (tbRef.current || gpRef.current)?.closest(".cn-root")?.querySelector("#lb")?.getBoundingClientRect();
+    const minLeft = (top: number, h: number) => (lb && lb.width && top < lb.bottom - sr.top && top + h > lb.top - sr.top ? Math.max(8, lb.right - sr.left + 8) : 8);
+    if (tbRef.current) { const tw = tbRef.current.offsetWidth, th = tbRef.current.offsetHeight; const ty = a.y - sr.top - 52; const top = Math.max(8, ty); tb = ty > sr.height - 60 || b.y < sr.top ? { left: -9999, top: -9999 } : { left: clamp(cx - tw / 2, minLeft(top, th), sr.width - tw - 8), top }; }
+    if (gpRef.current) { const gw = gpRef.current.offsetWidth, gh = gpRef.current.offsetHeight; let top = b.y - sr.top + 14; const safeB = gpRef.current.closest(".cn-root.in-win") ? 76 : 8; /* 嵌在系统窗口里：底部给会弹出的 Dock 让位 */ if (top + gh > sr.height - safeB) top = Math.max(8, sr.height - gh - safeB); gp = { left: clamp(cx - gw / 2, minLeft(top, gh), sr.width - gw - 8), top }; }
     if (JSON.stringify(tb) !== JSON.stringify(pos.tb) || JSON.stringify(gp) !== JSON.stringify(pos.gp)) setPos({ tb, gp });
   });
   if (!node) return null;
@@ -55,6 +58,11 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   const tagBtn = () => <button key="pin" className={"ib tipT" + (g!.tag ? " on" : "")} data-tb="pin" data-tip={g!.tag ? "颜色标记" : "标记"} onClick={(e) => openPop(e.currentTarget, (close) => <div className="swatches h">
     {NODE_TAG.map(([k, c]) => <button key={k} className={"sw" + (g!.tag === k ? " on" : "")} style={{ background: c }} aria-label={k} onClick={() => { close(); store.patchGen(node.id, g!.tag === k ? { tag: undefined, pinned: false } : { tag: k, pinned: true }, { history: true }); }} />)}
   </div>, "up", "left", "pop-sw")}><Icon name="tag" />{g!.tag ? <i className="tagmini" style={{ background: tagColor(g!.tag)! }} /> : null}</button>;
+  /** 存进桌面资产库（与右键「存入资产库」同一条路径）；没有桌面后端时只能在本画布收藏，提示里如实说明 */
+  const saveToLibrary = (el: HTMLElement) => {
+    if (store.backend.kind !== "bridge") { store.patchGen(node.id, { fav: true }); store.toast(`「${g!.title}」已收藏到本画布（资产库只在桌面版里可用）`); return; }
+    const r = el.getBoundingClientRect(); void saveNodeToLibrary(ctl, node, { x: r.left, y: r.bottom + 6 });
+  };
   const edit = (k: string, el: Element) => window.dispatchEvent(new CustomEvent("cn:editor", { detail: { kind: k, id: node.id, anchor: el } }));
   let items: React.ReactElement[] = [];
   // 生成中：视频节点参数条全禁用，工具条里只有「截帧」还能用（对齐 TapNow）；其它类型保持只有「停止」
@@ -62,7 +70,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     ? [B("frame", "frame", "截帧（快捷键 1）", "截帧"), <span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))]
     : [<span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))];
   else if (node.kind === "image") items = !out ? [B("upload", "upload", "上传图片", "上传", () => window.dispatchEvent(new CustomEvent("cn:upload", { detail: { target: node.id, at: { x: node.x + 120, y: node.y + 120 } } })))]
-    : [B("crop", "crop", "裁剪"), B("angle", "cube", "多角度"), B("mask", "brush", "局部重绘"), B("relight", "sun", "重打光"), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", () => { store.patchGen(node.id, { fav: true }); store.toast(`「${g!.title}」已保存到素材库`); }), B("dl", "download", "下载", "", () => void download(node, store)), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
+    : [B("crop", "crop", "裁剪"), B("angle", "cube", "多角度"), B("mask", "brush", "局部重绘"), B("relight", "sun", "重打光"), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
   else if (node.kind === "text") items = [bgBtn(), tagBtn(), <span key="s" className="vsep" />, B("copy", "copy", "复制全部", "", async () => { try { await navigator.clipboard.writeText(textOf(node)); store.toast("已复制全部内容"); } catch { store.toast("剪贴板不可用"); } }), B("lib", "libadd", "保存到素材库", "", (el) => { const r = el.getBoundingClientRect(); void saveNodeToLibrary(ctl, node, { x: r.left, y: r.bottom + 6 }); }), B("full", "expand", "全屏编辑", "", () => window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: node.id })))];
   else if (node.kind === "video" && out) items = [
     // TapNow 视频工具栏：裁剪 / 擦除 / 截帧 / 更多 ┃ 标签 ┃ 保存素材库 / 下载 / 全屏
@@ -72,7 +80,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     B("frame", "frame", "截帧（快捷键 1）", "截帧"),
     <button key="vmore" className="ib tipT" data-tb="vmore" data-tip="更多" onClick={(e) => videoMore(store, node, e.currentTarget)}><Icon name="more" /></button>,
     <span key="s1" className="vsep" />, tagBtn(), <span key="s2" className="vsep" />,
-    B("lib", "libadd", "保存到素材库", "", () => { store.patchGen(node.id, { fav: true }); store.toast(`「${g!.title}」已保存到素材库`); }),
+    B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)),
     B("dl", "download", "下载", "", () => void download(node, store)),
     B("full", "expand", "全屏播放", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id }))),
   ];
