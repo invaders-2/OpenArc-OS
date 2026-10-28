@@ -1346,3 +1346,39 @@
 .cn-root .ai .foot{min-width:0;}
 .cn-root .ai .foot > *{flex-shrink:0;}
 .cn-root .ai .foot > .pill{flex-shrink:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+
+/* ---------- 多节点堆叠（Stack） ---------- */
+.cn-root .snode .nbody.sbody{background:transparent;border:none;box-shadow:none;overflow:visible;}
+.cn-root .stack-body{position:absolute;inset:0;}
+.cn-root .stack-cards{position:absolute;inset:14px 18px 10px 6px;}
+.cn-root .stack-card{position:absolute;inset:0;border-radius:14px;overflow:hidden;background:var(--card);border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.28);transform-origin:50% 100%;}
+.cn-root .stack-card img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;}
+.cn-root .stack-card .st-ph,.cn-root .stack-item .st-ph{width:100%;height:100%;display:grid;place-items:center;color:var(--fg3);background:var(--s2);}
+.cn-root .stack-card .st-text,.cn-root .stack-item .st-text{width:100%;height:100%;padding:12px;font-size:11.5px;line-height:1.5;color:var(--fg2);overflow:hidden;background:var(--card);text-align:left;}
+.cn-root .stack-count{position:absolute;right:6px;top:0;min-width:24px;height:24px;padding:0 7px;border-radius:12px;background:var(--solid);color:var(--on-solid);font-size:12px;font-weight:600;display:grid;place-items:center;z-index:5;}
+.cn-root .stack-open{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);height:28px;padding:0 12px;border-radius:14px;background:var(--glass);backdrop-filter:blur(14px);border:1px solid var(--line);font-size:12px;opacity:0;z-index:6;transition:opacity var(--d-quick) var(--e-std);}
+.cn-root .snode:hover .stack-open,.cn-root .snode.sel .stack-open{opacity:1;}
+.cn-root .snode.drop .stack-card{outline:2px dashed var(--hi);outline-offset:2px;}
+.cn-root .modal.stack-gallery{width:min(880px,100%);}
+.cn-root .stack-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;}
+.cn-root .stack-actions .sp{flex:1;}
+.cn-root .stack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
+.cn-root .stack-item{display:flex;flex-direction:column;gap:6px;min-width:0;}
+.cn-root .stack-thumb{aspect-ratio:1;border-radius:12px;overflow:hidden;background:var(--s2);padding:0;display:block;width:100%;}
+.cn-root .stack-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.cn-root .stack-meta{display:flex;align-items:center;gap:6px;font-size:12px;min-width:0;}
+.cn-root .stack-meta .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg2);}
+.cn-root .stack-tip{margin:14px 2px 0;font-size:12px;color:var(--fg3);}
+
+/* ---------- 分组运行确认 ---------- */
+.cn-root .modal.rungroup{width:min(460px,100%);}
+.cn-root .rg-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:4px 0 6px;}
+.cn-root .rg-sum div{background:var(--sunken);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;}
+.cn-root .rg-sum b{font-size:18px;font-weight:600;}
+.cn-root .rg-sum span{font-size:12px;color:var(--fg3);}
+.cn-root .rg .row{padding:6px 4px;font-size:13px;}
+.cn-root .rg .row.sub{color:var(--fg2);font-size:12px;padding:3px 4px 3px 16px;}
+.cn-root .rg-note{font-size:12px;color:var(--fg3);margin:12px 2px;line-height:1.6;}
+.cn-root .rg-foot{display:flex;justify-content:flex-end;gap:8px;}
+.cn-root .nbody .lg-group .lg-group-acts{display:flex;gap:2px;margin-left:4px;}
+.cn-root .rg-input{width:100%;box-sizing:border-box;padding:8px 10px;border-radius:9px;background:var(--sunken);border:1px solid var(--line);color:var(--fg);font:inherit;font-size:13px;resize:vertical;}

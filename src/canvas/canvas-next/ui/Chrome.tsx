@@ -11,7 +11,9 @@ import { renderCanvasThumb } from "../../react-canvas/exportCanvas";
 import { alignSelection, deleteSelection, title } from "../actions";
 import { runNode } from "../engine";
 import { minimapVisible } from "./minimap";
-import { download } from "./menus";
+import { download, downloadMany } from "./menus";
+import { stackSelection } from "../stack";
+import { confirmRunGroup, runnableIds } from "./StackNode";
 import { bounds, defaultParams, genOf, inputsOf, isGenKind, outOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, type AnyParams, type GenKind, type TextParams, type VideoMode, type VideoParams } from "../model";
 import { emptyTable, withTable } from "../table";
 import { useCtl, useS, type Ctl } from "./ctx";
@@ -75,7 +77,7 @@ export function Chrome() {
     {showMini ? <Minimap /> : null}
     {ui.sel.size > 1 ? <MultiBar /> : null}
     {/* Agent 展开后画布区变窄，提示会压到左下工具栏上：此时不显示 */}
-    {ui.agentOpen ? null : <div id="hint" className="float">滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点</div>}
+    {ui.agentOpen ? null : <div id="hint" className="float">{ui.leftDrag === "select" ? "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白框选 · 右键 / 空格拖动平移 · 双击空白添加节点" : "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点"}</div>}
     <BackToNodes />
     {!nodes.length ? <div id="empty" className="float">
       <div className="l1"><span className="kbd"><Icon name="cursor" size="s" />双击</span>画布自由生成，或从下面开始一条工作流</div>
@@ -172,8 +174,10 @@ function DownloadCanvas({ ctl, close }: { ctl: Ctl; close: () => void }) {
   </div></>;
 }
 function Settings({ ctl }: { ctl: Ctl }) {
-  const batch = useS((s) => s.ui.batchMode); const models = useS((s) => s.models); const store = ctl.store;
+  const batch = useS((s) => s.ui.batchMode); const leftDrag = useS((s) => s.ui.leftDrag); const models = useS((s) => s.models); const store = ctl.store;
   return <><ModalHead title="画布设置" /><div className="mbd">
+    <div className="sec"><span>左键拖动空白处</span></div>
+    <div className="seg" data-setting="leftdrag">{([["select", "框选（右键 / 中键 / 空格拖动平移）"], ["pan", "平移（Shift 拖动框选）"]] as const).map(([k, l]) => <button key={k} data-v={k} className={leftDrag === k ? "on" : ""} onClick={() => { store.setUI({ leftDrag: k }); try { localStorage.setItem("openarc-canvas-leftdrag", k); } catch { /* 忽略 */ } }}>{l}</button>)}</div>
     <div className="sec"><span>批量生成结果（2× / 4×）的保存方式</span></div>
     <div className="seg">{([["stack", "堆叠在一个节点"], ["spread", "铺开成多个节点"]] as const).map(([k, l]) => <button key={k} className={batch === k ? "on" : ""} onClick={() => { store.setUI({ batchMode: k }); store.toast(k === "stack" ? "批量结果会堆叠，用 ‹ › 切换" : "批量结果会铺开成新节点"); }}>{l}</button>)}</div>
     <div className="sec"><span>新节点默认模型</span></div>
@@ -194,7 +198,7 @@ function themeMenu(ctl: Ctl, anchor: Element) {
   openPop(anchor, (close) => <><div className="mh">外观</div>{([["dark", "moon", "深色"], ["light", "sun", "浅色"], ["system", "monitor", "跟随系统"]] as const).map(([k, ic, t]) => <button key={k} className={"mi" + (store.state.ui.themePref === k ? " on" : "")} data-th={k} onClick={() => { close(); store.setUI({ themePref: k }); try { localStorage.setItem("openarc-canvas-theme", k); } catch { /* 忽略 */ } applyTheme(store); }}><span className="ic"><Icon name={ic} size="s" /></span><span style={{ flex: 1 }}>{t}</span>{store.state.ui.themePref === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up");
 }
 export function showKeys() {
-  const k = [["撤销 / 重做", "⌘Z / ⇧⌘Z"], ["复制 / 粘贴", "⌘C / ⌘V"], ["创建副本", "⌘D"], ["删除", "⌫ / Del"], ["全选", "⌘A"], ["节点搜索", "⌘F"], ["打开 / 收起 Agent", "⌘J"], ["发送生成", "⌘↵"], ["适应画布", "⇧1"], ["放大 / 缩小", "⌘+ / ⌘−"], ["切换深浅色", "⇧⌘L"], ["评论模式", "C"], ["拖动画布", "空格 / 中键 + 拖动"], ["微移节点", "方向键（⇧ 10px）"], ["重命名节点", "双击节点标题"], ["框选", "Shift + 拖动"], ["取消 / 关闭", "Esc"]];
+  const k = [["撤销 / 重做", "⌘Z / ⇧⌘Z"], ["复制 / 粘贴", "⌘C / ⌘V"], ["创建副本", "⌘D"], ["删除", "⌫ / Del"], ["全选", "⌘A"], ["节点搜索", "⌘F"], ["打开 / 收起 Agent", "⌘J"], ["发送生成", "⌘↵"], ["适应画布", "⇧1"], ["放大 / 缩小", "⌘+ / ⌘−"], ["切换深浅色", "⇧⌘L"], ["评论模式", "C"], ["拖动画布", "右键 / 中键 / 空格 + 拖动"], ["微移节点", "方向键（⇧ 10px）"], ["重命名节点", "双击节点标题"], ["框选", "拖动空白（⇧ 追加）"], ["堆叠选中节点", "⇧S"], ["取消 / 关闭", "Esc"]];
   openModal(() => <><ModalHead title="快捷键" /><div className="mbd"><div className="kbdlist">{k.map(([a, b]) => <div key={a}><span>{a}</span><kbd>{b}</kbd></div>)}</div></div></>);
 }
 export function toggleCmt(ctl: Ctl) { const on = !ctl.store.state.ui.cmtMode; ctl.store.setUI({ cmtMode: on }); if (on) ctl.store.toast("点击画布放置评论"); }
@@ -903,7 +907,7 @@ function MultiBar() {
   const ctl = useCtl(); const store = ctl.store; const ui = useS((s) => s.ui); const doc = useS((s) => s.doc);
   const nodes = [...ui.sel].map((id) => doc.nodes.find((n) => n.id === id)).filter((n): n is CanvasNode => !!n);
   if (nodes.length < 2) return null;
-  const runnable = nodes.filter((n) => isGenKind(n.kind));
+  const runnable = runnableIds(store, nodes);
   return <div className="multi-bar float" id="multibar" data-multi={nodes.length}>
     <span className="mb-count tnum" data-mb-count>已选 {nodes.length} 个</span>
     <span className="vsep" />
@@ -913,8 +917,9 @@ function MultiBar() {
       <button className="mi" data-align="top" onClick={() => { close(); alignSelection(store, "top"); }}><Icon name="up" size="s" />顶对齐</button>
       <button className="mi" data-align="hgap" onClick={() => { close(); alignSelection(store, "hgap"); }}><Icon name="layers" size="s" />水平等距</button>
     </>, "down")}><Icon name="layers" size="s" />对齐</button>
-    <button className="mb-btn" data-mb="run" disabled={!runnable.length} title={runnable.length ? "运行选中的生成节点" : "选中的节点里没有可运行的"} onClick={() => { runnable.forEach((n) => { void runNode(store, n.id).catch(() => undefined); }); store.toast(`已开始运行 ${runnable.length} 个节点`); }}><Icon name="play" size="s" />批量运行</button>
-    <button className="mb-btn" data-mb="dl" onClick={() => { nodes.forEach((n) => void download(n, store)); }}><Icon name="download" size="s" />下载</button>
+    <button className="mb-btn" data-mb="stack" title="把选中的节点收成一叠（⇧S）" onClick={() => stackSelection(store)}><Icon name="layers" size="s" />堆叠</button>
+    <button className="mb-btn" data-mb="run" disabled={!runnable.length} title={runnable.length ? "按依赖顺序运行选中的生成节点（先确认消耗）" : "选中的节点里没有可运行的"} onClick={() => confirmRunGroup(ctl, runnable, `选中的 ${nodes.length} 个节点`)}><Icon name="play" size="s" />批量运行</button>
+    <button className="mb-btn" data-mb="dl" title="有结果的节点打包成 zip 下载" onClick={() => void downloadMany(nodes, store)}><Icon name="download" size="s" />下载</button>
     <button className="mb-btn danger" data-mb="del" onClick={() => deleteSelection(store)}><Icon name="trash" size="s" />删除</button>
     <span className="vsep" />
     <button className="mb-btn icon-only" data-mb="cancel" title="取消选择" onClick={() => store.setUI({ sel: new Set() })}><Icon name="x" size="s" /></button>

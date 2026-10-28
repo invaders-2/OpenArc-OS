@@ -21,6 +21,8 @@ import { isTyping, Viewport } from "./ui/Viewport";
 import "./ui/canvas-next.css";
 import { attachCollab } from "./collab";
 import { groupSelection, ungroup } from "./ui/LegacyNodes";
+import { StackGalleryHost } from "./ui/StackNode";
+import { hiddenIds, isStack, stackSelection } from "./stack";
 
 /** 作用域根：所有样式都在 .cn-root 之下，主题写在它的 data-theme 上，不影响外壳 */
 function Root({ children, inset }: { children: React.ReactNode; inset?: number }) {
@@ -85,7 +87,7 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
       if (mod && e.shiftKey && k === "l" && !isTyping()) { e.preventDefault(); const pref = st.ui.theme === "light" ? "dark" : "light"; store.setUI({ themePref: pref }); try { localStorage.setItem("openarc-canvas-theme", pref); } catch { /* 忽略 */ } applyTheme(store); store.toast(pref === "light" ? "已切换到浅色" : "已切换到深色"); return; }
       if (isTyping() || modalOpen()) return;
       if (mod && k === "z") { e.preventDefault(); e.shiftKey ? store.redo() : store.undo(); return; }
-      if (mod && k === "a") { e.preventDefault(); store.setUI({ sel: new Set(st.doc.nodes.map((n) => n.id)) }); return; }
+      if (mod && k === "a") { e.preventDefault(); const hidden = hiddenIds(st.doc.nodes); store.setUI({ sel: new Set(st.doc.nodes.filter((n) => !hidden.has(n.id)).map((n) => n.id)) }); return; }
       if (mod && k === "c") { copySelection(store); return; }
       if (mod && k === "d") { e.preventDefault(); duplicate(store); return; }
       if (mod && k === "g") { e.preventDefault(); e.shiftKey ? ungroup(store) : groupSelection(store); return; }
@@ -93,11 +95,14 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
       if (mod && e.key === "-") { e.preventDefault(); const r = ctl.rect(); ctl.zoomAt(st.view.k / 1.2, r.left + r.width / 2, r.top + r.height / 2); return; }
       if (e.key === "!" || (e.shiftKey && e.code === "Digit1")) { ctl.fitTo(st.doc.nodes); return; }
       if (e.key === "?") { showKeys(); return; }
+      if (k === "s" && e.shiftKey && !mod && st.ui.sel.size > 1) { e.preventDefault(); stackSelection(store); return; }
       if (k === "c" && !mod) { toggleCmt(ctl); return; }
       if (e.key === "Delete" || e.key === "Backspace") { closePop(); deleteSelection(store); return; }
       if (e.key.startsWith("Arrow") && st.ui.sel.size) {
         e.preventDefault(); const d = e.shiftKey ? 10 : 1; const [dx, dy] = ({ ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] } as Record<string, number[]>)[e.key];
-        if (!e.repeat) store.snapshot(); store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (st.ui.sel.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n)) }));
+        // 堆叠里的成员跟着堆叠一起移动（取消堆叠后相对位置不变）
+        const moving = new Set(st.ui.sel); st.ui.sel.forEach((id) => { const g = store.node(id); if (isStack(g)) (g!.children || []).forEach((c) => moving.add(c)); });
+        if (!e.repeat) store.snapshot(); store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (moving.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n)) }));
       }
     };
     addEventListener("keydown", on); return () => removeEventListener("keydown", on);
@@ -116,6 +121,7 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
       <input type="file" ref={fileRef} accept="image/*,video/*,audio/*" multiple hidden onChange={(e) => { const files = [...(e.target.files || [])]; e.target.value = ""; const o = uploadOpts.current; void addFiles(store, files, o.at || ctl.center(), { target: o.target, linkTo: o.linkTo, replace: o.replace }); }} />
       <Toasts />
       <Lightbox />
+      <StackGalleryHost />
       <TextDocLayer />
       <OverlayHost />
       </Root>

@@ -11,20 +11,29 @@ import { Edges } from "./Edges";
 import { addMenu, blankMenu, nodeMenu, portMenu, onNodeAct } from "./menus";
 import { NodeView } from "./NodeView";
 import { closePop } from "./overlay";
+import { addToStack, hiddenIds, isStack } from "../stack";
 
 type Drag =
-  | { kind: "pan"; sx: number; sy: number; vx: number; vy: number; moved: boolean }
+  | { kind: "pan"; sx: number; sy: number; vx: number; vy: number; moved: boolean; /** 右键按下：没拖动就在松开时弹右键菜单 */ menu?: { nodeId: string | null } }
   | { kind: "node"; start: { x: number; y: number }; moved: boolean; orig: Array<{ id: string; x: number; y: number }> }
   | { kind: "resize"; id: string; sx: number; sy: number; w: number; h: number; ar: number; keepRatio: boolean }
   | { kind: "conn" }
-  | { kind: "marq"; sx: number; sy: number };
+  | { kind: "marq"; sx: number; sy: number; base: Set<string>; moved: boolean };
 
 export function Viewport() {
   const ctl = useCtl(); const store = ctl.store;
   const doc = useS((s) => s.doc); const view = useS((s) => s.view); const ui = useS((s) => s.ui); const runtime = useS((s) => s.runtime);
   const vpRef = useRef<HTMLDivElement>(null); const drag = useRef<Drag | null>(null); const space = useRef(false);
+  /** 右键菜单已在 pointerup 里弹过（Windows 的 contextmenu 在松开后才来，避免弹两次） */
+  const menuAt = useRef(0);
   const [marq, setMarq] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [panning, setPanning] = useState(false);
+  /** 拖动节点经过的堆叠（松开就放进去） */
+  const [dropStack, setDropStack] = useState<string | null>(null); const dropRef = useRef<string | null>(null);
+  const stackUnder = (x: number, y: number, moving: Set<string>) => {
+    for (const el of document.elementsFromPoint(x, y)) { const id = (el as HTMLElement).closest?.(".node")?.getAttribute("data-id"); if (id && !moving.has(id) && isStack(store.node(id))) return id; }
+    return null;
+  };
   useEffect(() => { ctl.vp = vpRef.current; }, [ctl]);
 
   // 空格拖动画布
@@ -37,9 +46,15 @@ export function Viewport() {
   const portPos = (n: CanvasNode, side: "in" | "out") => ({ x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 });
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    if (e.button === 2) return;
     closePop();
     const vp = vpRef.current!; const st = store.state; const t = e.target as HTMLElement;
+    // 右键：按住拖动 = 平移画布（TapNow）；没拖动 = 松开时弹右键菜单
+    if (e.button === 2) {
+      if (t.closest("textarea:not([readonly]),input:not([readonly])")) return;
+      const nodeEl = t.closest(".node") as HTMLElement | null;
+      drag.current = { kind: "pan", sx: e.clientX, sy: e.clientY, vx: st.view.x, vy: st.view.y, moved: false, menu: { nodeId: nodeEl?.dataset.id || null } };
+      vp.setPointerCapture(e.pointerId); return;
+    }
     if (e.button === 1 || space.current) { e.preventDefault(); drag.current = { kind: "pan", sx: e.clientX, sy: e.clientY, vx: st.view.x, vy: st.view.y, moved: true }; setPanning(true); vp.setPointerCapture(e.pointerId); return; }
     if (t.closest(".nhead .t.rename")) return;
     const nodeEl = t.closest(".node") as HTMLElement | null;
@@ -80,7 +95,13 @@ export function Viewport() {
     if (st.ui.cmtMode) { window.dispatchEvent(new CustomEvent("cn:place-comment", { detail: ctl.toWorld(e.clientX, e.clientY) })); return; }
     if (st.ui.pick) { store.setUI({ pick: null }); return; }
     if (st.ui.replace) { store.setUI({ replace: null }); return; }
-    if (e.shiftKey) { drag.current = { kind: "marq", sx: e.clientX, sy: e.clientY }; vp.setPointerCapture(e.pointerId); return; }
+    // 左键拖空白：默认框选（TapNow），触屏和「平移」偏好下拖动平移；Shift / ⌘ 框选时在原选择上追加
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    if (additive || (st.ui.leftDrag === "select" && e.pointerType !== "touch")) {
+      drag.current = { kind: "marq", sx: e.clientX, sy: e.clientY, base: additive ? new Set(st.ui.sel) : new Set(), moved: false };
+      if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur();
+      vp.setPointerCapture(e.pointerId); return;
+    }
     drag.current = { kind: "pan", sx: e.clientX, sy: e.clientY, vx: st.view.x, vy: st.view.y, moved: false }; vp.setPointerCapture(e.pointerId);
   }, [store, ctl]);
 
@@ -93,6 +114,8 @@ export function Viewport() {
       if (!d.moved) { store.snapshot(); d.moved = true; store.setUI({ dragging: true }); }
       const pos = new Map(d.orig.map((o) => { let x = o.x + dx, y = o.y + dy; if (st.ui.snap) { x = Math.round(x / 20) * 20; y = Math.round(y / 20) * 20; } return [o.id, { x: Math.round(x), y: Math.round(y) }]; }));
       store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (pos.has(n.id) ? { ...n, ...pos.get(n.id)! } : n)) }));
+      const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
+      if (over !== dropRef.current) { dropRef.current = over; setDropStack(over); }
     } else if (d.kind === "resize") {
       const dx = (e.clientX - d.sx) / st.view.k, dy = (e.clientY - d.sy) / st.view.k;
       const w = Math.round(Math.max(140, Math.min(900, d.w + dx))); const h = d.keepRatio ? Math.round(w * d.ar) : Math.round(Math.max(80, Math.min(900, d.h + dy)));
@@ -103,18 +126,38 @@ export function Viewport() {
       if (over && connectBlock(st.doc, c.rev ? over : c.id, c.rev ? c.id : over)) over = null;
       store.setUI({ conn: { ...c, p: ctl.toWorld(e.clientX, e.clientY), over } });
     } else if (d.kind === "marq") {
+      if (!d.moved && Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) < 4) return;
+      d.moved = true;
       const r = vpRef.current!.getBoundingClientRect();
       setMarq({ x: Math.min(e.clientX, d.sx) - r.left, y: Math.min(e.clientY, d.sy) - r.top, w: Math.abs(e.clientX - d.sx), h: Math.abs(e.clientY - d.sy) });
       const a = ctl.toWorld(Math.min(e.clientX, d.sx), Math.min(e.clientY, d.sy)), b = ctl.toWorld(Math.max(e.clientX, d.sx), Math.max(e.clientY, d.sy));
-      store.setUI({ sel: new Set(st.doc.nodes.filter((n) => n.x < b.x && n.x + n.w > a.x && n.y < b.y && n.y + n.h + 24 > a.y).map((n) => n.id)) });
+      const hidden = hiddenIds(st.doc.nodes);
+      // 分组框只有被完整框住才选中（框住组里几个节点时不把整个组拖着走）
+      const hit = st.doc.nodes.filter((n) => !hidden.has(n.id) && (n.kind === "group" && !isStack(n) ? n.x >= a.x && n.x + n.w <= b.x && n.y >= a.y && n.y + n.h + 24 <= b.y : n.x < b.x && n.x + n.w > a.x && n.y < b.y && n.y + n.h + 24 > a.y)).map((n) => n.id);
+      store.setUI({ sel: new Set([...d.base, ...hit]), edge: null });
     }
   }, [store, ctl]);
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
     const d = drag.current; if (!d) return; drag.current = null; setPanning(false); const st = store.state;
+    if (d.kind === "pan" && d.menu) {
+      // Windows 在 mouseup 之后才发 contextmenu：拖动平移结束也要记下时间，onContext 才会忽略它
+      menuAt.current = Date.now();
+      if (d.moved) return;
+      const id = d.menu.nodeId && store.node(d.menu.nodeId) ? d.menu.nodeId : null;
+      if (id) { if (!st.ui.sel.has(id)) store.setUI({ sel: new Set([id]), edge: null }); nodeMenu(ctl, { x: e.clientX, y: e.clientY }); }
+      else blankMenu(ctl, { x: e.clientX, y: e.clientY }, ctl.toWorld(e.clientX, e.clientY));
+      return;
+    }
     if (d.kind === "pan" && !d.moved) { if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur(); store.setUI({ sel: new Set(), edge: null, editCell: null }); }
-    if (d.kind === "node" && d.moved) store.setUI({ dragging: false });
-    if (d.kind === "marq") setMarq(null);
+    if (d.kind === "node" && d.moved) {
+      store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
+      const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
+      // 拖的是普通分组：只叠分组外单独选中的节点，组里的节点跟着分组走，不拆进叠
+      const dragged = new Set(d.orig.map((o) => o.id)); const inDraggedGroup = new Set(d.orig.flatMap((o) => { const g = store.node(o.id); return g && g.kind === "group" ? g.children || [] : []; }));
+      if (over) addToStack(store, over, [...dragged].filter((id) => !inDraggedGroup.has(id)));
+    }
+    if (d.kind === "marq") { setMarq(null); if (!d.moved) store.setUI({ sel: d.base, edge: null, editCell: null }); }
     if (d.kind === "conn") {
       vpRef.current?.closest(".cn-root")?.classList.remove("connecting"); const c = st.ui.conn; store.setUI({ conn: null }); if (!c) return;
       if (!c.over && Math.hypot(e.clientX - c.sx, e.clientY - c.sy) < 5) { portMenu(ctl, store.node(c.id)!, c.rev ? "in" : "out", { x: e.clientX + 14, y: e.clientY - 20 }); return; }
@@ -151,7 +194,7 @@ export function Viewport() {
     const nodeEl = tg.closest(".node") as HTMLElement | null;
     const tt = tg.closest(".nhead .t") as HTMLElement | null;
     if (tt && nodeEl) { renameInline(nodeEl.dataset.id!, tt); return; }
-    if (nodeEl) { const n = store.node(nodeEl.dataset.id)!; if (n.kind === "table") { /* 指针被画布捕获后双击到不了单元格：按位置找到单元格进入编辑 */ const cell = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest("[data-cell]") as HTMLElement | null; if (cell?.dataset.cell) { store.snapshot(); store.setUI({ editCell: cell.dataset.cell, sel: new Set([n.id]) }); } return; } if (n.kind === "text" && !tg.closest("[data-act]")) { window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: n.id })); return; } if (outOf(n)) window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: n.id })); return; }
+    if (nodeEl) { const n = store.node(nodeEl.dataset.id)!; if (isStack(n)) { window.dispatchEvent(new CustomEvent("cn:stack", { detail: n.id })); return; } if (n.kind === "table") { /* 指针被画布捕获后双击到不了单元格：按位置找到单元格进入编辑 */ const cell = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest("[data-cell]") as HTMLElement | null; if (cell?.dataset.cell) { store.snapshot(); store.setUI({ editCell: cell.dataset.cell, sel: new Set([n.id]) }); } return; } if (n.kind === "text" && !tg.closest("[data-act]")) { window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: n.id })); return; } if (outOf(n)) window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: n.id })); return; }
     if (tg.closest("[data-edge]")) return;
     const w = ctl.toWorld(e.clientX, e.clientY); addMenu(ctl, { x: e.clientX + 4, y: e.clientY + 4 }, w);
   };
@@ -164,7 +207,11 @@ export function Viewport() {
   };
 
   const onContext = (e: React.MouseEvent) => {
-    e.preventDefault(); const nodeEl = (e.target as HTMLElement).closest(".node") as HTMLElement | null;
+    e.preventDefault();
+    // 鼠标右键在 pointerup 里处理（拖动平移 / 不动弹菜单）；这里只接键盘菜单键等没有按下过程的情况
+    if (drag.current?.kind === "pan" && drag.current.menu) return;
+    if (Date.now() - menuAt.current < 600) return;
+    const nodeEl = (e.target as HTMLElement).closest(".node") as HTMLElement | null;
     if (nodeEl) { const id = nodeEl.dataset.id!; if (!store.state.ui.sel.has(id)) store.setUI({ sel: new Set([id]), edge: null }); nodeMenu(ctl, { x: e.clientX, y: e.clientY }); }
     else blankMenu(ctl, { x: e.clientX, y: e.clientY }, ctl.toWorld(e.clientX, e.clientY));
   };
@@ -181,12 +228,12 @@ export function Viewport() {
       <div id="world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${k})` }}>
         <Edges />
         <div id="nodes">
-          {[...doc.nodes].sort((a, b) => (a.kind === "group" ? 0 : 1) - (b.kind === "group" ? 0 : 1)).map((n) => {
+          {(() => { const hidden = hiddenIds(doc.nodes); return doc.nodes.filter((n) => !hidden.has(n.id)); })().sort((a, b) => (a.kind === "group" && !isStack(a) ? 0 : 1) - (b.kind === "group" && !isStack(b) ? 0 : 1)).map((n) => {
             const run = runtime[n.id];
             const loadSrc = run ? srcOf(n) || inputsOf(doc, n.id).map((x) => srcOf(x.node)).find(Boolean) : undefined;
             const bj = run ? null : batchOf(n).journal;
             const batchInfo = bj && n.kind !== "table" ? `${bj.rows.filter((r) => r.status === "completed").length}/${bj.rows.length} 行` : undefined;
-            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} modelName={(store.modelOf(n) || {}).name} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id} noconn={!!conn && conn.over !== n.id && !!connectBlock(doc, conn.rev ? n.id : conn.id, conn.rev ? conn.id : n.id)} hl={ui.hlNode === n.id} loadSrc={loadSrc} batchInfo={batchInfo}
+            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} modelName={(store.modelOf(n) || {}).name} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id || dropStack === n.id} noconn={!!conn && conn.over !== n.id && !!connectBlock(doc, conn.rev ? n.id : conn.id, conn.rev ? conn.id : n.id)} hl={ui.hlNode === n.id} loadSrc={loadSrc} batchInfo={batchInfo}
               onAct={(node, act, ev) => onNodeAct(ctl, node, act, ev)} onTextCommit={(id, text) => commitText(store, id, text)} />;
           })}
         </div>

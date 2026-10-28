@@ -3,6 +3,7 @@ import type { CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { autoVideoMode, connectBlock, genOf, inputsOf, isGenKind, uid, withGen, type GenKind, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { tableAutoSize, tableMedia, tableOf } from "./table";
+import { hiddenIds, isStack } from "./stack";
 
 /** 连线；成功后选中下游节点，并按输入自动切换视频生成方式 */
 export function connect(store: CanvasStore, from: string, to: string, opts: { quiet?: boolean; select?: boolean } = {}): CanvasEdge | null {
@@ -27,9 +28,17 @@ export function deleteSelection(store: CanvasStore) {
   const { ui } = store.state;
   if (ui.edge) { const e = store.state.doc.edges.find((x) => x.id === ui.edge); store.removeEdge(ui.edge); store.setUI({ edge: null }); if (e) afterInputsChanged(store, e.to); return; }
   if (!ui.sel.size) return;
-  const ids = [...ui.sel]; const touched = store.state.doc.edges.filter((e) => ui.sel.has(e.from) && !ui.sel.has(e.to)).map((e) => e.to);
+  // 删除堆叠 = 连同叠里的节点一起删（分组只删框，组内节点留在画布上）
+  const ids = withStackMembers(store, [...ui.sel]); const gone = new Set(ids);
+  const touched = [...new Set(store.state.doc.edges.filter((e) => gone.has(e.from) && !gone.has(e.to)).map((e) => e.to))];
   store.removeNodes(ids); touched.forEach((t) => afterInputsChanged(store, t));
   store.toast(`已删除 ${ids.length} 个节点 · ⌘Z 撤销`);
+}
+/** 选中的堆叠展开出成员（删除 / 复制时成员跟着堆叠走） */
+function withStackMembers(store: CanvasStore, ids: string[]): string[] {
+  const out = new Set(ids);
+  for (const id of ids) { const n = store.node(id); if (isStack(n)) (n!.children || []).forEach((c) => { if (store.node(c)) out.add(c); }); }
+  return [...out];
 }
 
 let clip: { nodes: CanvasNode[]; edges: CanvasEdge[] } | null = null;
@@ -41,7 +50,8 @@ export const hasClip = () => !!clip;
 const CLIP_MARK = "openarc-canvas-nodes:";
 let clipMarkSynced = false;
 export function copySelection(store: CanvasStore, quiet = false, toSystem = true) {
-  const sel = store.state.ui.sel; if (!sel.size) return;
+  if (!store.state.ui.sel.size) return;
+  const sel = new Set(withStackMembers(store, [...store.state.ui.sel]));
   const nodes = store.state.doc.nodes.filter((n) => sel.has(n.id)); const edges = store.state.doc.edges.filter((e) => sel.has(e.from) && sel.has(e.to));
   clip = JSON.parse(JSON.stringify({ nodes, edges }));
   if (toSystem) {
@@ -64,9 +74,12 @@ export function paste(store: CanvasStore, dx = 40) {
   const nodes = clip.nodes.map((n) => { const c: CanvasNode = JSON.parse(JSON.stringify(n)); c.id = uid("n"); map[n.id] = c.id; c.x += dx; c.y += dx; return c; });
   const realEdges = edges.map((e) => ({ id: e.id, from: map[e._old.from], to: map[e._old.to] }));
   // 输入顺序里的旧 edge id 换成新的
-  const fixed = nodes.map((c) => (isGenKind(c.kind) ? withGen(c, { order: realEdges.filter((e) => e.to === c.id).map((e) => e.id) }) : c));
+  // 分组 / 堆叠的成员 id 换成新节点；没一起复制的成员去掉
+  const remapped = nodes.map((c) => (c.children ? { ...c, children: c.children.map((x) => map[x]).filter(Boolean) } : c));
+  const fixed = remapped.map((c) => (isGenKind(c.kind) ? withGen(c, { order: realEdges.filter((e) => e.to === c.id).map((e) => e.id) }) : c));
   store.mutate((d) => ({ ...d, nodes: [...d.nodes, ...fixed], edges: [...d.edges, ...realEdges] }), { history: true });
-  store.setUI({ sel: new Set(fixed.map((n) => n.id)), edge: null });
+  const hidden = hiddenIds(fixed);
+  store.setUI({ sel: new Set(fixed.filter((n) => !hidden.has(n.id)).map((n) => n.id)), edge: null });
 }
 export function duplicate(store: CanvasStore) { const keep = clip; copySelection(store, true, false); paste(store, 30); clip = keep; }
 
