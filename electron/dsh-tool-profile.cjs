@@ -16,14 +16,14 @@
  * 全局 AI 联网：`web.search` / `web.fetch`（广播名 web_search / web_fetch）同理是受控只读工具，
  * 走 OpenArc 自己的出网代理 + SSRF 防护 + 工具审计；FORBIDDEN 里的 `web` 仍禁 Harness 内置联网。
  */
-const READ_TOOL_IDS = Object.freeze(["resource.search", "resource.read.metadata", "resource.read.content", "browser.read.page", "canvas.read", "canvas.list", "web.search", "web.fetch"]);
+const READ_TOOL_IDS = Object.freeze(["resource.search", "resource.read.metadata", "resource.read.content", "browser.read.page", "canvas.read", "canvas.list", "web.search", "web.fetch", "skill.list", "skill.load", "workspace.list", "workspace.read", "workspace.search"]);
 /**
  * 唯一允许进入 SIDE_EFFECT_PROPOSAL route 的 tool；由 Registry 的 riskClass + executionPolicy 二次确认。
  *
  * D5-02 Full-App：加入 `canvas.edit`（REVERSIBLE_WRITE + CONTROLLED_REVERSIBLE_WRITE）。
  * 没有它时，模型即使提议 canvas_edit 也会被 capability 挡在桥外 —— "AI 编辑画布"整条链断在广播面。
  */
-const WRITE_TOOL_IDS = Object.freeze(["resource.trash", "browser.navigate", "canvas.edit", "resource.save.text", "canvas.generate.image"]);
+const WRITE_TOOL_IDS = Object.freeze(["resource.trash", "browser.navigate", "canvas.edit", "resource.save.text", "canvas.generate.image", "workspace.write", "workspace.exec"]);
 const HARNESS_VISIBLE_TOOL_IDS = Object.freeze([...READ_TOOL_IDS, ...WRITE_TOOL_IDS]);
 
 /**

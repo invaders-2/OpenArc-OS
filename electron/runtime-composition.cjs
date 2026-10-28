@@ -248,6 +248,8 @@ async function bootRuntime(context) {
       serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
       browserControl,
       mcpInvocationSwitch: mcpSwitch,
+      // 全局 AI 工作文件夹：放在用户主目录下好找（可用 OPENARC_WORKSPACE_DIR 覆盖）。
+      workspaceDir: require("./agent-workspace.cjs").defaultWorkspaceDir(),
     });
     identity = runtime.identity;
   } catch (error) {
@@ -428,6 +430,19 @@ function registerRuntimeDomains(context) {
       logger: null,
       clock: null,
     });
+    // 全局 AI 第 2 期：技能中心接给全局 AI（只读：列出 / 读取已启用技能；首轮提示带技能目录）。
+    try {
+      const { createSkillCatalog, createSkillCatalogProvider } = require("./agent-skill-catalog.cjs");
+      const skillCatalog = createSkillCatalog({ listSkills: () => require("./skill-store.cjs").listSkills() });
+      if (identity.adapters && identity.adapters.providers && typeof identity.adapters.providers === "object") {
+        identity.adapters.providers.SkillCatalog = createSkillCatalogProvider({ catalog: skillCatalog });
+      }
+      if (identity.orchestrator && typeof identity.orchestrator.setSkillCatalog === "function") {
+        identity.orchestrator.setSkillCatalog((userId) => skillCatalog.promptCatalog({ userId }));
+      }
+    } catch (error) {
+      console.warn("[openarc] 技能目录未接上全局 AI：" + ((error && error.message) || error));
+    }
     registerSkillIpc({
       ipcMain,
       bundle: skillBundle,

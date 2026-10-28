@@ -66,6 +66,7 @@ async function createOpenArcRuntime({
   sessionTtlMs = null,
   sessionIdleMs = null,
   mcpInvocationSwitch = null,
+  workspaceDir = null,
   now = null,
 } = {}) {
   if (!userDataDir) throw new Error("createOpenArcRuntime 需要 userDataDir");
@@ -85,6 +86,7 @@ async function createOpenArcRuntime({
     sessionIdleMs,
     // B4e 收口：MCP 工具调用显式开关（默认关闭）先于 identity 创建，注入每个真实连接。
     mcpInvocationSwitch,
+    workspaceDir,
   });
   bootOrder.push(BOOT_STEP.IDENTITY_CREATED);
   if (!identity || !identity.modelProxy || typeof identity.modelProxy.start !== "function") {

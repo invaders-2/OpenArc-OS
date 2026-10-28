@@ -136,7 +136,7 @@ function resolveSessionTtlOverride({ env = process.env } = {}) {
  * @param opts.sessionIdleMs  可选，空闲有效期（**只有显式注入才改**；默认 DEFAULT_IDLE_MS）
  * @param opts.timers         可选，到期调度用的 { setTimeout, clearTimeout }（测试注入）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null, mcpInvocationSwitch = null, taskMergeV29 = null } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null, mcpInvocationSwitch = null, taskMergeV29 = null, workspaceDir = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
@@ -282,7 +282,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     isProxied: () => { try { return !!(modelService && modelService.readEgressProxy().enabled); } catch { return false; } },
     logger: log,
   });
-  const { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator } = createTaskBundle({
+  const { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, workspace: agentWorkspace, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator } = createTaskBundle({
     identityStore: store,
     authorization,
     authStore,
@@ -305,7 +305,8 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     executorLauncher,
     executorTestHook,
     // 全局 AI 会话化：每个对话一个持久 dsh 会话目录（多轮接着上下文）。
-    agentSession: { sessionRoot: path.join(userDataDir, "agent-sessions") },
+    // 第 2 期：AI 工作文件夹（读写 / 运行命令只限这里；写和命令都要审批）。
+    agentSession: { sessionRoot: path.join(userDataDir, "agent-sessions"), workspaceDir: workspaceDir || path.join(userDataDir, "workspace") },
   });
   // D5-02 Closure：拿到会话时对该会话的组织再 seed 一次内置 Model App baseline
   // （首次运行是"先建库、后注册管理员"，一次性 seed 时还没有组织）。upsert 幂等。
@@ -328,7 +329,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
 
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, webAccess, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService, canvasDxosStore, canvasAssetLibrary, canvasAgentAttachments, canvasDxosExtension, taskMergeV29: taskMergeV29Result };
+  return { service, store, secrets, logger: log, webAccess, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, agentWorkspace, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService, canvasDxosStore, canvasAssetLibrary, canvasAgentAttachments, canvasDxosExtension, taskMergeV29: taskMergeV29Result };
 }
 
 /**
