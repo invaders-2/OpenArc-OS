@@ -34,11 +34,29 @@ export function deleteSelection(store: CanvasStore) {
 
 let clip: { nodes: CanvasNode[]; edges: CanvasEdge[] } | null = null;
 export const hasClip = () => !!clip;
-export function copySelection(store: CanvasStore, quiet = false) {
+/**
+ * 复制节点时往系统剪贴板写一个标记：之后 ⌘V 时剪贴板里还是这个标记 → 粘贴节点；
+ * 已经换成别处复制的文字 → 新建文本节点（不再误贴上一次复制的节点）。写剪贴板失败时退回旧行为。
+ */
+const CLIP_MARK = "openarc-canvas-nodes:";
+let clipMarkSynced = false;
+export function copySelection(store: CanvasStore, quiet = false, toSystem = true) {
   const sel = store.state.ui.sel; if (!sel.size) return;
   const nodes = store.state.doc.nodes.filter((n) => sel.has(n.id)); const edges = store.state.doc.edges.filter((e) => sel.has(e.from) && sel.has(e.to));
   clip = JSON.parse(JSON.stringify({ nodes, edges }));
+  if (toSystem) {
+    clipMarkSynced = false;
+    try { void navigator.clipboard?.writeText(CLIP_MARK + uid("c")).then(() => { clipMarkSynced = true; }, () => undefined); } catch { /* 无剪贴板权限：退回旧行为 */ }
+  }
   if (!quiet) store.toast(`已复制 ${nodes.length} 个节点`);
+}
+/** 系统粘贴事件（无文件时）：判断该贴节点还是把外部文字贴成文本节点 */
+export function pasteFromSystem(store: CanvasStore, text: string, at: { x: number; y: number }) {
+  const t = text.trim();
+  if (!t || t.startsWith(CLIP_MARK) || (clip && !clipMarkSynced)) { paste(store); return; }
+  const n = store.newNode("text", at.x - 160, at.y - 90, { title: "粘贴的文本", hist: [{ text: t.slice(0, 20000) }], hi: 0, manual: true });
+  store.addNodes([n], [], { select: true });
+  store.toast("已把剪贴板文字贴成文本节点");
 }
 export function paste(store: CanvasStore, dx = 40) {
   if (!clip) return; const map: Record<string, string> = {};
@@ -50,7 +68,10 @@ export function paste(store: CanvasStore, dx = 40) {
   store.mutate((d) => ({ ...d, nodes: [...d.nodes, ...fixed], edges: [...d.edges, ...realEdges] }), { history: true });
   store.setUI({ sel: new Set(fixed.map((n) => n.id)), edge: null });
 }
-export function duplicate(store: CanvasStore) { const keep = clip; copySelection(store, true); paste(store, 30); clip = keep; }
+export function duplicate(store: CanvasStore) { const keep = clip; copySelection(store, true, false); paste(store, 30); clip = keep; }
+
+/** 资源库导入失败时允许内嵌进文档的上限（字符数，约 1.5MB 文件） */
+const INLINE_FALLBACK_MAX = 2 * 1024 * 1024;
 
 /** 上传图片：新建节点，或填进指定节点，或作为某节点的输入 */
 export async function addFiles(store: CanvasStore, files: File[], at: { x: number; y: number }, opts: { target?: string; linkTo?: string; replace?: string } = {}) {
@@ -63,6 +84,8 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
     if (!dataUrl) { store.toast("读取失败：" + f.name); continue; }
     const wh = kind === "image" ? await new Promise<[number, number]>((r) => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.onerror = () => r([1, 1]); im.src = dataUrl; }) : [16, 9];
     const url = await store.backend.importAsset(store.state.canvasId, dataUrl, f.name);
+    // 桌面版存资源库失败时不把整段 data URL 写进画布文档（几十上百 MB 会拖垮保存与本机备份），只放行小图
+    if (store.backend.kind === "bridge" && url.startsWith("data:") && url.length > INLINE_FALLBACK_MAX) { store.toast(`${f.name} 存入资源库失败，未添加（文件较大，不能内嵌进画布）`); continue; }
     const name = f.name.replace(/\.[^.]+$/, "").slice(0, 24);
     // 「替换」：只换当前版本，节点本身不动（位置/尺寸/连线/提示词保留）
     if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1] }); continue; }

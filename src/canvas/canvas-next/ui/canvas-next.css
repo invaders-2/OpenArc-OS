@@ -1341,3 +1341,8 @@
   .cn-root .skill-install,.cn-root .campop,.cn-root .campop.closing{animation:none;}
   .cn-root .cam-track,.cn-root .cam-item .g,.cn-root .gp-chip,.cn-root .style-slider,.cn-root .style-arrow{transition:none;}
 }
+
+/* Agent 输入栏：按钮多了以后（文件夹 / 截图）不能把发送键挤出面板。胶囊可收缩并省略，图标键与发送键保持原尺寸 */
+.cn-root .ai .foot{min-width:0;}
+.cn-root .ai .foot > *{flex-shrink:0;}
+.cn-root .ai .foot > .pill{flex-shrink:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}

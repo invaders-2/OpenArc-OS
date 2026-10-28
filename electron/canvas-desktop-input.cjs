@@ -14,7 +14,15 @@ function load() { if (loaded) return; loaded = true; try { const rows = JSON.par
 function save() { fs.mkdirSync(path.dirname(grantFile()), { recursive: true }); const tmp = grantFile() + ".tmp"; fs.writeFileSync(tmp, JSON.stringify([...grants.values()], null, 2), { mode: 0o600 }); fs.renameSync(tmp, grantFile()); }
 function error(code, detail) { return { ok: false, error: code, ...(detail ? { detail: String(detail).slice(0, 300) } : {}) }; }
 function grant(id) { load(); const value = grants.get(String(id || "")); if (!value) throw new Error("FOLDER_GRANT_INVALID"); return value; }
-function safeChild(root, relative) { const target = path.resolve(root, relative); if (target !== root && !target.startsWith(root + path.sep)) throw new Error("FOLDER_PATH_NOT_ALLOWED"); return target; }
+function inside(root, target) { return target === root || target.startsWith(root + path.sep); }
+// 先按字面路径挡住 ../，再按真实路径挡住软链接：授权目录里的软链接不能把读取带到目录外
+function safeChild(root, relative) {
+  const target = path.resolve(root, relative); if (!inside(root, target)) throw new Error("FOLDER_PATH_NOT_ALLOWED");
+  let realRoot, realTarget;
+  try { realRoot = fs.realpathSync(root); realTarget = fs.realpathSync(target); } catch { throw new Error("FOLDER_FILE_NOT_FOUND"); }
+  if (!inside(realRoot, realTarget)) throw new Error("FOLDER_PATH_NOT_ALLOWED");
+  return realTarget;
+}
 
 async function chooseFolder(sender, defaultPath) {
   const owner = BrowserWindow.fromWebContents(sender);
@@ -55,7 +63,8 @@ async function captureSources() {
 }
 async function captureScreenshot(id) {
   const rows = await withCaptureTimeout(desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 1920, height: 1080 } }));
-  const source = rows.find((s) => s.id === id) || rows.find((s) => s.id.startsWith("screen:"));
+  // 用户点了某个窗口/屏幕就只截它；找不到（窗口已关）要报错，不能悄悄改截整个屏幕
+  const source = id ? rows.find((s) => s.id === id) : rows.find((s) => s.id.startsWith("screen:"));
   if (!source) return error("CAPTURE_SOURCE_NOT_FOUND");
   const image = source.thumbnail; if (image.isEmpty()) return error("CAPTURE_EMPTY");
   return { ok: true, name: "画布截图-" + new Date().toISOString().replace(/[:.]/g, "-") + ".png", mime: "image/png", dataUrl: image.toDataURL() };

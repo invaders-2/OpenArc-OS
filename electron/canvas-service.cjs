@@ -1327,7 +1327,8 @@ class CanvasService {
   }
 
   /** 解析引用（受控加载路径）：读权限 / 资源 owner / 可见画布文档引用 三选一，且未回收才返回内容。*/
-  readAsset({ context, ref, maxBytes = 120 * 1024 * 1024 } = {}) {
+  // 上限与 importAsset 的视频 / 音频导入上限（200MB）一致：能导入的素材必须也能读回来显示
+  readAsset({ context, ref, maxBytes = 200 * 1024 * 1024 } = {}) {
     const r = this.#actor(context);
     if (!r.ok) return r;
     // 接受 openarc-asset:<id> 与裸 ResourceRef 两种写法（前端节点 refs 是前者）。

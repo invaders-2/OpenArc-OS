@@ -72,6 +72,8 @@ export class CanvasStore {
   private listeners = new Set<Listener>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private saveFlight: Promise<void> | null = null;
+  /** 保存进行中又有新的保存请求（期间有编辑）：这次保存结束后要再存一次 */
+  private saveAgain = false;
   private disposeFlight: Promise<void> | null = null;
   private disposed = false;
   private toastTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -99,7 +101,7 @@ export class CanvasStore {
   rebase: ((ours: CanvasDoc, remote: CanvasDoc) => CanvasDoc) | null = null;
   setCollab(patch: Partial<CanvasState["collab"]>) { if (this.disposed) return; this.state = { ...this.state, collab: { ...this.state.collab, ...patch } }; this.emit(); }
   /** 远端改动：不进撤销栈，也不由本端保存（发起方负责落盘） */
-  applyRemote(fn: (doc: CanvasDoc) => CanvasDoc) { if (this.disposed) return; const prev = this.state.doc; const next = fn(prev); if (next === prev) return; this.state = { ...this.state, doc: next }; this.cleanSel(); this.emit(); }
+  applyRemote(fn: (doc: CanvasDoc) => CanvasDoc) { if (this.disposed) return; const prev = this.state.doc; const next = fn(prev); if (next === prev) return; this.state = { ...this.state, doc: next }; this.cleanSel(); this.stopOrphanRuns(); this.emit(); }
   set(patch: Partial<CanvasState>) { if (this.disposed) return; this.state = { ...this.state, ...patch }; this.emit(); }
   setUI(patch: Partial<UIState>) { if (this.disposed) return; this.state = { ...this.state, ui: { ...this.state.ui, ...patch } }; this.emit(); }
   setView(v: View) { if (this.disposed) return; this.state = { ...this.state, view: v }; this.emit(); }
@@ -140,11 +142,12 @@ export class CanvasStore {
   private scheduleSave() {
     if (this.disposed) return;
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => void this.saveNow(), 800);
+    this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.saveNow(); }, 800);
   }
   async saveNow(force = false) {
-    if (this.saveFlight) return this.saveFlight;
+    if (this.saveFlight) { this.saveAgain = true; return this.saveFlight; }
     if (this.disposed && !force) return;
+    this.saveAgain = false;
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     this.set({ saving: "saving" });
     const flight = (async () => {
@@ -162,6 +165,8 @@ export class CanvasStore {
     })();
     this.saveFlight = flight;
     try { await flight; } finally { if (this.saveFlight === flight) this.saveFlight = null; }
+    // 保存途中的编辑：上一次请求带的是旧文档，结束后补存一次（冲突 / 失败时不自动重试，交给原有提示）
+    if (this.saveAgain && !this.saveTimer && this.state.saving === "saved" && (!this.disposed || force)) await this.saveNow(force);
   }
 
   dispose(): Promise<void> {
@@ -173,7 +178,7 @@ export class CanvasStore {
     this.listeners.clear();
     this.disposeFlight = (async () => {
       if (this.saveFlight) await this.saveFlight;
-      if (this.saveTimer) await this.saveNow(true);
+      if (this.saveTimer || this.saveAgain) await this.saveNow(true);
     })();
     return this.disposeFlight;
   }
@@ -187,8 +192,10 @@ export class CanvasStore {
     this.state = { ...this.state, doc: next, undo, redo: opts.history ? [] : this.state.redo }; this.emit(); this.scheduleSave();
   }
   snapshot() { this.state = { ...this.state, undo: [...this.state.undo.slice(-59), this.state.doc], redo: [] }; }
-  undo() { const u = this.state.undo; if (!u.length) return this.toast("没有可撤销的操作"); this.state = { ...this.state, doc: u[u.length - 1], undo: u.slice(0, -1), redo: [...this.state.redo, this.state.doc] }; this.cleanSel(); this.emit(); this.scheduleSave(); }
-  redo() { const r = this.state.redo; if (!r.length) return this.toast("没有可重做的操作"); this.state = { ...this.state, doc: r[r.length - 1], redo: r.slice(0, -1), undo: [...this.state.undo, this.state.doc] }; this.cleanSel(); this.emit(); this.scheduleSave(); }
+  undo() { const u = this.state.undo; if (!u.length) return this.toast("没有可撤销的操作"); this.state = { ...this.state, doc: u[u.length - 1], undo: u.slice(0, -1), redo: [...this.state.redo, this.state.doc] }; this.cleanSel(); this.stopOrphanRuns(); this.emit(); this.scheduleSave(); }
+  redo() { const r = this.state.redo; if (!r.length) return this.toast("没有可重做的操作"); this.state = { ...this.state, doc: r[r.length - 1], redo: r.slice(0, -1), undo: [...this.state.undo, this.state.doc] }; this.cleanSel(); this.stopOrphanRuns(); this.emit(); this.scheduleSave(); }
+  /** 撤销 / 重做 / 远端改动让正在生成的节点消失时，停掉它的生成（否则继续计费，结果也无处可写） */
+  private stopOrphanRuns() { const ids = new Set(this.state.doc.nodes.map((n) => n.id)); for (const [id, r] of Object.entries(this.state.runtime)) if (!ids.has(id)) r.abort.abort(); }
   private cleanSel() { const ids = new Set(this.state.doc.nodes.map((n) => n.id)); const sel = new Set([...this.state.ui.sel].filter((x) => ids.has(x))); this.state = { ...this.state, ui: { ...this.state.ui, sel } }; }
 
   node = (id: string | null | undefined) => (id ? this.state.doc.nodes.find((n) => n.id === id) : undefined);
