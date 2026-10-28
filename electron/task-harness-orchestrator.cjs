@@ -10,6 +10,7 @@
  * Harness event 永远不能自己改 Task/Step status；终态只由这里显式决定。
  */
 "use strict";
+const MAX_DYNAMIC_WRITE_TOOLS = 40;
 const { memoryNotes, rememberedNote } = require("./agent-memory.cjs");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -196,6 +197,7 @@ class TaskHarnessOrchestrator {
     // 全局 AI 长期记忆（第 3 期）：首轮提示附上已有记忆；本轮成功收尾时把 memory_save 排的队写进资源库。
     this.agentMemory = agentMemory && typeof agentMemory.flush === "function" ? agentMemory : null;
     this.skillCatalog = null;
+    this.dynamicWriteTools = null;
     this.taskService = taskService;
     // D4-05 S4 / A36：可选受控记忆装配。null → 不接线，行为完全不变。
     this.memoryContext = memoryContext;
@@ -242,6 +244,9 @@ class TaskHarnessOrchestrator {
 
   /** 运行中进度（计划 / 正在用的工具 / 流式文字）推给界面的出口；只给界面看，不落库。 */
   setProgressSink(fn) { this.progressSink = typeof fn === "function" ? fn : null; }
+
+  /** 每轮动态追加的受控提议工具（目前是已连接的 MCP 工具）。fn() → toolId[]。 */
+  setDynamicWriteTools(fn) { this.dynamicWriteTools = typeof fn === "function" ? fn : null; }
 
   /** 技能目录（userId → 文字目录）。没有接上时提示模型用 skill_list。 */
   setSkillCatalog(fn) { this.skillCatalog = typeof fn === "function" ? fn : null; }
@@ -860,7 +865,23 @@ class TaskHarnessOrchestrator {
     if (!proxy || typeof proxy.executeReadOnly !== "function" || !proxy.adapterFor) return null;
     const toolIds = cfg.toolIds && cfg.toolIds.length ? cfg.toolIds : ["resource.read.metadata", "resource.search"];
     // D4-03C4：WRITE proposal tools 只能走 SIDE_EFFECT_PROPOSAL route；未装配 sideEffectRuntime 时绝不暴露。
-    const writeToolIds = cfg.writeToolIds && cfg.writeToolIds.length && this.sideEffectRuntime ? cfg.writeToolIds : [];
+    let writeToolIds = cfg.writeToolIds && cfg.writeToolIds.length && this.sideEffectRuntime ? cfg.writeToolIds : [];
+    // 全局 AI · MCP：每轮开始时把当前已连接、已登记的 MCP 工具加进提议清单（它们都是外部副作用，一律先审批）。
+    if (this.sideEffectRuntime && this.dynamicWriteTools) {
+      let extra = [];
+      try { extra = this.dynamicWriteTools() || []; } catch { extra = []; }
+      const known = new Set([...toolIds, ...writeToolIds]);
+      const usable = [];
+      for (const id of Array.isArray(extra) ? extra : []) {
+        if (usable.length >= MAX_DYNAMIC_WRITE_TOOLS) break;
+        const tid = String(id || "");
+        if (!tid || known.has(tid)) continue;
+        try { buildBridgeManifest(proxy.registry, { writeToolIds: [tid] }); } catch { continue; } // 不合受控合同的一律不暴露
+        known.add(tid);
+        usable.push(tid);
+      }
+      if (usable.length) writeToolIds = [...writeToolIds, ...usable];
+    }
     const manifest = buildBridgeManifest(proxy.registry, { readToolIds: toolIds, writeToolIds });
     const make = typeof cfg.bridgeFactory === "function" ? cfg.bridgeFactory : (o) => new ToolFacadeBridge(o);
     const bridge = make({ toolProxy: proxy, manifest, sideEffectRuntime: this.sideEffectRuntime, clock: this.clock, logger: this.logger, ttlMs: cfg.ttlMs, execTimeoutMs: cfg.execTimeoutMs });
