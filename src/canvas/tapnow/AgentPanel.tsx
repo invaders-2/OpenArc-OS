@@ -414,7 +414,7 @@ function usageModal(ctl: Ctl, a: AgentState) {
   openModal(() => <><ModalHead title="用量统计" icon="bolt" /><div className="mbd">
     {([["对话轮数", asks + " 轮"], ["执行步骤", steps + " 步"], ["新建节点", made + " 个"], ["Agent 处理耗时", secs >= 60 ? Math.floor(secs / 60) + "m " + Math.round(secs % 60) + "s" : secs.toFixed(1) + "s"], ["对话文字（估算 tokens）", "约 " + Math.round(chars * 1.6).toLocaleString()], ["模型", a.lockedModel || a.model]] as Array<[string, string]>).map(([k, v]) => <div key={k} className="row"><span>{k}</span><b className="tnum">{v}</b></div>)}
     <p style={{ color: "var(--fg3)", fontSize: 12, marginTop: 10 }}>生成类花费以各节点实际调用为准；这里统计的是 Agent 本次对话本身。{ctl.store.state.canvasId ? "" : ""}</p>
-  </div></>);
+  </div></>, "m-sm");
 }
 function ctxPopover(ctl: Ctl, a: AgentState, anchor: Element, b: Array<[string, number]>) {
   const tot = b.reduce((s, x) => s + x[1], 0);
@@ -442,7 +442,7 @@ function micInput(ctl: Ctl, btn: HTMLElement, onText: (t: string) => void) {
 }
 
 /* ---------- 记忆 / 技能 ---------- */
-export function memoryModal(a: AgentState) { openModal(() => <MemoryView a={a} />); }
+export function memoryModal(a: AgentState) { openModal(() => <MemoryView a={a} />, "m-md"); }
 function MemoryView({ a }: { a: AgentState }) {
   useAgent(a); const [tab, setTab] = useState<"user" | "canvas">("user"); const [v, setV] = useState("");
   const list = tab === "user" ? a.memUser : a.memCanvas;
@@ -467,7 +467,7 @@ function SkillsView({ a }: { a: AgentState }) {
     <div className="memadd" style={{ marginTop: 12 }}><button className="btn" onClick={() => uploadSkill(a)}><Icon name="upload" size="s" />上传技能文件</button><button className="btn solid" onClick={() => skillEditor(a)}><Icon name="plus" size="s" />创建技能</button></div>
   </div></>;
 }
-export function skillEditor(a: AgentState, k?: Skill) { openModal(() => <SkillEditor a={a} k={k} />); }
+export function skillEditor(a: AgentState, k?: Skill) { openModal(() => <SkillEditor a={a} k={k} />, "m-md"); }
 function SkillEditor({ a, k }: { a: AgentState; k?: Skill }) {
   const ro = k?.src === "官方"; const [name, setName] = useState(k?.name || ""); const [desc, setDesc] = useState(k?.desc || ""); const [md, setMd] = useState(k?.md || "");
   const save = () => { if (!name.trim() || !desc.trim()) return; const body = md || `---\nname: ${name}\ndescription: ${desc}\n---\n`; if (k) Object.assign(k, { name, desc, md: body, kw: name }); else a.skills.unshift({ name, desc, kw: name, md: body, src: "我的", on: true }); a.saveSkills(k || a.skills[0], true); closeModal(); };

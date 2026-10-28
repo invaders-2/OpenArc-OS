@@ -133,12 +133,12 @@ function CanvasList({ ctl, close }: { ctl: Ctl; close: () => void }) {
 }
 function canvasSettings(ctl: Ctl) {
   const store = ctl.store;
-  openModal(() => <Settings ctl={ctl} />);
+  openModal(() => <Settings ctl={ctl} />, "m-md");
   void store;
 }
 
 /* ---------- 下载画布（整画布导出，见 ../exportCanvas.ts） ---------- */
-function openDownloadCanvas(ctl: Ctl) { openModal((close) => <DownloadCanvas ctl={ctl} close={close} />, "download"); }
+function openDownloadCanvas(ctl: Ctl) { openModal((close) => <DownloadCanvas ctl={ctl} close={close} />, "download m-sm"); }
 function DownloadCanvas({ ctl, close }: { ctl: Ctl; close: () => void }) {
   const store = ctl.store;
   const doc = useS((s) => s.doc); const sel = useS((s) => s.ui.sel);
@@ -228,7 +228,7 @@ function themeMenu(ctl: Ctl, anchor: Element) {
 }
 export function showKeys() {
   const k = [["撤销 / 重做", "⌘Z / ⇧⌘Z"], ["复制 / 粘贴", "⌘C / ⌘V"], ["创建副本", "⌘D"], ["删除", "⌫ / Del"], ["全选", "⌘A"], ["节点搜索", "⌘F"], ["打开 / 收起 Agent", "⌘J"], ["发送生成", "⌘↵"], ["适应画布", "⇧1"], ["放大 / 缩小", "⌘+ / ⌘−"], ["切换深浅色", "⇧⌘L"], ["评论模式", "C"], ["拖动画布", "右键 / 中键 / 空格 + 拖动"], ["微移节点", "方向键（⇧ 10px）"], ["重命名节点", "双击节点标题"], ["框选", "拖动空白（⇧ 追加）"], ["堆叠选中节点", "⇧S"], ["取消 / 关闭", "Esc"]];
-  openModal(() => <><ModalHead title="快捷键" /><div className="mbd"><div className="kbdlist">{k.map(([a, b]) => <div key={a}><span>{a}</span><kbd>{kbd(b)}</kbd></div>)}</div></div></>);
+  openModal(() => <><ModalHead title="快捷键" /><div className="mbd"><div className="kbdlist">{k.map(([a, b]) => <div key={a}><span>{a}</span><kbd>{kbd(b)}</kbd></div>)}</div></div></>, "m-md");
 }
 export function toggleCmt(ctl: Ctl) { const on = !ctl.store.state.ui.cmtMode; ctl.store.setUI({ cmtMode: on }); if (on) ctl.store.toast("点击画布放置评论"); }
 

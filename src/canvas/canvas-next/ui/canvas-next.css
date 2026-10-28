@@ -1516,3 +1516,39 @@
 .cn-root .qa.plan.done .plan-steps li{color:var(--fg2)}
 .cn-root .qa.plan .plan-note{font-size:11.5px;color:var(--fg3);padding-left:26px}
 .cn-root .qa.plan .qa-f .btn{white-space:nowrap;flex:none}
+
+/* ===================================================================
+ * 弹层规范（统一所有子菜单 / 弹窗）——放在文件末尾，覆盖前面各处零散的值
+ *   容器：圆角 12、内边距 4、最小宽 184；默认最宽 296（带说明的菜单），
+ *         模型列表 300，比例 / 色块 / 调色板这类网格按内容。
+ *   文字：分组标题 11 / 500 / fg3；菜单项 13 / 400；说明 11.5 / 400 / fg3；
+ *         快捷键与尾注 11.5 / 400 / fg3；数值 13 / 500（不再用 700）。
+ *   行高：普通项 32，带说明的项约 44；图标底块 24。
+ * =================================================================== */
+.cn-root #pop,.cn-root #ctx{min-width:184px;max-width:min(296px,calc(100vw - 24px));padding:4px;border-radius:12px;}
+.cn-root #pop.palette{max-width:none;}
+.cn-root #pop.vai-pop{width:300px;max-width:min(300px,calc(100vw - 24px));}
+.cn-root #pop.pop-sw{min-width:0;}
+.cn-root #pop.pop-model{min-width:280px;max-width:min(300px,calc(100vw - 24px));}
+.cn-root #pop.pop-add{width:272px;}
+.cn-root .mh{font-size:11px;font-weight:500;line-height:16px;color:var(--fg3);padding:6px 8px 2px;}
+.cn-root .mi{min-height:32px;padding:6px 8px;gap:8px;border-radius:8px;font-size:13px;font-weight:400;line-height:18px;}
+.cn-root .mi .d{font-size:11.5px;font-weight:400;line-height:16px;margin-top:1px;white-space:normal;}
+.cn-root .mi .k{font-size:11.5px;font-weight:400;}
+.cn-root .mi .ic{width:24px;height:24px;border-radius:6px;}
+.cn-root .mi .ic svg{width:14px;height:14px;}
+.cn-root #pop .row,.cn-root #ctx .row{padding:6px 8px;font-size:13px;line-height:18px;gap:12px;}
+.cn-root #pop .row b,.cn-root #pop b.tnum{font-weight:500;}
+.cn-root .msep{margin:4px 8px;}
+.cn-root .seg{padding:2px 4px 6px;}
+.cn-root .seg button{padding:5px 10px;min-width:40px;border-radius:7px;font-size:12px;}
+.cn-root .ratio-grid{padding:2px 4px 6px;gap:4px;}
+.cn-root .ratio-grid button{font-size:11.5px;border-radius:8px;padding:6px 4px;}
+/* 对话框标题统一 15 / 600 */
+.cn-root .mhd{font-size:15px;font-weight:600;}
+/* 对话框三档宽度：小 440（下载、用量、调整像素等表单）；中 560（设置、快捷键、多角度、打光、记忆）；
+   默认 640 留给内容多的（技能管理、搜索）。确认类沿用 rungroup。 */
+.cn-root .modal.m-sm{width:min(440px,100%);}
+.cn-root .modal.m-md{width:min(560px,100%);}
+.cn-root .modal.rungroup{width:min(440px,100%);}
+.cn-root .mbd .row b,.cn-root .mbd b.tnum{font-weight:500;}

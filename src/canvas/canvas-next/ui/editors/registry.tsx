@@ -79,8 +79,8 @@ export function openEditor(ctl: Ctl, kind: string, id: string, anchor?: Element)
   const store = ctl.store; const n = store.node(id); if (!n) return;
   if (kind === "crop") return setEd({ type: "crop", id });
   if (kind === "mask") return setEd({ type: "mask", id, mode: "redraw" });
-  if (kind === "angle") return openModal(() => <AngleModal ctl={ctl} id={id} />);
-  if (kind === "relight") return openModal(() => <RelightModal ctl={ctl} id={id} />);
+  if (kind === "angle") return openModal(() => <AngleModal ctl={ctl} id={id} />, "m-md");
+  if (kind === "relight") return openModal(() => <RelightModal ctl={ctl} id={id} />, "m-md");
   if (kind === "frame") return void captureFrame(store, n, "current");
   if (kind === "cropframe") return void frameThen(ctl, n, "crop");
   if (kind === "eraseframe") return void frameThen(ctl, n, "erase");
@@ -94,7 +94,7 @@ export function openEditor(ctl: Ctl, kind: string, id: string, anchor?: Element)
     <button className="mi" onClick={() => { close(); setEd({ type: "mask", id, mode: "erase" }); }}><Icon name="eraser" size="s" />擦除</button>
     <button className="mi" onClick={() => { close(); setEd({ type: "mask", id, mode: "annot" }); }}><Icon name="annot" size="s" />标注</button>
     <button className="mi" onClick={() => { close(); void runEdit(store, id, "enhance", "增强"); }}><Icon name="zoomin" size="s" />增强<span className="k">2×</span></button>
-    <button className="mi" onClick={() => { close(); openModal(() => <ResizeModal ctl={ctl} id={id} />); }}><Icon name="resize" size="s" />调整像素</button>
+    <button className="mi" onClick={() => { close(); openModal(() => <ResizeModal ctl={ctl} id={id} />, "m-sm"); }}><Icon name="resize" size="s" />调整像素</button>
     <button className="mi" onClick={() => { close(); void runEdit(store, id, "cutout", "抠图"); }}><Icon name="scissors" size="s" />抠图</button>
     <div className="mh">快速切分</div><div className="seg">{[2, 3, 4].map((k) => <button key={k} onClick={() => { close(); void split(ctl, id, k); }}>{k}×{k}</button>)}</div>
   </>);
