@@ -195,14 +195,17 @@ class TaskService {
    * D4 收口 · 注入实际生效额度（bootstrap / executor bundle 传真实配置）。
    * 只影响账本 base / nextGrant；任一缺失回退 BUDGET_BASE，绝不把缺省当成无限。
    */
-  attachBudgetConfig({ modelMaxCalls = null, toolMaxCalls = null, maxToolRounds = null } = {}) {
+  attachBudgetConfig({ modelMaxCalls = null, toolMaxCalls = null, maxToolRounds = null, perTurnAllowance = false } = {}) {
     const pick = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : fallback);
     this.budgetConfig = {
       MODEL_CALLS: pick(modelMaxCalls, BUDGET_BASE.MODEL_CALLS),
       TOOL_CALLS: pick(toolMaxCalls, BUDGET_BASE.TOOL_CALLS),
       TOOL_ROUNDS: pick(maxToolRounds, BUDGET_BASE.TOOL_ROUNDS),
     };
-    return { ok: true, base: Object.assign({}, this.budgetConfig) };
+    // 对话式任务（全局 AI）：每追加一轮就把剩余额度补回一份 base，并让续接上限按轮计算。
+    // 默认关闭，其他装配保持"追加不改账本"的原有语义。
+    this.perTurnAllowance = perTurnAllowance === true;
+    return { ok: true, base: Object.assign({}, this.budgetConfig), perTurnAllowance: this.perTurnAllowance };
   }
 
   // ------------------------------------------------------------------ Task
@@ -822,7 +825,17 @@ class TaskService {
     if (!task) return Object.assign(base, { reason: RESUME_REASON.NOT_BLOCKED });
     const runs = this.store.harnessRunsOfTask(task.task_id);
     const steps = this.store.stepsOfTask(task.task_id);
-    const grants = this.#budgetGrantEvents(task.task_id);
+    let grants = this.#budgetGrantEvents(task.task_id);
+    if (this.perTurnAllowance) {
+      // 按轮计算续接次数：只数最后一次"新一轮补额"事件之后的续接授权（按事件写入顺序）。
+      const ordered = this.store.eventsOfTask(task.task_id);
+      let lastTurnIdx = -1;
+      ordered.forEach((e, i) => { if (e.event_type === TASK_EVENT.TASK_BUDGET_TURN_GRANTED) lastTurnIdx = i; });
+      if (lastTurnIdx >= 0) {
+        const after = new Set(ordered.slice(lastTurnIdx + 1).filter((e) => e.event_type === TASK_EVENT.TASK_BUDGET_GRANTED).map((e) => e.event_id));
+        grants = grants.filter((g) => after.has(g.eventId));
+      }
+    }
     const exhaust = this.#budgetExhaustEvents(task.task_id);
     const lastRun = runs.length ? runs[runs.length - 1] : null;
     const lastStep = steps.length ? steps[steps.length - 1] : null;
@@ -1207,7 +1220,21 @@ class TaskService {
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_STARTED, safePayload: sanitizeEventPayload({ revision: updatedTask.revision, appended: true, appendIndex: assessment.appendIndex }), at: now });
       this.#audit(guard, context, "task.appendStep", task.task_id);
       // 账本只惰性补缺失行；已有 authorized/consumed 一律原样返回，绝不抬升/清零。
-      const kinds = this.#ensureBudgetRows(task, now);
+      let kinds = this.#ensureBudgetRows(task, now);
+      // 例外：显式开启 perTurnAllowance 的对话式装配，每轮补足到一份 base（只抬升 authorized，绝不清零 consumed）。
+      if (this.perTurnAllowance) {
+        const topped = {};
+        for (const kind of BUDGET_KIND_ALL) {
+          const row = kinds[kind];
+          const base = this.#grantBase(kind);
+          if (row.remaining >= base) continue;
+          const authorized = row.consumed + base;
+          this.store.upsertTaskBudget({ taskId: task.task_id, kind, authorized, consumed: row.consumed, updatedAt: now });
+          topped[kind] = { from: row.authorized, to: authorized };
+        }
+        this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_BUDGET_TURN_GRANTED, at: now, safePayload: sanitizeEventPayload({ stepId: step.step_id, appendIndex: assessment.appendIndex, topped }) });
+        kinds = this.#budgetKinds(task.task_id);
+      }
       return { ok: true, task: safeTask(updatedTask), step: safeStep(step), appendIndex: assessment.appendIndex, remaining: this.#remainingOf(kinds) };
     });
   }

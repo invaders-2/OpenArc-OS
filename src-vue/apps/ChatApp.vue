@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, CircleAlert, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Paperclip, RotateCcw, ShieldQuestion, Sparkles, Square, SquarePen, Wrench } from "lucide-vue-next";
+import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, Circle, CircleAlert, CircleDot, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Paperclip, RotateCcw, ShieldQuestion, Sparkles, Square, SquarePen, Wrench } from "lucide-vue-next";
 import ResourcePicker from "./ResourcePicker.vue";
 import { useShellStore } from "../stores/shell";
 
@@ -45,6 +45,16 @@ const selectedModelId = ref("");
 const modelError = ref("");
 const approvals = ref<Approval[]>([]);
 const approvalError = ref("");
+/** 运行中的实时进度（只给界面看，不落库）：流式文字、当前计划、正在用的工具。 */
+type PlanItem = { content: string; status: "pending" | "in_progress" | "completed" };
+const live = ref<{ taskId: string; text: string; plan: PlanItem[]; tool: string } | null>(null);
+function onProgress(ev: any) {
+  if (!ev || ev.taskId !== currentId.value) return;
+  const cur = live.value && live.value.taskId === ev.taskId ? live.value : { taskId: ev.taskId, text: "", plan: [], tool: "" };
+  if (ev.kind === "text" && typeof ev.text === "string") live.value = { ...cur, text: (cur.text + ev.text).slice(-20000), tool: "" };
+  else if (ev.kind === "plan" && Array.isArray(ev.items)) live.value = { ...cur, plan: ev.items };
+  else if (ev.kind === "tool" && typeof ev.name === "string") live.value = { ...cur, tool: ev.name };
+}
 let off: (() => void) | null = null;
 let offApproval: (() => void) | null = null;
 let poll = 0;
@@ -131,6 +141,7 @@ const toolTone = (status: string) => (status === "执行完成" ? "ok" : status 
 type Turn = {
   key: string; ask: string; answer: string; pending: boolean; failed: boolean; tools: any[]; doneAt: number;
   askAt: number; answerAt: number; summary: string; dur: string; rows: WorkRow[]; nodes: NodeRef[]; media: MediaRef[];
+  plan: PlanItem[];
 };
 /** 每一轮 = 用户提问 + 这一轮的工具步骤 + 助手回答；工具/事件按时间归到它之后第一个产出回答的轮次。 */
 const turns = computed<Turn[]>(() => {
@@ -147,12 +158,12 @@ const turns = computed<Turn[]>(() => {
       // 真实消息时间：用户侧用这一步的 createdAt（没有就退回任务创建时间），助手侧用产物时间
       askAt: Number((s as any).createdAt) || (i === 0 ? Number(d.task.createdAt) || 0 : 0),
       answerAt: last ? Number(last.createdAt) || 0 : 0,
-      summary: "", dur: "", rows: [], nodes: [], media: [],
+      summary: "", dur: "", rows: [], nodes: [], media: [], plan: [],
     };
   });
   if (!rows.length) rows.push({
     key: "goal", ask: d.task.goal, answer: running(d.task.status) ? "" : STATUS[d.task.status] ?? "", pending: running(d.task.status), failed: false, tools: [],
-    doneAt: Infinity, askAt: Number(d.task.createdAt) || 0, answerAt: Number(d.task.updatedAt) || 0, summary: "", dur: "", rows: [], nodes: [], media: [],
+    doneAt: Infinity, askAt: Number(d.task.createdAt) || 0, answerAt: Number(d.task.updatedAt) || 0, summary: "", dur: "", rows: [], nodes: [], media: [], plan: [],
   });
   for (const card of toolCards.value) {
     const target = rows.find((r) => card.at <= r.doneAt) || rows[rows.length - 1];
@@ -164,7 +175,13 @@ const turns = computed<Turn[]>(() => {
     const target = rows.find((r) => at <= r.doneAt) || rows[rows.length - 1];
     for (const n of nodeRefsIn((e as any).safePayload)) if (!target.nodes.some((x) => x.id === n.id)) target.nodes.push(n);
     for (const m of mediaRefsIn((e as any).safePayload)) if (!target.media.some((x) => x.url === m.url)) target.media.push(m);
+    // 这一轮最后一次计划（todo_write）：后一条覆盖前一条
+    if (e.eventType === "harness.plan" && Array.isArray(e.safePayload?.items)) target.plan = e.safePayload.items;
   }
+  // 运行中：用实时推送的计划（比落库的更新）
+  const lv = live.value;
+  const tail = rows[rows.length - 1];
+  if (lv && lv.taskId === d.task.taskId && tail && tail.pending && lv.plan.length) tail.plan = lv.plan;
   for (const r of rows) {
     r.summary = r.tools.length ? summarize(r.tools) : "";
     const start = r.tools.length ? Math.min(...r.tools.map((t) => Number(t.at) || r.askAt || Infinity)) : 0;
@@ -202,9 +219,13 @@ const toolNameOf = (p: any) => {
 const toolCards = computed(() => {
   const evs = detail.value?.events || [];
   const byKey = new Map<string, { key: string; title: string; toolId: string; status: string; detail: string; rank: number; sequence: number; at: number }>();
+  // todo_write 是助手自己的计划清单（已显示成计划卡片）：它的提议和后续更新都不算工具步骤
+  const planCalls = new Set(evs.filter((e) => e.safePayload?.toolId === "todo_write" || e.safePayload?.name === "todo_write").map((e) => String(e.safePayload?.toolCallId || "")).filter(Boolean));
   for (const e of evs) {
     if (!/^(tool\.|harness\.tool|harness\.permission)/.test(e.eventType)) continue;
     const p = e.safePayload || {};
+    // todo_write 是助手自己的计划清单，已经显示成计划卡片，不算工具步骤
+    if (p.toolId === "todo_write" || p.name === "todo_write" || (p.toolCallId && planCalls.has(String(p.toolCallId)))) continue;
     const title = toolNameOf(p);
     // tool-69 的 safe toolId/toolName 优先；没有 proposalId 时用 eventId，绝不把 12 个提议折叠成一个。
     const key = String(p.proposalId || p.toolCallId || p.executionId || (p.toolId ? p.toolId + ":" + e.eventId : e.eventId));
@@ -443,13 +464,15 @@ function markdown(src: string): string {
   }
   return out || "<p>" + inlineMarkdown(text) + "</p>";
 }
-function select(id: string | null) { currentId.value = id; detail.value = null; error.value = ""; if (id) void loadDetail(id); }
+const planDone = (plan: PlanItem[]) => plan.filter((x) => x.status === "completed").length;
+const liveFor = (turn: Turn) => (turn.pending && live.value && live.value.taskId === currentId.value ? live.value : null);
+function select(id: string | null) { currentId.value = id; detail.value = null; error.value = ""; live.value = null; if (id) void loadDetail(id); }
 function newSession() { select(null); draft.value = ""; error.value = ""; modelError.value = ""; }
 async function send() {
   const text = draft.value.trim(); if (!text || sending.value || !taskBridge) return;
   // 夹具模式（e2e）：只记录这次发送，绝不下发到任何后端
   if (fixtureMode) { lastSent.value = text; draft.value = ""; flash("已发送（夹具模式：不会发给任何后端）"); return; }
-  sending.value = true; error.value = ""; const id = currentId.value;
+  sending.value = true; error.value = ""; const id = currentId.value; live.value = null;
   const r = id ? await taskBridge.command({ command: "task/appendStep", payload: { taskId: id, goal: text } }).catch(() => null) : await taskBridge.command({ command: "task/run", payload: { goal: text } }).catch(() => null);
   sending.value = false;
   if (!r?.ok) { error.value = errText(r?.error) + (r?.detail ? "（" + String(r.detail).slice(0, 160) + "）" : ""); return; }
@@ -476,7 +499,8 @@ onMounted(async () => {
   await Promise.all([loadList(), loadModels(), loadApprovals()]);
   off = taskBridge?.onEvent((ev: any) => {
     if (!ev) return;
-    if (ev.type === "task/result") { void loadList(); if (ev.taskId === currentId.value) void loadDetail(); }
+    if (ev.type === "task/result") { void loadList(); if (ev.taskId === currentId.value) { live.value = null; void loadDetail(); } }
+    else if (ev.type === "task/progress") onProgress(ev);
     else if (ev.type === "task/event" && ev.taskId === currentId.value) mergeEvents(ev.events);
   }) ?? null;
   offApproval = sideEffectBridge?.onEvent?.((ev: any) => { if (ev?.type === "sideEffect/approvalRequested") { if (ev.request) approvals.value = [ev.request, ...approvals.value.filter((a) => a.approvalRequestId !== ev.request.approvalRequestId)]; else void loadApprovals(); } }) ?? null;
@@ -566,6 +590,18 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); })
                 <div class="chat-msg chat-msg-ai" data-role="assistant" data-chat-message="assistant" :class="{ pending: turn.pending, failed: turn.failed }">
                   <span class="chat-orb" aria-hidden="true" />
                   <div class="chat-bubble">
+                    <!-- 计划卡片：助手用 todo_write 列出的步骤，运行中实时更新 -->
+                    <section v-if="turn.plan.length" class="chat-plan" data-chat-plan>
+                      <header class="chat-plan-head"><ListChecks :size="14" /><span>计划</span><small data-chat-plan-progress>{{ planDone(turn.plan) }} / {{ turn.plan.length }}</small></header>
+                      <ol class="chat-plan-items">
+                        <li v-for="(it, i) in turn.plan" :key="i" :data-chat-plan-item="it.status" :class="it.status">
+                          <Check v-if="it.status === 'completed'" :size="13" class="chat-plan-ic" />
+                          <CircleDot v-else-if="it.status === 'in_progress'" :size="13" class="chat-plan-ic" />
+                          <Circle v-else :size="13" class="chat-plan-ic" />
+                          <span>{{ it.content }}</span>
+                        </li>
+                      </ol>
+                    </section>
                     <!-- 中间过程组：一行摘要句 + 耗时 + chevron；展开是左侧竖线 + 缩进明细（13px） -->
                     <div v-if="turn.tools.length" class="chat-working" data-chat-tools :data-open="openTurns.has(turn.key) ? '1' : '0'">
                       <button type="button" class="chat-working-head" :aria-expanded="openTurns.has(turn.key)" @click="toggleTurn(turn.key)">
@@ -584,7 +620,11 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); })
                       </ol>
                       </Transition>
                     </div>
-                    <span v-if="turn.pending" class="chat-typing"><i /><i /><i /><span class="chat-caret" /></span>
+                    <template v-if="turn.pending">
+                      <p v-if="liveFor(turn)?.tool" class="chat-live-tool" data-chat-live-tool><Wrench :size="12" /> 正在{{ toolLabel(liveFor(turn)!.tool) }}…</p>
+                      <div v-if="liveFor(turn)?.text" class="chat-md chat-md-live" data-chat-live-text v-html="markdown(liveFor(turn)!.text)" />
+                      <span v-else class="chat-typing"><i /><i /><i /><span class="chat-caret" /></span>
+                    </template>
                     <div v-else class="chat-md" data-chat-markdown v-html="markdown(turn.answer)" />
                     <div v-if="!turn.pending && turn.nodes.length" class="chat-chips" data-chat-nodes>
                       <button v-for="n in turn.nodes" :key="n.id" type="button" class="chat-nodechip" :data-chat-node="n.id" :title="'在画布中定位：' + n.title" @click="focusNode(n)"><Layers :size="12" /><span>{{ n.title }}</span></button>
@@ -686,6 +726,20 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); })
 
 <style scoped>
 .chat-side { width: 260px; }
+.chat-plan { margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.02); }
+.chat-plan-head { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--muted); margin-bottom: 4px; }
+.chat-plan-head span { font-weight: var(--fw-medium); color: var(--text); }
+.chat-plan-head small { margin-left: auto; font-variant-numeric: tabular-nums; }
+.chat-plan-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-secondary); }
+.chat-plan-items li { display: flex; align-items: flex-start; gap: 6px; line-height: 1.45; }
+.chat-plan-ic { flex: none; margin-top: 3px; color: var(--muted); }
+.chat-plan-items li.completed { color: var(--muted); }
+.chat-plan-items li.completed span { text-decoration: line-through; text-decoration-color: rgb(var(--text-rgb) / 0.3); }
+.chat-plan-items li.completed .chat-plan-ic { color: var(--success, #2f9e5b); }
+.chat-plan-items li.in_progress { font-weight: var(--fw-medium); }
+.chat-plan-items li.in_progress .chat-plan-ic { color: var(--accent); }
+.chat-live-tool { display: flex; align-items: center; gap: 5px; margin: 0 0 4px; font-size: var(--fs-caption); color: var(--muted); }
+.chat-md-live { opacity: 0.92; }
 .chat-side-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .chat-search { flex: 1; min-width: 0; }
 .chat-icon-btn { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-md); color: var(--muted); }

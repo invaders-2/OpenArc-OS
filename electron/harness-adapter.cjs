@@ -192,8 +192,41 @@ function buildManagedToolProfile({ dshHome, manifest }) {
   return { profileDir, manifestPath };
 }
 
+/**
+ * 按模型名估上下文窗口 / 单次输出上限（模型配置里没有这项元数据）。
+ * 估低只会让压缩提前发生；估高会让上游报超长，所以未知模型取保守值。
+ */
+const MODEL_LIMITS = Object.freeze([
+  [/claude/i, 200000, 8192],
+  [/gemini/i, 200000, 8192],
+  [/deepseek|qwen|qwq|glm|kimi|moonshot|doubao|seed|minimax|mistral|llama|grok|ernie|hunyuan|step/i, 128000, 8192],
+  [/gpt-5|gpt-4\.1|gpt-4o|o[134](-|$)/i, 128000, 8192],
+]);
+const DEFAULT_MODEL_LIMITS = Object.freeze({ contextWindow: 65536, maxTokens: 8192 });
+function modelLimits(modelId) {
+  const id = String(modelId || "");
+  for (const [re, contextWindow, maxTokens] of MODEL_LIMITS) if (re.test(id)) return { contextWindow, maxTokens };
+  return { ...DEFAULT_MODEL_LIMITS };
+}
+
+/** YAML 单行字符串（单引号转义），只用于 OpenArc 自己写的 persona 文本。 */
+/** 计划条目只保留 content / status，限长限量（模型写的文字，按普通输出对待）。 */
+const PLAN_STATUSES = new Set(["pending", "in_progress", "completed"]);
+function safePlan(entries) {
+  const out = [];
+  for (const e of Array.isArray(entries) ? entries.slice(0, 20) : []) {
+    if (!e || typeof e !== "object") continue;
+    const content = typeof e.content === "string" ? e.content.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+    if (!content) continue;
+    out.push({ content, status: PLAN_STATUSES.has(e.status) ? e.status : "pending" });
+  }
+  return out;
+}
+
+function yamlQuote(text) { return "'" + String(text).replace(/[\r\n]+/g, " ").replace(/'/g, "''") + "'"; }
+
 /** OpenArc 管理的 ACP profile patch：ACP stdio ON，模型走 OpenArc，其它全部关。 */
-function buildAcpPatch() {
+function buildAcpPatch({ contextWindow = 32768, maxTokens = 4096, persona = null, planTool = false } = {}) {
   const disabled = [
     "llm-deepseek", "llm-retry", "session-telemetry-otel",
     "web", "web-search-deepseek", "web-fetch-http",
@@ -219,8 +252,8 @@ function buildAcpPatch() {
     "        models:",
     "          - id: openarc-task-model",
     "            name: OpenArc Task Model",
-    "            contextWindow: 32768",
-    "            maxTokens: 4096",
+    "            contextWindow: " + Math.max(8192, Math.floor(Number(contextWindow) || 32768)),
+    "            maxTokens: " + Math.max(1024, Math.floor(Number(maxTokens) || 4096)),
     "            input:",
     "              - text",
     "- id: agent-default-model",
@@ -231,8 +264,16 @@ function buildAcpPatch() {
     "  config:",
     "    provider: openarc",
     "    model: openarc-task-model",
-    ""
   );
+  if (persona) {
+    // 全局 AI：把 dsh 默认的"coding agent / 工作目录"人设换成 OpenArc 助手（随会话保留，压缩后也在）。
+    lines.push("- id: system-prompt", "  config:", "    personaPrefix: " + yamlQuote(persona), "    personaSuffix: ''");
+  }
+  if (planTool) {
+    // 全局 AI：打开 dsh 自带的 todo_write（只改会话里的任务清单，不碰文件 / 网络），多步任务先列计划再执行。
+    lines.push("- id: tool-todo", "  disabled: false");
+  }
+  lines.push("");
   return lines.join("\n");
 }
 
@@ -262,6 +303,7 @@ class HarnessAdapter {
     this.dshHome = null;
     this.workspace = null;
     this.events = [];
+    this.listeners = new Set();
     this.permissions = [];
     this.started = false;
     this.processExited = false;
@@ -301,7 +343,7 @@ class HarnessAdapter {
   }
 
   async #runStartup(options, deadlineAt) {
-    const { context, modelConfigId, modelConfigVersion = null, maxCalls = 4, ttlMs = 120000, workspace = null, requestId = null, toolFacade = null, memory = null } = options;
+    const { context, modelConfigId, modelConfigVersion = null, maxCalls = 4, ttlMs = 120000, workspace = null, requestId = null, toolFacade = null, memory = null, session = null, persona = null, planTool = false } = options;
     if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found in runtime " + this.runtime);
     if (!this.sdkPath) throw harnessError(HARNESS_ERROR.NOT_STARTED, "ACP SDK not found");
     // dispose 之后不再复用同一实例（启动、签发能力、spawn 子进程全部拒绝）。
@@ -309,13 +351,18 @@ class HarnessAdapter {
     const cap = this.modelProxy.issueCapability({ context, configId: modelConfigId, allowedCapabilities: ["chat"], maxCalls, ttlMs, expectedModelConfigVersion: modelConfigVersion });
     if (!cap.ok) { const e = harnessError(cap.error === "MODEL_CONFIG_UNAVAILABLE" ? HARNESS_ERROR.NOT_STARTED : cap.error); throw e; }
     this.capability = { capabilityId: cap.capability.capabilityId, token: cap.capability.token, maxCalls: cap.capability.maxCalls, modelConfigId: cap.capability.modelConfigId, modelConfigVersion: cap.capability.modelConfigVersion };
+    this.limits = modelLimits(cap.capability.modelId);
 
     this.bridge = new HarnessModelAdapter({ modelProxy: this.modelProxy, logger: this.logger, clock: this.clock, expectedToken: this.capability.token, requestId, memory });
     this.modelRequestId = requestId;
     await this.bridge.start();
 
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d4-02b-"));
+    // 会话目录：给了 session.root 就用这个持久目录（同一对话跨轮复用 dsh 会话），否则每个 run 一个临时目录。
+    const persistentRoot = session && typeof session.root === "string" && session.root ? path.resolve(session.root) : null;
+    if (persistentRoot) fs.mkdirSync(persistentRoot, { recursive: true, mode: 0o700 });
+    const root = persistentRoot || fs.mkdtempSync(path.join(os.tmpdir(), "oa-d4-02b-"));
     this.root = root;
+    this.persistentRoot = !!persistentRoot;
     this.dshHome = path.join(root, "dsh-home");
     this.workspace = workspace || path.join(root, "workspace");
     fs.mkdirSync(this.dshHome, { recursive: true, mode: 0o700 });
@@ -339,7 +386,7 @@ class HarnessAdapter {
     let args = this.dshArgs;
     if (!args) {
       const patchPath = path.join(root, "openarc-acp.yml");
-      fs.writeFileSync(patchPath, buildAcpPatch(), { mode: 0o600 });
+      fs.writeFileSync(patchPath, buildAcpPatch({ ...this.limits, persona, planTool }), { mode: 0o600 });
       args = profileArgs ? [...profileArgs, "--patch", patchPath] : ["--profile", "acp", "--patch", patchPath];
     }
     // task-66：不用 shebang（GUI 最小 PATH 无 node 会 127），显式用运行时自带 Node。
@@ -360,7 +407,7 @@ class HarnessAdapter {
     this.conn = new ClientSideConnection(() => client, stream);
 
     let init;
-    let session;
+    let started = null;
     try {
       init = await this.#withDeadline(
         this.conn.initialize({ protocolVersion: ACP_PROTOCOL_VERSION, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } } }),
@@ -369,10 +416,26 @@ class HarnessAdapter {
       this.#assertNotInterrupted(HARNESS_ERROR.START_TIMEOUT);
       if (Number(init.protocolVersion) !== ACP_PROTOCOL_VERSION) throw harnessError(HARNESS_ERROR.PROTOCOL_UNSUPPORTED, "agent protocolVersion=" + init.protocolVersion);
       this.agentInfo = init.agentInfo || null;
-      session = await this.#withDeadline(
-        this.conn.newSession({ cwd: this.workspace, mcpServers: [], additionalDirectories: [] }),
-        deadlineAt, HARNESS_ERROR.START_TIMEOUT
-      );
+      const resumeId = session && typeof session.resumeSessionId === "string" && session.resumeSessionId ? session.resumeSessionId : null;
+      this.resumed = false;
+      if (resumeId && persistentRoot && typeof this.conn.resumeSession === "function") {
+        // 接着上一轮的 dsh 会话（历史与压缩状态都在会话目录里）；恢复不了就开新会话，绝不让这一轮失败。
+        try {
+          await this.#withDeadline(this.conn.resumeSession({ sessionId: resumeId, cwd: this.workspace, mcpServers: [] }), deadlineAt, HARNESS_ERROR.START_TIMEOUT);
+          this.resumed = true;
+          started = { sessionId: resumeId };
+        } catch (e) {
+          if (e && e.code === HARNESS_ERROR.START_TIMEOUT) throw e;
+          this.#assertNotInterrupted(HARNESS_ERROR.START_TIMEOUT);
+          try { this.logger?.log?.({ event: "harness.session.resume_failed", detail: String((e && e.message) || e).slice(0, 200) }); } catch { /* ignore */ }
+        }
+      }
+      if (!started) {
+        started = await this.#withDeadline(
+          this.conn.newSession({ cwd: this.workspace, mcpServers: [], additionalDirectories: [] }),
+          deadlineAt, HARNESS_ERROR.START_TIMEOUT
+        );
+      }
     } catch (e) {
       if (e && e.code) throw e;
       this.protocolError = true;
@@ -386,8 +449,8 @@ class HarnessAdapter {
     this.#assertNotInterrupted(HARNESS_ERROR.START_TIMEOUT);
     // 启动段内子进程死亡：按真实原因收敛，绝不把「没有 session 的成功」交给编排器。
     if (this.processExited) throw harnessError(HARNESS_ERROR.PROCESS_EXITED);
-    if (!session || !session.sessionId) throw harnessError(HARNESS_ERROR.PROTOCOL_ERROR, "session/new 未返回 sessionId");
-    this.sessionId = session.sessionId;
+    if (!started || !started.sessionId) throw harnessError(HARNESS_ERROR.PROTOCOL_ERROR, "session/new 未返回 sessionId");
+    this.sessionId = started.sessionId;
     return {
       sessionId: this.sessionId,
       dshHome: this.dshHome,
@@ -401,6 +464,9 @@ class HarnessAdapter {
       agentInfo: this.agentInfo,
       toolExecutionMode: toolFacade ? "facade" : "openarc",
       toolCapabilityId: this.toolCapability ? this.toolCapability.capabilityId : null,
+      resumed: !!this.resumed,
+      persistent: this.persistentRoot,
+      contextWindow: this.limits ? this.limits.contextWindow : null,
     };
   }
 
@@ -424,9 +490,27 @@ class HarnessAdapter {
       ev.kind = u.kind || null;
       ev.rawInput = u.rawInput && typeof u.rawInput === "object" ? u.rawInput : null;
     }
-    else if (raw === "plan") { ev.type = "plan"; }
+    else if (raw === "plan") { ev.type = "plan"; ev.plan = safePlan(Array.isArray(u.entries) ? u.entries : []); }
     else if (raw === "usage_update") { ev.type = "usage"; ev.usage = u.usage || null; }
     this.events.push(ev);
+    // dsh 的 todo_write 不发 ACP plan 更新，这里把它的清单转成一条 plan 事件，界面统一按计划显示。
+    if (raw === "tool_call" && ev.title === "todo_write" && ev.rawInput && Array.isArray(ev.rawInput.todos)) {
+      const planEv = { type: "plan", at: ev.at, raw: "plan", plan: safePlan(ev.rawInput.todos), source: "todo_write" };
+      this.events.push(planEv);
+      this.#notify(planEv);
+    }
+    this.#notify(ev);
+  }
+
+  /** 运行中的进度订阅（计划 / 工具 / 文本片段），只给界面看，不落库。返回取消订阅函数。 */
+  subscribe(fn) {
+    if (typeof fn !== "function") return () => {};
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  #notify(ev) {
+    for (const fn of this.listeners) { try { fn(ev); } catch { /* 订阅方出错不影响 run */ } }
   }
 
   #withTimeout(promise, ms, code) { return this.#withDeadline(promise, this.#now() + Math.max(1, ms), code); }
@@ -487,7 +571,8 @@ class HarnessAdapter {
       }
       try { await this.bridge?.stop(); } catch { /* ignore */ }
       this.bridge = null;
-      if (!this.keepTemp && this.root) { try { fs.rmSync(this.root, { recursive: true, force: true }); } catch { /* ignore */ } }
+      // 持久会话目录留给下一轮恢复；只删每个 run 自己的临时目录。
+      if (!this.keepTemp && this.root && !this.persistentRoot) { try { fs.rmSync(this.root, { recursive: true, force: true }); } catch { /* ignore */ } }
       return { ok: true, exited: this.processExited, exitCode: this.exitCode, protocolError: this.protocolError };
     })();
     if (!this._teardownPromise) this._teardownPromise = dispose().catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
@@ -631,4 +716,4 @@ class HarnessAdapter {
   }
 }
 
-module.exports = { HarnessAdapter, HARNESS_ERROR, DSH_RUNTIME_ERROR, ACP_PROTOCOL_VERSION, resolveDshRuntime, resolveDshBin, resolveDshNode, resolveAcpSdk, dshVersion, buildHarnessEnv, buildDshSpawn, buildAcpPatch, buildManagedToolProfile, MANAGED_TOOL_PROFILE, TOOL_FACADE_BUNDLE };
+module.exports = { HarnessAdapter, HARNESS_ERROR, modelLimits, MODEL_LIMITS, DSH_RUNTIME_ERROR, ACP_PROTOCOL_VERSION, resolveDshRuntime, resolveDshBin, resolveDshNode, resolveAcpSdk, dshVersion, buildHarnessEnv, buildDshSpawn, buildAcpPatch, safePlan, buildManagedToolProfile, MANAGED_TOOL_PROFILE, TOOL_FACADE_BUNDLE };
