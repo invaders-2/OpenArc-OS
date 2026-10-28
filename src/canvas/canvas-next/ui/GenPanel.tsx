@@ -23,6 +23,7 @@ import { draftToFinal, smartClip, trimToNode } from "../videoTools";
 import { videoAiMenu } from "./VideoTools";
 import type { CanvasStore } from "../store";
 import { kbd } from "../keys";
+import { ModelMenu } from "./ModelMenu";
 
 export function SelectionUI() {
   const ctl = useCtl(); const ui = useS((s) => s.ui); const doc = useS((s) => s.doc); useS((s) => s.view); const runtime = useS((s) => s.runtime);
@@ -407,16 +408,9 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   const set = (patch: Record<string, unknown>) => store.patchGen(node.id, (gg) => ({ params: { ...gg.params, ...patch } as typeof gg.params }));
   if (k === "model") {
     const list = store.modelsOf(kind);
-    return openPop(anchor, (close) => <>
-      <div className="mh">{TYPE_LABEL[kind]}模型 · 来自 设置 › 模型</div>
-      {list.map((x) => <button key={x.id} className={"mi" + (x.id === cur().m?.id ? " on" : "")} data-v={x.id} onClick={() => { close(); store.rememberModel(kind, x.id); store.patchGen(node.id, (gg) => ({ params: clampParams(kind, gg.params, x) })); if (kind === "video") afterInputsChanged(store, node.id); }}>
-        <span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{x.name}{x.tags.map((t) => <span key={t} className={"tag" + (t === "NEW" ? " new" : "")}>{t}</span>)}{x.specSource === "guess" ? <span className="tag" data-spec-source="guess" title="服务商没有提供该模型的参数规格，下面的比例 / 档位 / 选项是按模型名推断的，以实际生成为准">未验证</span> : null}</span>
-          {kind === "video" ? <span className="mtags">{x.res?.length && !x.tags.some((t) => t.toLowerCase() === x.res![x.res!.length - 1].toLowerCase()) ? <span className="tag">{x.res[x.res.length - 1]}</span> : null}{x.durs?.length ? <span className="tag tnum">{Math.min(...x.durs) === Math.max(...x.durs) ? x.durs[0] + "S" : Math.min(...x.durs) + "-" + Math.max(...x.durs) + "S"}</span> : null}{x.audio ? <span className="tag"><Icon name="audio" size="xs" /></span> : null}<span className="tag">{(x.modes || []).length} 种方式</span></span> : null}
-          <span className="d">{x.vendor}{kind === "image" ? ` · ${x.i2i ? "最多 " + x.maxRefs + " 张参考图" : "仅文生图"}` : kind === "video" ? "" : kind === "text" ? (x.vision ? " · 能读图" : " · 只读文字") : ""}</span></span>
-      </button>)}
-      {!list.length ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>还没有配置{TYPE_LABEL[kind]}模型</span></div> : null}
-      {ctl.host.openModelSettings ? <><div className="msep" /><button className="mi" onClick={() => { close(); ctl.host.openModelSettings!(); }}><Icon name="settings" size="s" />模型设置</button></> : null}
-    </>, "up", "left", "pop-model");
+    return openPop(anchor, (close) => <ModelMenu kind={kind} list={list} currentId={cur().m?.id} close={close}
+      onPick={(x) => { store.rememberModel(kind, x.id); store.patchGen(node.id, (gg) => ({ params: clampParams(kind, gg.params, x) })); if (kind === "video") afterInputsChanged(store, node.id); }}
+      onSettings={ctl.host.openModelSettings ? () => ctl.host.openModelSettings!() : undefined} />, "up", "left", "pop-model");
   }
   const { m } = cur();
   // 没配置模型：仍把同一套控件渲染出来（灰显），顶部保留引导 + 「打开模型设置」；有模型时行为不变。

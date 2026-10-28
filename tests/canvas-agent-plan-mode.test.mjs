@@ -51,3 +51,9 @@ test("画布助手可以切换对话模型：走模型服务的 defaults/set，�
   // 任务提交里仍然不带模型：模型由后台按默认解析
   assert.doesNotMatch(panel, /runAgentTask\(\{[^}]*modelConfigId/);
 });
+
+test("模型选择弹层：节点和画布助手用同一个组件", () => {
+  assert.match(read("src/canvas/canvas-next/ui/GenPanel.tsx"), /<ModelMenu kind=\{kind\}/);
+  assert.match(read("src/canvas/tapnow/AgentPanel.tsx"), /<ModelMenu kind="text"/);
+  assert.match(read("src/canvas/canvas-next/ui/canvas-next.css"), /弹层规范（统一所有子菜单 \/ 弹窗）/);
+});

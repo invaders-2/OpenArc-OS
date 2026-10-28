@@ -1552,3 +1552,15 @@
 .cn-root .modal.m-md{width:min(560px,100%);}
 .cn-root .modal.rungroup{width:min(440px,100%);}
 .cn-root .mbd .row b,.cn-root .mbd b.tnum{font-weight:500;}
+/* 弹层规范补充：/ 技能面板、@ 引用面板、二级菜单返回行、色块 */
+.cn-root #pop.palette{padding:4px;}
+.cn-root .pal-s{height:32px;margin:0 0 4px;border-radius:8px;font-size:13px;}
+.cn-root .pal-row{padding:6px 8px;border-radius:8px;font-size:13px;line-height:18px;min-height:32px;}
+.cn-root .pal-row b{font-weight:500;}
+.cn-root .pal-row .pd{font-size:11.5px;color:var(--fg3);}
+.cn-root .pal-row .src{font-size:11.5px;}
+.cn-root .pal-row .ic{width:24px;height:24px;border-radius:6px;}
+.cn-root .mi.back{font-weight:500;}
+.cn-root #pop.pop-sw{padding:4px;}
+/* 尾注（各处内联写的 12px 灰字）统一到 11.5 */
+.cn-root #pop .row[style*="font-size: 12px"]{font-size:11.5px !important;}

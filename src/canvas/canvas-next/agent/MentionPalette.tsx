@@ -4,6 +4,9 @@ import { title } from "../actions";
 import { Icon } from "../ui/Icon";
 import { listAgentReferences, type AgentReference } from "./references";
 
+/** 节点类型显示中文（之前直接显示 image / text） */
+const KIND_NAME: Record<string, string> = { image: "图片", video: "视频", text: "文本", audio: "音频", table: "多维表格", group: "分组", note: "便签", model3d: "3D", scene3d: "3D 片场", timeline: "剪辑时间线", stack: "堆叠" };
+
 type Choice = { id: string; group: string; title: string; detail: string; node?: CanvasNode; ref?: AgentReference };
 
 export function MentionPalette({ nodes, onNode, onRef }: { nodes: CanvasNode[]; onNode: (node: CanvasNode) => void; onRef: (ref: AgentReference) => void }) {
@@ -13,7 +16,7 @@ export function MentionPalette({ nodes, onNode, onRef }: { nodes: CanvasNode[]; 
   useEffect(() => { let live = true; void listAgentReferences().then((r) => { if (!live) return; setRefs([...r.apps, ...r.assets]); setError(r.errors.join("；")); setLoading(false); }); return () => { live = false; }; }, []);
   const choices = useMemo<Choice[]>(() => {
     const kw = q.trim().toLocaleLowerCase();
-    const nodeChoices = nodes.map((node) => ({ id: "node:" + node.id, group: "画布节点", title: title(node), detail: node.kind, node }));
+    const nodeChoices = nodes.map((node) => ({ id: "node:" + node.id, group: "画布节点", title: title(node), detail: KIND_NAME[node.kind] || "节点", node }));
     return [...nodeChoices, ...refs.map((ref) => ({ id: ref.id, group: ref.group, title: ref.title, detail: ref.detail || ref.kind, ref }))].filter((item) => !kw || (item.title + item.detail + item.group).toLocaleLowerCase().includes(kw)).slice(0, 60);
   }, [nodes, refs, q]);
   useEffect(() => { setActive(0); }, [q]);

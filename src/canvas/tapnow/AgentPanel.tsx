@@ -25,6 +25,7 @@ import { inspectSkillRepository, installSkillPreview } from "../canvas-next/agen
 import { SkillInstallCard } from "../canvas-next/agent/SkillInstallCard";
 import { CaptureButton, FolderButton } from "./DesktopInputControls";
 import { kbd } from "../canvas-next/keys";
+import { ModelMenu } from "../canvas-next/ui/ModelMenu";
 
 const SUGS: Array<[Parameters<typeof Icon>[0]["name"], string, string, string]> = [
   ["brain", "帮我延续这个项目的记忆", "保留已经确定的设定、风格和方向。", "回顾这张画布和记忆，总结已经确定的设定、风格和方向，之后都按这个来"],
@@ -63,20 +64,16 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
   const modelLabel = frozenModelId ? models.find((m) => m.id === frozenModelId)?.name || "本轮任务模型" : models.find((m) => m.id === defaultModelId)?.name || (chatModels.length ? "默认对话模型" : "未配置对话模型");
   const modelHint = (frozenModelId ? "本轮任务模型：" : "对话模型：") + modelLabel;
   /** 切换对话模型 = 改「我的默认对话模型」：全局生效，从下一条消息开始用；进行中的任务不受影响 */
-  const modelMenu = (anchor: HTMLElement) => openPop(anchor, (close) => <>
-    <div className="mh">对话模型 · 从下一条消息开始使用</div>
-    {chatModels.map((m) => <button key={m.id} className={"mi" + (m.id === defaultModelId ? " on" : "")} data-chat-model={m.id} onClick={async () => {
-      close(); if (m.id === defaultModelId) return;
+  const modelMenu = (anchor: HTMLElement) => openPop(anchor, (close) => <ModelMenu kind="text" list={chatModels} currentId={defaultModelId} close={close}
+    title="从下一条消息开始使用" note="全局默认模型，其他对话也会一起切换"
+    onPick={async (m) => {
+      if (m.id === defaultModelId) return;
       const set = store.backend.setDefaultChatModel; if (!set) { store.toast("当前环境不能切换对话模型"); return; }
       const res = await set(m.id);
       if (!res.ok) { store.toast("切换失败：" + (res.error || "未知错误")); return; }
       setDefaultModelId(m.id); store.toast(`已切换到 ${m.name}` + (runningTask ? "，进行中的任务仍用原模型" : ""));
-    }}><span style={{ flex: 1, minWidth: 0 }}>{m.name}<span className="d">{m.vendor}{m.vision ? " · 能读图" : ""}</span></span>{m.id === defaultModelId ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}
-    {!chatModels.length ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>还没有可用的对话模型</span></div> : null}
-    <div className="msep" />
-    <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>全局默认模型，其他对话也会一起切换</span></div>
-    {ctl.host.openModelSettings ? <button className="mi" onClick={() => { close(); ctl.host.openModelSettings!(); }}><Icon name="settings" size="s" />模型设置</button> : null}
-  </>, "up", "right", "pop-model");
+    }}
+    onSettings={ctl.host.openModelSettings ? () => ctl.host.openModelSettings!() : undefined} />, "up", "right", "pop-model");
 
   // 上下文：固定的 + 当前选中的（可移除）
   const ctxNodes = (): Array<{ n: CanvasNode; pinned: boolean }> => {
@@ -397,7 +394,7 @@ function plusMenu(ctl: Ctl, a: AgentState, anchor: Element, slash: () => void) {
   function Menu({ close }: { close: () => void }) {
     const [v, setV] = useState("root");
     if (v === "skill") return <>
-      <button className="mi" onClick={() => setV("root")}><Icon name="left" size="s" /><b>技能</b></button><div className="msep" />
+      <button className="mi back" onClick={() => setV("root")}><Icon name="left" size="s" /><span>技能</span></button><div className="msep" />
       {a.skillsOn().map((k) => <button key={k.name} className="mi" onClick={() => { close(); a.skill = k.name; a.emit(); }}><span className="ic"><Icon name="sparkle" size="s" /></span><span>{k.name}<span className="d">{k.desc}</span></span>{k.src === "我的" ? <span className="k">我的</span> : null}</button>)}
       <div className="msep" />
       <button className="mi" onClick={() => { close(); uploadSkill(a); }}><Icon name="upload" size="s" />上传技能文件</button>
