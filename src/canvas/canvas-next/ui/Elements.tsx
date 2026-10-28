@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { ELEMENT_KINDS, ELEMENT_MAX_REFS, deleteElement, listElements, nameError, saveElement, type CanvasElement, type ElementKind } from "../elements";
+import { ELEMENT_KINDS, ELEMENT_MAX_REFS, deleteElement, listElements, nameError, saveElement, syncElements, type CanvasElement, type ElementKind } from "../elements";
 import { clearOf } from "../history";
 import { genOf, isGenKind, outOf } from "../model";
 import { stackItems, isStack } from "../stack";
@@ -16,9 +16,10 @@ import { useAssetUrl } from "./useAsset";
 export const KIND_ICON: Record<ElementKind, IconName> = { character: "user", product: "cube", scene: "image", style: "palette", other: "tag" };
 const kindLabel = (k: ElementKind) => ELEMENT_KINDS.find(([x]) => x === k)?.[1] || "其他";
 
+let synced = false;
 export function useElements(): CanvasElement[] {
   const [list, setList] = useState(listElements);
-  useEffect(() => { const on = () => setList(listElements()); addEventListener("cn:elements", on); return () => removeEventListener("cn:elements", on); }, []);
+  useEffect(() => { const on = () => setList(listElements()); addEventListener("cn:elements", on); if (!synced) { synced = true; void syncElements(); } return () => removeEventListener("cn:elements", on); }, []);
   return list;
 }
 
@@ -66,7 +67,7 @@ function ElementEditor({ ctl, init, extra, close }: { ctl: Ctl; init: Omit<Canva
       <div className="seg">{ELEMENT_KINDS.map(([k, l]) => <button key={k} data-el-kind={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{l}</button>)}</div>
       <div className="sec"><span>描述（可选，会一起写进提示词）</span></div>
       <textarea className="rg-input" rows={3} value={desc} maxLength={300} placeholder="外形、材质、穿着等需要保持一致的特征" onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
-      <p className="rg-note">元素在所有画布里都能用。生成时参考图按模型支持的参考图数量加入。{err ? <><br /><span style={{ color: "var(--bad)" }}>{err}</span></> : null}</p>
+      <p className="rg-note">元素在所有画布里都能用，桌面版会同步到个人资产库的 AI 角色。生成时参考图按模型支持的参考图数量加入。{err ? <><br /><span style={{ color: "var(--bad)" }}>{err}</span></> : null}</p>
       <div className="rg-foot"><button className="btn" onClick={close}>取消</button><button className="btn solid" data-el-save disabled={busy} onClick={() => void save()}>{busy ? "保存中…" : "保存"}</button></div>
     </div>
   </>;

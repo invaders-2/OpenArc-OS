@@ -42,7 +42,7 @@ export type GenOutput = {
   draft?: boolean;
   /** 音频波形（0~1），后端不给时前端从音频解码或用占位 */
   bars?: number[];
-  meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string };
+  meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string; /** 上传文档的文件名 */ doc?: string };
 };
 
 export type GenData = {
