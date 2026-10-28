@@ -3,6 +3,8 @@
  * 生成面板：输入（可拖动排序）→ 提示词（@ 引用上游分段）→ 提示 → 请求预览 → 底栏（模型 / 参数 / 张数 / 发送）。
  * 上游连着多维表格时，面板中间出现「生成输入」逐行列表与批量设置。
  */
+import { listElements } from "../elements";
+import { ElementMenuItems } from "./Elements";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
@@ -170,11 +172,16 @@ function GenPanel({ node }: { node: CanvasNode }) {
   };
   const refMenu = (ta: HTMLTextAreaElement) => {
     const opts: Array<[string, string]> = []; ins.forEach((x) => { if (x.node.kind === "text") Object.keys(sectionsOf(textOf(x.node))).forEach((k) => opts.push([title(x.node), k])); });
-    if (!opts.length) return store.toast("上游没有可引用的分段文本。连一个输出“海报1/海报2…”的文本节点试试");
-    openPop(ta, (close) => <><div className="mh">引用上游文本中的一段</div>{opts.map(([t, k]) => <button key={t + k} className="mi" onClick={() => { close(); const v = ta.value.replace(/@$/, "@" + t + "·" + k + " "); setDraft(v); commitPrompt(v); setTimeout(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = v.length; }, 0); }}><Icon name="text" size="s" />{t} › {k}</button>)}</>);
+    const els = listElements();
+    if (!opts.length && !els.length) return store.toast("没有可引用的内容：连一个输出“海报1/海报2…”的文本节点，或把图片存成元素后用 @名字 引用");
+    const put = (tag: string) => { const v = ta.value.replace(/@$/, "@" + tag + " "); setDraft(v); commitPrompt(v); setTimeout(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = v.length; }, 0); };
+    openPop(ta, (close) => <>
+      {opts.length ? <><div className="mh">引用上游文本中的一段</div>{opts.map(([t, k]) => <button key={t + k} className="mi" onClick={() => { close(); put(t + "·" + k); }}><Icon name="text" size="s" />{t} › {k}</button>)}</> : null}
+      {els.length ? <><div className="mh">元素</div><ElementMenuItems onPick={(e) => { close(); put(e.name); }} /></> : null}
+    </>);
   };
 
-  const ph = kind === "text" ? (g.manual ? "这是手写文本节点。写一条指令可以让模型改写它，或双击节点直接编辑" : (p as TextParams).output === "table" ? "描述要拆成哪些行、每行包含什么，上游文字和素材会一起发送" : (p as TextParams).output === "storyboard" ? "描述这条片子的内容，会拆成逐镜头的分镜表" : "写给模型的指令，上游连进来的文字和图片会作为上下文") : kind === "video" ? "描述镜头运动、主体动作和氛围" : kind === "audio" ? "描述想要的音乐或声音" : "描述任何你想要生成的内容，输入 @ 引用上游节点";
+  const ph = kind === "text" ? (g.manual ? "这是手写文本节点。写一条指令可以让模型改写它，或双击节点直接编辑" : (p as TextParams).output === "table" ? "描述要拆成哪些行、每行包含什么，上游文字和素材会一起发送" : (p as TextParams).output === "storyboard" ? "描述这条片子的内容，会拆成逐镜头的分镜表" : "写给模型的指令，上游连进来的文字和图片会作为上下文") : kind === "video" ? "描述镜头运动、主体动作和氛围" : kind === "audio" ? "描述想要的音乐或声音" : "描述任何你想要生成的内容，输入 @ 引用上游文本或元素";
   // 视频编辑器：TapNow 排法 —— 顶部参考缩略图（首帧/尾帧）+ 交换 + 「+」，下面提示词；
   // 底部一行左边「模型 · 生成方式 · 比例 · 清晰度 · 时长」文字值，右边 次数 + 圆形发送；音频收成行首图标。
   if (kind === "video") {

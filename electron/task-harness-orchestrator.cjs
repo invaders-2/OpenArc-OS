@@ -46,6 +46,18 @@ const ORCHESTRATOR_ERROR = Object.freeze({
 
 function sha256(text) { return crypto.createHash("sha256").update(String(text)).digest("hex"); }
 
+/**
+ * 画布 Agent 思考强度（renderer 只能从这 4 个枚举里选，task-bootstrap 已校验）。
+ * 非 off 时允许先用 ```openarc-questions 问答卡提问（画布面板渲染成最多 4 个问题的卡片）。
+ */
+const QUESTIONS_PROTOCOL = "If essential information is missing, reply ONLY with a fenced ```openarc-questions block containing a JSON array of at most 4 items {\"question\", \"options\": 2-5 short choices, \"multi\": boolean}, written in the user's language, and do not call any tool in that turn.";
+const THINKING_GUIDE = Object.freeze({
+  off: "Thinking level: off. Do not ask clarifying questions; act on the most reasonable interpretation right away.",
+  light: "Thinking level: light. Plan briefly, then act. Ask only when a critical detail cannot be guessed. " + QUESTIONS_PROTOCOL,
+  standard: "Thinking level: standard. Outline the steps before acting. " + QUESTIONS_PROTOCOL,
+  heavy: "Thinking level: heavy. Analyse the goal, constraints and risks thoroughly and present a complete plan before acting. " + QUESTIONS_PROTOCOL,
+});
+
 /** §16/§17 安全 prompt：只放 goal + safe step input + 可选 prior artifact；绝不塞 DB dump / credentials / 全历史。*/
 function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEnabled = false } = {}) {
   const lines = [];
@@ -54,6 +66,8 @@ function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEn
     : "You are an OpenArc reasoning runtime. Tools are disabled; answer in text only.");
   lines.push("Task goal: " + String(goal == null ? "" : goal));
   if (stepInput != null) lines.push("Step input: " + (typeof stepInput === "string" ? stepInput : JSON.stringify(stepInput)).slice(0, 4000));
+  const level = stepInput && typeof stepInput === "object" && stepInput.type === "canvas.task.v1" ? THINKING_GUIDE[stepInput.thinking] : null;
+  if (level) lines.push(level);
   if (priorArtifactText != null) lines.push("Prior artifact: " + String(priorArtifactText).slice(0, 2000));
   return lines.join("\n");
 }

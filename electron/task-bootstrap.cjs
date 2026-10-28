@@ -105,6 +105,9 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */
 const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume", "task/appendStep", "task/recovery", "task/acknowledgeUnknownEffect"]);
 
+/** 画布 Agent 思考强度（TapNow Off / Light / Standard / Heavy） */
+const THINKING_LEVELS = Object.freeze(["off", "light", "standard", "heavy"]);
+
 function normalizeCanvasTaskContext(raw) {
   if (raw == null) return { ok: true, context: null };
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.schemaVersion !== 1) return { ok: false, error: "INVALID_INPUT" };
@@ -114,10 +117,12 @@ function normalizeCanvasTaskContext(raw) {
   if (!strings(raw.selectedNodeIds, 16, /^[A-Za-z0-9_.#:-]{1,120}$/)) return { ok: false, error: "INVALID_INPUT" };
   if (!strings(raw.resourceRefs, 16, /^(?:openarc-asset:|resource:\/\/)[A-Za-z0-9_.#:-]{1,160}$/)) return { ok: false, error: "INVALID_INPUT" };
   if (!strings(raw.completionConditions, 4, /^[^\u0000-\u001f]{1,160}$/)) return { ok: false, error: "INVALID_INPUT" };
+  if (raw.thinking != null && !THINKING_LEVELS.includes(raw.thinking)) return { ok: false, error: "INVALID_INPUT" };
   const context = {
     type: "canvas.task.v1", schemaVersion: 1, canvasId,
     selectedNodeIds: [...new Set(raw.selectedNodeIds)], resourceRefs: [...new Set(raw.resourceRefs)],
     completionConditions: raw.completionConditions.slice(),
+    ...(raw.thinking ? { thinking: raw.thinking } : {}),
   };
   if (JSON.stringify(context).length > 3500) return { ok: false, error: "INVALID_INPUT" };
   return { ok: true, context };
