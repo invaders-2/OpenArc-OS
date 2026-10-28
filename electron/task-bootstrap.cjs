@@ -126,6 +126,7 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
         planTool: true,
         workspaceTools: !!workspace,
         agentMemory,
+        subagentTool: true,
       } : {}),
     });
   }

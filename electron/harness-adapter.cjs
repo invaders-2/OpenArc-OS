@@ -226,8 +226,8 @@ function safePlan(entries) {
 function yamlQuote(text) { return "'" + String(text).replace(/[\r\n]+/g, " ").replace(/'/g, "''") + "'"; }
 
 /** OpenArc 管理的 ACP profile patch：ACP stdio ON，模型走 OpenArc，其它全部关。 */
-function buildAcpPatch({ contextWindow = 32768, maxTokens = 4096, persona = null, planTool = false } = {}) {
-  const disabled = [
+function buildAcpPatch({ contextWindow = 32768, maxTokens = 4096, persona = null, planTool = false, subagentTool = false } = {}) {
+  const all = [
     "llm-deepseek", "llm-retry", "session-telemetry-otel",
     "web", "web-search-deepseek", "web-fetch-http",
     "tool-bash", "tool-pwsh", "tool-fs", "tool-fs-search", "tool-web", "tool-jobs",
@@ -235,6 +235,8 @@ function buildAcpPatch({ contextWindow = 32768, maxTokens = 4096, persona = null
     "tool-subagent", "tool-subagent-fork", "tool-subagent-control", "tool-subagent-list-agents",
     "skill", "skill-filesystem",
   ];
+  // 全局 AI 子 agent（第 4 期）：只打开 dsh 的 spawn 子 agent 工具（前台等结果、最多一层），其余委派工具仍关。
+  const disabled = subagentTool ? all.filter((id) => id !== "tool-subagent") : all;
   const lines = [];
   for (const id of disabled) { lines.push("- id: " + id, "  disabled: true"); }
   lines.push(
@@ -272,6 +274,20 @@ function buildAcpPatch({ contextWindow = 32768, maxTokens = 4096, persona = null
   if (planTool) {
     // 全局 AI：打开 dsh 自带的 todo_write（只改会话里的任务清单，不碰文件 / 网络），多步任务先列计划再执行。
     lines.push("- id: tool-todo", "  disabled: false");
+  }
+  if (subagentTool) {
+    // 子 agent 和主 AI 用同一套 OpenArc 受控工具、同一个模型代理和预算；写入 / 命令照样要审批。
+    lines.push(
+      "- id: tool-subagent",
+      "  disabled: false",
+      "  config:",
+      "    provider: spawn",
+      "    toolName: subagent",
+      "    modelSelectionSettings: false",
+      "    backgroundMode: one-shot",
+      "    enableRunInBackground: false",
+      "    maxDepth: 1",
+    );
   }
   lines.push("");
   return lines.join("\n");
@@ -343,7 +359,7 @@ class HarnessAdapter {
   }
 
   async #runStartup(options, deadlineAt) {
-    const { context, modelConfigId, modelConfigVersion = null, maxCalls = 4, ttlMs = 120000, workspace = null, requestId = null, toolFacade = null, memory = null, session = null, persona = null, planTool = false } = options;
+    const { context, modelConfigId, modelConfigVersion = null, maxCalls = 4, ttlMs = 120000, workspace = null, requestId = null, toolFacade = null, memory = null, session = null, persona = null, planTool = false, subagentTool = false } = options;
     if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found in runtime " + this.runtime);
     if (!this.sdkPath) throw harnessError(HARNESS_ERROR.NOT_STARTED, "ACP SDK not found");
     // dispose 之后不再复用同一实例（启动、签发能力、spawn 子进程全部拒绝）。
@@ -386,7 +402,7 @@ class HarnessAdapter {
     let args = this.dshArgs;
     if (!args) {
       const patchPath = path.join(root, "openarc-acp.yml");
-      fs.writeFileSync(patchPath, buildAcpPatch({ ...this.limits, persona, planTool }), { mode: 0o600 });
+      fs.writeFileSync(patchPath, buildAcpPatch({ ...this.limits, persona, planTool, subagentTool }), { mode: 0o600 });
       args = profileArgs ? [...profileArgs, "--patch", patchPath] : ["--profile", "acp", "--patch", patchPath];
     }
     // task-66：不用 shebang（GUI 最小 PATH 无 node 会 127），显式用运行时自带 Node。
