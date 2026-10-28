@@ -28,6 +28,7 @@ import { computeExportBounds, exportCanvas, exportFileName, exportPixels, pickEx
 import { applyTheme } from "./theme";
 import { useAssetUrl } from "./useAsset";
 import { deletePersonalTemplate, loadPersonalTemplates, savePersonalTemplate } from "../personalTemplates";
+import { kbd } from "../keys";
 
 export function Chrome() {
   const ctl = useCtl(); const store = ctl.store;
@@ -58,7 +59,7 @@ export function Chrome() {
     </div>
     <div id="lb" className="float cap">
       <button className="ib primary tipR" id="addBtn" data-tip="添加节点" onClick={(e) => addMenu(ctl, e.currentTarget, ctl.center(), null, "right")}><Icon name="plus" /></button>
-      <button className="ib tipR" data-drawer="search" data-tip="节点搜索 ⌘F" onClick={() => openSearch(ctl)}><Icon name="search" /></button>
+      <button className="ib tipR" data-drawer="search" data-tip={kbd("节点搜索 ⌘F")} onClick={() => openSearch(ctl)}><Icon name="search" /></button>
       <button className={"ib tipR" + (ui.drawer === "assets" ? " on" : "")} data-drawer="assets" data-tip="素材库" onClick={() => store.setUI({ drawer: ui.drawer === "assets" ? null : "assets" })}><Icon name="folder" /></button>
       <button className="ib tipR" data-drawer="templates" data-tip="模板" onClick={(e) => openTemplates(ctl, e.currentTarget)}><Icon name="layout" /></button>
       <button className={"ib tipR" + (ui.cmtMode ? " on" : "")} id="cmtBtn" data-tip="评论 C" onClick={() => toggleCmt(ctl)}><Icon name="msg" /></button>
@@ -71,7 +72,7 @@ export function Chrome() {
         <button className={"ib tipT" + (showMini ? " on" : "")} id="miniBtn" data-mini-pref={ui.mini === null ? "auto" : ui.mini ? "on" : "off"} data-tip={showMini ? "隐藏小地图" : "显示小地图"} onClick={() => store.setUI({ mini: !showMini })}><Icon name="map" /></button>
         <button className={"ib tipT" + (ui.hideEdges ? " on" : "")} id="edgeBtn" data-tip={ui.hideEdges ? "显示连线" : "隐藏连线"} onClick={() => { store.setUI({ hideEdges: !ui.hideEdges }); store.toast(!ui.hideEdges ? "已隐藏连线，输入关系仍然生效" : "已显示连线"); }}><Icon name={ui.hideEdges ? "eye" : "eyeoff"} /></button>
         <button className={"ib tipT" + (ui.snap ? " on" : "")} id="snapBtn" data-tip="网格吸附" onClick={() => { store.setUI({ snap: !ui.snap }); store.toast(!ui.snap ? "拖动节点时吸附到 20px 网格" : "已关闭网格吸附"); }}><Icon name="grid" /></button>
-        <button className="ib tipT" id="fitBtn" data-tip="适应画布 ⇧1" onClick={() => ctl.fitTo(store.state.doc.nodes)}><Icon name="fit" /></button>
+        <button className="ib tipT" id="fitBtn" data-tip={kbd("适应画布 ⇧1")} onClick={() => ctl.fitTo(store.state.doc.nodes)}><Icon name="fit" /></button>
         <input type="range" id="zoomR" min={15} max={200} step={1} aria-label="缩放" value={zoomPct} onChange={(e) => { const r = ctl.rect(); ctl.zoomAt(+e.target.value / 100, r.left + r.width / 2, r.top + r.height / 2); }} />
         <span id="zoomV" className="tnum">{zoomPct}%</span>
       </div>
@@ -82,7 +83,7 @@ export function Chrome() {
     {ui.sel.size > 1 ? <MultiBar /> : null}
     {/* Agent 展开后画布区变窄，提示会压到左下工具栏上：此时不显示 */}
     {/* 选中节点时底部会出生成面板，提示文字会从面板后面露出来：此时也不显示 */}
-    {ui.agentOpen || ui.sel.size ? null : <div id="hint" className="float">{ui.leftDrag === "select" ? "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白框选 · 右键 / 空格拖动平移 · 双击空白添加节点" : "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点"}</div>}
+    {ui.agentOpen || ui.sel.size ? null : <div id="hint" className="float">{ui.leftDrag === "select" ? kbd("滚轮平移 · ⌘+滚轮缩放 · 拖动空白框选 · 右键 / 空格拖动平移 · 双击空白添加节点") : kbd("滚轮平移 · ⌘+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点")}</div>}
     <BackToNodes />
     {!nodes.length ? <div id="empty" className="float">
       <div className="l1"><span className="kbd"><Icon name="cursor" size="s" />双击</span>画布自由生成，或从下面开始一条工作流</div>
@@ -227,7 +228,7 @@ function themeMenu(ctl: Ctl, anchor: Element) {
 }
 export function showKeys() {
   const k = [["撤销 / 重做", "⌘Z / ⇧⌘Z"], ["复制 / 粘贴", "⌘C / ⌘V"], ["创建副本", "⌘D"], ["删除", "⌫ / Del"], ["全选", "⌘A"], ["节点搜索", "⌘F"], ["打开 / 收起 Agent", "⌘J"], ["发送生成", "⌘↵"], ["适应画布", "⇧1"], ["放大 / 缩小", "⌘+ / ⌘−"], ["切换深浅色", "⇧⌘L"], ["评论模式", "C"], ["拖动画布", "右键 / 中键 / 空格 + 拖动"], ["微移节点", "方向键（⇧ 10px）"], ["重命名节点", "双击节点标题"], ["框选", "拖动空白（⇧ 追加）"], ["堆叠选中节点", "⇧S"], ["取消 / 关闭", "Esc"]];
-  openModal(() => <><ModalHead title="快捷键" /><div className="mbd"><div className="kbdlist">{k.map(([a, b]) => <div key={a}><span>{a}</span><kbd>{b}</kbd></div>)}</div></div></>);
+  openModal(() => <><ModalHead title="快捷键" /><div className="mbd"><div className="kbdlist">{k.map(([a, b]) => <div key={a}><span>{a}</span><kbd>{kbd(b)}</kbd></div>)}</div></div></>);
 }
 export function toggleCmt(ctl: Ctl) { const on = !ctl.store.state.ui.cmtMode; ctl.store.setUI({ cmtMode: on }); if (on) ctl.store.toast("点击画布放置评论"); }
 
@@ -445,7 +446,7 @@ function applyTemplate(ctl: Ctl, tpl: TplEntry): string {
   }
   try {
     const made = createFromTemplate(ctl, tpl);
-    ctl.store.toast(`已按模板创建 ${made.nodes} 个节点、${made.edges} 条连线（⌘Z 可撤销）`, 4000);
+    ctl.store.toast(kbd(`已按模板创建 ${made.nodes} 个节点、${made.edges} 条连线（⌘Z 可撤销）`), 4000);
     return "";
   } catch (e) {
     const msg = "应用模板失败：" + (e instanceof Error ? e.message : "未知错误");
@@ -804,7 +805,7 @@ function TplTip({ total, count, onMore, onDismiss, onNever }: { total: number; c
     </div>
     <div className="tpl-tip-main">
       <b>用一个模板开个头</b>
-      <p>{(total > 0 ? total : "全部") + " 个模板覆盖电商、影视、社媒；点卡片直接把节点铺到画布，⌘Z 可撤销。"}</p>
+      <p>{(total > 0 ? total : "全部") + kbd(" 个模板覆盖电商、影视、社媒；点卡片直接把节点铺到画布，⌘Z 可撤销。")}</p>
       <button type="button" className="tpl-tip-more" title="模板用法：点卡片应用、hover 点「查看」看详情、右上「浏览全部」打开模板库" onClick={onMore}>了解更多</button>
     </div>
     <div className="tpl-tip-ft">
@@ -949,7 +950,7 @@ function MultiBar() {
       <button className="mi" data-align="top" onClick={() => { close(); alignSelection(store, "top"); }}><Icon name="up" size="s" />顶对齐</button>
       <button className="mi" data-align="hgap" onClick={() => { close(); alignSelection(store, "hgap"); }}><Icon name="layers" size="s" />水平等距</button>
     </>, "down")}><Icon name="layers" size="s" />对齐</button>
-    <button className="mb-btn" data-mb="stack" title="把选中的节点收成一叠（⇧S）" onClick={() => stackSelection(store)}><Icon name="layers" size="s" />堆叠</button>
+    <button className="mb-btn" data-mb="stack" title={kbd("把选中的节点收成一叠（⇧S）")} onClick={() => stackSelection(store)}><Icon name="layers" size="s" />堆叠</button>
     <button className="mb-btn" data-mb="run" disabled={!runnable.length} title={runnable.length ? "按依赖顺序运行选中的生成节点（先确认消耗）" : "选中的节点里没有可运行的"} onClick={() => confirmRunGroup(ctl, runnable, `选中的 ${nodes.length} 个节点`)}><Icon name="play" size="s" />批量运行</button>
     <button className="mb-btn" data-mb="dl" title="有结果的节点打包成 zip 下载" onClick={() => void downloadMany(nodes, store)}><Icon name="download" size="s" />下载</button>
     <button className="mb-btn danger" data-mb="del" onClick={() => deleteSelection(store)}><Icon name="trash" size="s" />删除</button>

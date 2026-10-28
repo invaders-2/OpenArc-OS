@@ -12,7 +12,7 @@ import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { GenError, type GenInput, type GenRequest } from "./backend/types";
 import { applyElements, elementInputs } from "./elements";
 import { nodeError } from "./errorText";
-import { autoVideoMode, clamp, draftRes, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
+import { autoVideoMode, clamp, draftRes, fitMediaBox, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { batchOf, batchRows, emptyRunHint, parseTableJson, repairPrompt, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableMedia, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type TableData, type TableMedia } from "./table";
 
@@ -155,7 +155,8 @@ async function persistOutputs(store: CanvasStore, outs: GenOutput[], name: strin
 
 function applyOutputs(store: CanvasStore, id: string, outs: GenOutput[]) {
   const node = store.node(id)!; const g = genOf(node);
-  const fit = (n: CanvasNode, o: GenOutput): CanvasNode => (o.w && o.h && (n.kind === "image" || n.kind === "video") ? { ...n, h: Math.round(clamp((n.w * o.h) / o.w, 100, 520)) } : n);
+  // 结果按原比例定尺寸（以宽度为基准，太高时缩宽），不再只夹高度导致比例失真
+  const fit = (n: CanvasNode, o: GenOutput): CanvasNode => { if (n.kind !== "image" && n.kind !== "video") return n; const b = fitMediaBox(o.w, o.h, n.w); return b ? { ...n, w: b.w, h: b.h } : n; };
   if (outs.length > 1 && store.state.ui.batchMode === "spread" && node.kind === "image") {
     store.mutate((d) => {
       const extra = outs.slice(1).map((o, i) => fit(withGen({ ...node, id: uid("n"), x: node.x + (i + 1) * (node.w + 30) }, { ...g, title: g.title + " · " + (i + 2), hist: [o], hi: 0, order: [] }), o));

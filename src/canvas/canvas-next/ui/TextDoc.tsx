@@ -12,6 +12,7 @@ import { genOf, outOf } from "../model";
 import { useCtl } from "./ctx";
 import { Icon } from "./Icon";
 import { markdownToHtml } from "./markdown";
+import { kbd } from "../keys";
 
 /** Markdown → HTML：和节点里同一套解析 */
 function mdToHtml(md: string): string { return markdownToHtml(md) || "<p><br></p>"; }
@@ -198,8 +199,8 @@ function TextDoc({ initial, title, onClose, onCopy }: { id: string; initial: str
       {B(fmt.block === "h3", "标题 3", () => setBlock("h3"), <b className="hx">H<sub>3</sub></b>)}
       {B(fmt.block === "p" && !fmt.ul && !fmt.ol, "正文", () => setBlock("p"), <b className="hx">¶</b>)}
       <span className="td-sep" />
-      {B(fmt.bold, "加粗 ⌘B", () => run("bold"), <b className="hx">B</b>)}
-      {B(fmt.italic, "斜体 ⌘I", () => run("italic"), <i className="hx it">I</i>)}
+      {B(fmt.bold, kbd("加粗 ⌘B"), () => run("bold"), <b className="hx">B</b>)}
+      {B(fmt.italic, kbd("斜体 ⌘I"), () => run("italic"), <i className="hx it">I</i>)}
       <span className="td-sep" />
       {B(fmt.ul, "无序列表", () => toggleList("ul"), <Icon name="list" size="s" />)}
       {B(fmt.ol, "有序列表", () => toggleList("ol"), <b className="hx ol">1.</b>)}

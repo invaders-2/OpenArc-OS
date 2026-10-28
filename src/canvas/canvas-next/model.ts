@@ -475,6 +475,18 @@ export function refsIn(prompt: string, ins: InputRef[]) {
 let _seq = 0;
 export const uid = (p = "n") => p + "_" + Date.now().toString(36) + (++_seq).toString(36) + Math.random().toString(36).slice(2, 5);
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+/**
+ * 按素材原始宽高给节点定尺寸：始终保持原比例。
+ * 先按 baseW 算高；太高就按最大高缩宽，太扁就按最小高放宽（宽度有上限，极端长条图才会低于最小高）。
+ */
+export function fitMediaBox(mw: number | undefined, mh: number | undefined, baseW: number, opt: { minH?: number; maxH?: number; maxW?: number } = {}): { w: number; h: number } | null {
+  if (!mw || !mh || !Number.isFinite(mw / mh) || mw <= 0 || mh <= 0) return null;
+  const r = mw / mh; const minH = opt.minH ?? 100, maxH = opt.maxH ?? 520, maxW = opt.maxW ?? Math.max(480, baseW * 2);
+  let w = baseW, h = w / r;
+  if (h > maxH) { h = maxH; w = h * r; }
+  else if (h < minH) { h = minH; w = h * r; if (w > maxW) { w = maxW; h = w / r; } }
+  return { w: Math.round(w), h: Math.round(h) };
+}
 export function ratioWH(r: string | undefined, long = 640): [number, number] {
   if (!r || /auto|自适应/i.test(r)) r = "3:4";
   const [a, b] = r.split(":").map(Number); if (!a || !b) return [long, long];

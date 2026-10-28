@@ -22,6 +22,7 @@ import { skillInstallIntent } from "../canvas-next/agent/skillInstallIntent";
 import { inspectSkillRepository, installSkillPreview } from "../canvas-next/agent/skillInstallClient";
 import { SkillInstallCard } from "../canvas-next/agent/SkillInstallCard";
 import { CaptureButton, FolderButton } from "./DesktopInputControls";
+import { kbd } from "../canvas-next/keys";
 
 const SUGS: Array<[Parameters<typeof Icon>[0]["name"], string, string, string]> = [
   ["brain", "帮我延续这个项目的记忆", "保留已经确定的设定、风格和方向。", "回顾这张画布和记忆，总结已经确定的设定、风格和方向，之后都按这个来"],
@@ -66,7 +67,11 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
   useEffect(() => { [...a.muted].forEach((id) => { if (!ui.sel.has(id)) a.muted.delete(id); }); }, [ui.sel, a]);
   // 画布上点选加入上下文
   useEffect(() => { const on = (e: Event) => { const id = (e as CustomEvent).detail as string; if (!a.pinned.includes(id)) a.pinned.push(id); a.emit(); }; addEventListener("cn:agent-pick", on); return () => removeEventListener("cn:agent-pick", on); }, [a]);
-  useEffect(() => { const el = scrollRef.current; if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 200) el.scrollTop = el.scrollHeight; });
+  // 跟随到底：用户停在底部附近时（滚动事件里记下）新内容出来就滚到底；用户往上翻过就不打扰。
+  // 之前按「渲染后离底部的距离」判断：一张很高的问答卡出现后距离超过阈值，就再也不跟随了。
+  const stick = useRef(true);
+  useEffect(() => { const el = scrollRef.current; if (!el) return; const on = () => { stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }; el.addEventListener("scroll", on, { passive: true }); return () => el.removeEventListener("scroll", on); }, []);
+  useEffect(() => { const el = scrollRef.current; if (el && stick.current) el.scrollTop = el.scrollHeight; });
 
   const ctxBreak = (): Array<[string, number]> => [["系统与工具", 3200], ["技能", a.skill ? 900 : 0], ["记忆", a.memory().length * 60], ["画布与已选节点", ctxNodes().length * 600 + doc.nodes.length * 80], ["对话历史", a.msgs.reduce((s, m) => s + m.text.length * 2 + (m.tools ? m.tools.length * 180 : 0), 0)]];
   const used = ctxBreak().reduce((s, x) => s + x[1], 0);
@@ -144,6 +149,7 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
   }
 
   async function send(fromQa = false) {
+    stick.current = true; // 自己发出的消息总是滚到底
     let text = a.draft.trim(); const skill = a.skill ? a.skills.find((s) => s.name === a.skill) || null : null;
     if ((!text && !skill) || a.busy) return; if (!text) text = skill!.desc;
     const installSource = skillInstallIntent(text);
@@ -235,13 +241,13 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
           <FolderButton ctl={ctl} a={a} />
           <CaptureButton ctl={ctl} a={a} />
           <button className="pill ghost" id="aMode" onClick={(e) => openPop(e.currentTarget, (close) => <>{([["manual", "cursor", "手动确认", "Agent 自动规划与只读执行，写入由你逐次批准"], ["auto", "bolt", "自动规划", "Agent 自动规划与只读执行，写入仍需你的可信批准"]] as const).map(([k, ic, t, d]) => <button key={k} className={"mi" + (a.mode === k ? " on" : "")} data-m={k} onClick={() => { close(); a.setMode(k); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.mode === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name={a.mode === "auto" ? "bolt" : "cursor"} size="s" />{a.mode === "auto" ? (full ? "自动规划" : "自动") : (full ? "手动确认" : "手动")}<Icon name="down" size="xs" /></button>
-          <button className={"pill ghost tipT" + (full ? "" : " icon")} id="aThink" data-thinking={a.thinking} aria-label={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} data-tip={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">思考强度</div>{THINKING.map(([k, t, d]) => <button key={k} className={"mi" + (a.thinking === k ? " on" : "")} data-t={k} onClick={() => { close(); a.setThinking(k); }}><span className="ic"><Icon name="brain" size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.thinking === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name="brain" size="s" />{full ? THINKING.find(([k]) => k === a.thinking)?.[1] : null}{a.thinking === "off" ? null : <i className={"thk l" + THINKING.findIndex(([k]) => k === a.thinking)} />}</button>
+          <button className={"pill ghost tipT" + (full ? "" : " icon")} id="aThink" data-thinking={a.thinking} aria-label={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} data-tip={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">思考强度</div>{THINKING.map(([k, t, d]) => <button key={k} className={"mi" + (a.thinking === k ? " on" : "")} data-t={k} onClick={() => { close(); a.setThinking(k); }}><span className="ic"><Icon name="brain" size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.thinking === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name="brain" size="s" />{full ? THINKING.find(([k]) => k === a.thinking)?.[1] : null}<span className={"thk l" + THINKING.findIndex(([k]) => k === a.thinking)} aria-hidden="true"><b /><b /><b /></span></button>
           <span className="sp" />
-          <button className="ib" style={{ width: 30, height: 30 }} id="aRing" aria-label="上下文占用" onClick={(e) => ctxPopover(ctl, a, e.currentTarget, ctxBreak())}><Ring p={Math.min(1, used / CTX_MAX)} /></button>
+          <button className="ib tipT" style={{ width: 30, height: 30 }} id="aRing" aria-label="上下文占用" data-tip={"上下文已用 " + Math.max(1, Math.round(Math.min(1, used / CTX_MAX) * 100)) + "%"} onClick={(e) => ctxPopover(ctl, a, e.currentTarget, ctxBreak())}><Ring p={Math.min(1, used / CTX_MAX)} /></button>
           <button className={"pill ghost locked tipT" + (full ? "" : " icon")} id="aModel" aria-label={modelHint} data-tip={modelHint} onClick={() => store.toast(modelHint)}><Icon name="sparkle" size="s" />{full ? modelLabel : null}</button>
           <button className="ib" style={{ width: 30, height: 30 }} id="aMic" aria-label="语音输入" onClick={(e) => micInput(ctl, e.currentTarget, (t) => setDraft((a.draft ? a.draft + " " : "") + t))}><Icon name="mic" size="s" /></button>
           {a.busy ? <button className="send busy" id="aSend" title="停止" onClick={() => { void stopTask(); }}><i className="ring"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="sqr" /></button>
-            : <button className="send" id="aSend" title="发送 ↵" onClick={() => void send()}><Icon name="send" size="s" /></button>}
+            : <button className="send" id="aSend" title={kbd("发送 ↵")} disabled={!a.draft.trim() && !a.skill} onClick={() => void send()}><Icon name="send" size="s" /></button>}
         </div>
       </div>
       {full && a.prevOpen ? <PreviewWin ctl={ctl} onClose={() => { a.prevOpen = false; a.emit(); }} /> : null}
@@ -293,7 +299,10 @@ function Msg({ m, i, isNew, a, ctl, onRetry, onBranch, onQ, onSkillInstallConfir
 function MessageTime({ at }: { at?: number }) {
   if (!at) return null;
   const d = new Date(at);
-  return <time className="mtime" dateTime={d.toISOString()}>{d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })} {d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}</time>;
+  const hm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  // 今天的消息只写时间；跨天才带日期（之前「10/2818:12」日期和时间还挤在一起）
+  const today = new Date().toDateString() === d.toDateString();
+  return <time className="mtime" dateTime={d.toISOString()} title={d.toLocaleString("zh-CN", { hour12: false })}>{today ? hm : d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }) + " " + hm}</time>;
 }
 /** 处理过程（同 TapNow）：进行中逐条显示「已思考 Ns · 摘要」与每一步；完成后折叠成「处理了 1m 12s」 */
 function Proc({ m, patch }: { m: AgentMsg; patch: (p: Partial<AgentMsg>) => void }) {

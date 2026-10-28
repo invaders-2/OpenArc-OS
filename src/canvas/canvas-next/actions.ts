@@ -1,9 +1,10 @@
 /** 画布上的编辑动作（连线、删除、复制粘贴、上传……），界面和 Agent 共用 */
 import type { CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { autoVideoMode, connectBlock, genOf, inputsOf, isGenKind, uid, withGen, type GenKind, type VideoParams } from "./model";
+import { autoVideoMode, connectBlock, fitMediaBox, genOf, inputsOf, isGenKind, uid, withGen, type GenKind, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { tableAutoSize, tableMedia, tableOf } from "./table";
 import { hiddenIds, isStack } from "./stack";
+import { kbd } from "./keys";
 
 /** 连线；成功后选中下游节点，并按输入自动切换视频生成方式 */
 export function connect(store: CanvasStore, from: string, to: string, opts: { quiet?: boolean; select?: boolean } = {}): CanvasEdge | null {
@@ -32,7 +33,7 @@ export function deleteSelection(store: CanvasStore) {
   const ids = withStackMembers(store, [...ui.sel]); const gone = new Set(ids);
   const touched = [...new Set(store.state.doc.edges.filter((e) => gone.has(e.from) && !gone.has(e.to)).map((e) => e.to))];
   store.removeNodes(ids); touched.forEach((t) => afterInputsChanged(store, t));
-  store.toast(`已删除 ${ids.length} 个节点 · ⌘Z 撤销`);
+  store.toast(kbd(`已删除 ${ids.length} 个节点 · ⌘Z 撤销`));
 }
 /** 选中的堆叠展开出成员（删除 / 复制时成员跟着堆叠走） */
 function withStackMembers(store: CanvasStore, ids: string[]): string[] {
@@ -144,7 +145,7 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
     if (!dataUrl) { store.toast("读取失败：" + f.name); continue; }
     // 视频 / 音频读一下元数据：时长（使用区间、切镜要用）和视频宽高
     const meta = kind === "image" ? null : await mediaMeta(dataUrl, kind);
-    const wh = kind === "image" ? await new Promise<[number, number]>((r) => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.onerror = () => r([1, 1]); im.src = dataUrl; }) : meta?.w && meta.h ? [meta.w, meta.h] : [16, 9];
+    const wh = kind === "image" ? await new Promise<[number, number]>((r) => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.onerror = () => r([1, 1]); im.src = dataUrl; }) : meta?.w && meta.h ? [meta.w, meta.h] : [0, 0]; /* 读不到视频宽高时留空，节点显示后由视频元素补上真实比例 */
     const dur = meta?.dur ? Math.round(meta.dur * 100) / 100 : undefined;
     const url = await store.backend.importAsset(store.state.canvasId, dataUrl, f.name);
     // 桌面版存资源库失败时不把整段 data URL 写进画布文档（几十上百 MB 会拖垮保存与本机备份），只放行小图
@@ -154,11 +155,15 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
     if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }); continue; }
     if (opts.target && store.node(opts.target)) {
       const t = store.node(opts.target)!; const g = genOf(t);
-      store.updateNode(t.id, (n) => withGen({ ...n, h: kind === "image" ? Math.round(Math.max(100, Math.min(520, n.w * wh[1] / wh[0]))) : n.h }, { hist: [...g.hist, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], hi: g.hist.length, uploaded: true }), { history: true });
+      // 传进已有节点：节点按素材原比例重新定尺寸（以节点当前宽度为基准），视频和图片同样处理
+      const box = kind === "audio" ? null : fitMediaBox(wh[0], wh[1], t.w);
+      store.updateNode(t.id, (n) => withGen({ ...n, ...(box ? { w: box.w, h: box.h } : {}) }, { hist: [...g.hist, { url, ...(wh[0] && wh[1] ? { w: wh[0], h: wh[1] } : {}), ...(dur ? { dur } : {}) }], hi: g.hist.length, uploaded: true }), { history: true });
       made.push(t.id); opts = { ...opts, target: undefined }; continue;
     }
-    const w = kind === "image" ? 240 : 320; const h = kind === "image" ? Math.round(Math.max(100, Math.min(520, w * wh[1] / wh[0]))) : kind === "video" ? (meta?.w && meta.h ? Math.round(Math.max(100, Math.min(520, w * meta.h / meta.w))) : 180) : 120;
-    const n = store.newNode(kind, at.x + dx - w / 2, at.y - h / 2, { title: name, uploaded: true, hist: [{ url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], w, h });
+    // 节点按素材原比例定尺寸（之前把高度夹在 100~520 而宽度不变，竖版视频 / 长图会被压扁再裁切）
+    const box = kind === "audio" ? null : fitMediaBox(wh[0], wh[1], kind === "image" ? 240 : 320);
+    const w = box ? box.w : 320; const h = box ? box.h : kind === "video" ? 180 : 120;
+    const n = store.newNode(kind, at.x + dx - w / 2, at.y - h / 2, { title: name, uploaded: true, hist: [{ url, ...(wh[0] && wh[1] ? { w: wh[0], h: wh[1] } : {}), ...(dur ? { dur } : {}) }], w, h });
     store.addNodes([n]); made.push(n.id); dx += w + 30;
     if (opts.linkTo && store.node(opts.linkTo)) connect(store, n.id, opts.linkTo, { quiet: true, select: false });
   }

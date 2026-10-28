@@ -22,6 +22,7 @@ import { useEditorState } from "./editors/registry";
 import { draftToFinal, smartClip, trimToNode } from "../videoTools";
 import { videoAiMenu } from "./VideoTools";
 import type { CanvasStore } from "../store";
+import { kbd } from "../keys";
 
 export function SelectionUI() {
   const ctl = useCtl(); const ui = useS((s) => s.ui); const doc = useS((s) => s.doc); useS((s) => s.view); const runtime = useS((s) => s.runtime);
@@ -232,11 +233,14 @@ function GenPanel({ node }: { node: CanvasNode }) {
         {hasLast ? <><button className="vp-swap tipB" data-p="vswap" data-fram-swap data-tip="交换首尾帧" disabled={busy || !first || !last} onClick={swap}><Icon name="branch" size="xs" /></button>{slot("last", "尾帧", last)}</> : null}
         <button className="vp-add tipB" data-p="addin" data-tip="添加参考图" onClick={(e) => addMenu(e.currentTarget)}><Icon name="plus" size="s" /></button>
         {m?.modes?.includes("视频编辑") ? <button className="vp-object" data-p="object-replace" disabled={busy} onClick={() => { set({ mode: "视频编辑" }); const next = draft.trim() || "替换源视频中的目标对象，保持其他人物、背景、光照、镜头运动和场景连续性不变"; setDraft(next); commitPrompt(next); }}><Icon name="wand" size="xs" />对象替换</button> : null}
+        <span className="grow" />
+        <button className={"linkbtn" + (preview ? " on" : "")} data-p="preview" onClick={() => store.setUI({ preview: !preview })}><Icon name="text" size="xs" />请求预览</button>
       </div>
       <textarea id="gpPrompt" className="vp-prompt" placeholder={ph} value={draft}
         onChange={(e) => { setDraft(e.target.value); if (e.target.value.endsWith("@")) refMenu(e.target); }} onBlur={() => commitPrompt(draft)}
         onKeyDown={(e) => { e.stopPropagation(); if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } if (e.key === "Escape") { (e.target as HTMLTextAreaElement).blur(); store.setUI({ sel: new Set(), pick: null }); } }} />
       {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
+      {preview ? <div className="gp-prev"><pre>{JSON.stringify(previewOf(ctl, node), null, 2)}</pre></div> : null}
       <div className="vp-foot">
         <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>
         <button className="vp-model" data-p="model" onClick={(e) => paramPop(ctl, node, "model", e.currentTarget)} title={m?.name || "未配置模型"}>{m?.name || "未配置模型"}</button>
@@ -251,10 +255,13 @@ function GenPanel({ node }: { node: CanvasNode }) {
           <button data-p="dur" data-vval="dur" disabled={busy || !m} onClick={(e) => paramPop(ctl, node, "dur", e.currentTarget)}>{videoDurLabel(vp.dur)}</button>
         </span>
         <span className="grow" />
+        {/* 与图片 / 文本面板一致：语音输入 + 预计耗时 */}
+        <button className="vp-mic" data-p="mic" title="语音输入" onClick={(e) => voice(ctl, node, e.currentTarget, (v) => { setDraft(v); commitPrompt(v); })}><Icon name="mic" size="s" /></button>
+        {est ? <span className="vp-est tnum" title="预计耗时">{est}</span> : null}
         <button className="vp-times tnum" data-p="vtimes" disabled={busy || !m || (m.times || [1]).length < 2} onClick={(e) => paramPop(ctl, node, "vtimes", e.currentTarget)}>{videoTimesLabel(vp.times)}</button>
         {run
           ? <button className="vp-send busy" data-p="stop" title="停止生成" onClick={() => stopNode(store, node.id)}><span className="sqr" /></button>
-          : <button className="vp-send" data-p="send" title="生成 ⌘↵" onClick={send}><Icon name="send" size="s" /></button>}
+          : <button className="vp-send" data-p="send" title={kbd("生成 ⌘↵")} onClick={send}><Icon name="send" size="s" /></button>}
       </div>
     </>;
   }
@@ -319,7 +326,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
         {/* 没配模型时 est 为空：不渲染空药丸（否则看起来像没渲染完），也不占位 */}
         {est ? <span className="est tnum" title="预计耗时">{est}{m?.local ? " · 本机" : ""}</span> : null}
         {run ? <button className="send busy" data-p="stop" title="停止生成" onClick={() => stopNode(store, node.id)}><i className="ring"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="sqr" /></button>
-          : <button className="send" data-p="send" title="生成 ⌘↵" onClick={send}><Icon name="send" size="s" /></button>}
+          : <button className="send" data-p="send" title={kbd("生成 ⌘↵")} onClick={send}><Icon name="send" size="s" /></button>}
       </div>
     </div>
     {kind === "image" && camOpen ? <CamLayer node={node} anchor={camRef.current} onClose={() => setCamOpen(false)} /> : null}
