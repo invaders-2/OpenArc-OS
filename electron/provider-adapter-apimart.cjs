@@ -913,6 +913,7 @@ async function chatStream(o = {}) {
 
 module.exports = {
   ...generic,
+  supportsWebSearch,
   listModels,
   chat,
   chatStream,
