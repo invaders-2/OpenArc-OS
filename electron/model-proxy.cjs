@@ -58,7 +58,7 @@ class ModelProxy {
       binding: binding && typeof binding === "object" ? { taskId: binding.taskId || null, stepId: binding.stepId || null, runId: binding.runId || null } : null,
     };
     this.capabilities.set(token, cap);
-    return { ok: true, capability: { capabilityId: cap.capabilityId, token, expiresAt: cap.expiresAt, maxCalls: cap.maxCalls, modelConfigId: cap.modelConfigId, modelConfigVersion: cap.modelConfigVersion, executionBinding: cap.binding } };
+    return { ok: true, capability: { capabilityId: cap.capabilityId, token, expiresAt: cap.expiresAt, maxCalls: cap.maxCalls, modelConfigId: cap.modelConfigId, modelConfigVersion: cap.modelConfigVersion, modelId: resolved.snapshot && resolved.snapshot.modelId ? String(resolved.snapshot.modelId).slice(0, 120) : null, executionBinding: cap.binding } };
   }
 
   revokeCapability(token) { const c = this.capabilities.get(String(token || "")); if (!c) return { ok: true, changed: false }; c.state = CAP_STATE.REVOKED; return { ok: true, changed: true }; }

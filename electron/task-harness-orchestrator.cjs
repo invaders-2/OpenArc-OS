@@ -11,6 +11,8 @@
  */
 "use strict";
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
 const domain = require("./task-domain.cjs");
 const { ToolFacadeBridge } = require("./tool-facade-bridge.cjs");
 const { buildBridgeManifest } = require("./tool-registry.cjs");
@@ -76,6 +78,26 @@ function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEn
 }
 
 /**
+ * 接着上一轮 dsh 会话时的提示：会话里已有系统说明和完整历史，只发这一轮新增的内容。
+ * 没有可用的新内容（比如第一步失败后重跑）时返回 null，调用方退回完整提示。
+ */
+function buildFollowupPrompt({ stepInput = null } = {}) {
+  const date = "Today's date: " + new Date().toISOString().slice(0, 10) + ".";
+  if (stepInput && typeof stepInput === "object" && stepInput.appended === true && typeof stepInput.goal === "string" && stepInput.goal.trim()) {
+    return date + "\n" + stepInput.goal.trim();
+  }
+  if (stepInput && typeof stepInput === "object" && stepInput.continuation === true) {
+    return date + "\nThe previous run stopped because it reached its budget. Continue the task from where you left off. Do not repeat tool requests that already succeeded.";
+  }
+  return null;
+}
+
+/** 会话目录名：taskId 的哈希（不把 id 原样当路径）。 */
+const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function sessionDirName(taskId) { return crypto.createHash("sha256").update(String(taskId)).digest("hex").slice(0, 32); }
+
+/**
  * §18 显式 ACP HarnessEvent → safe TaskEvent mapping。
  * §50 reasoning 不落库；§51 text delta 只聚合计数；§54 event flood 上限。
  */
@@ -103,7 +125,11 @@ function mapAcpEvents(events = [], { maxPersisted = DEFAULT_MAX_PERSISTED_EVENTS
       const toolId = String(e.toolId || e.title || "").trim();
       if (toolId) { payload.toolId = toolId.slice(0, 160); payload.name = toolId.slice(0, 160); }
     }
-    if (e.type === "plan" && Array.isArray(e.plan)) payload.itemCount = e.plan.length;
+    if (e.type === "plan" && Array.isArray(e.plan)) {
+      payload.itemCount = e.plan.length;
+      // 全局 AI 计划卡片：条目已在 adapter 里限长限量（只有 content / status）。
+      payload.items = e.plan.map((it) => ({ content: String(it.content || "").slice(0, 200), status: String(it.status || "pending") }));
+    }
     out.push({ eventType, safePayload: payload });
   }
   if (textChunks > 0 && out.length < maxPersisted) out.push({ eventType: TASK_EVENT.HARNESS_TEXT_DELTA, safePayload: { chunks: textChunks, chars: textChars } });
@@ -132,8 +158,15 @@ function classifyHarnessError(e) {
 }
 
 class TaskHarnessOrchestrator {
-  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null, maxToolRounds = MAX_TOOL_ROUNDS } = {}) {
+  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null, maxToolRounds = MAX_TOOL_ROUNDS, sessionRoot = null, persona = null, modelTtlMs = null, planTool = false } = {}) {
     if (!taskService) throw new Error("TaskHarnessOrchestrator 需要 TaskService");
+    // 全局 AI 会话化：给了 sessionRoot 时，每个任务（= 一个对话）有自己的持久 dsh 会话目录，下一轮接着上一轮。
+    this.sessionRoot = typeof sessionRoot === "string" && sessionRoot ? path.resolve(sessionRoot) : null;
+    this.persona = typeof persona === "string" && persona.trim() ? persona.trim() : null;
+    this.modelTtlMs = Number(modelTtlMs) > 0 ? Number(modelTtlMs) : null;
+    // 打开 dsh 的 todo_write（多步任务先列计划），计划通过进度推送和 harness.plan 事件给界面。
+    this.planTool = planTool === true;
+    this.progressSink = null;
     this.taskService = taskService;
     // D4-05 S4 / A36：可选受控记忆装配。null → 不接线，行为完全不变。
     this.memoryContext = memoryContext;
@@ -158,6 +191,48 @@ class TaskHarnessOrchestrator {
     // D5-03 第十批：应用 dispose 之后不再接受新的启动段（在途启动要在同一份收尾里被中断）。
     this.disposed = false;
     this.lastEvidence = null;
+    if (this.sessionRoot) this.#pruneSessions();
+  }
+
+  /** 清理 30 天没动过的对话会话目录（尽力而为，失败不影响启动）。 */
+  #pruneSessions(maxAgeMs = SESSION_MAX_AGE_MS) {
+    let entries = [];
+    try { entries = fs.readdirSync(this.sessionRoot, { withFileTypes: true }); } catch { return; }
+    const cutoff = this.clock() - maxAgeMs;
+    for (const ent of entries) {
+      if (!ent.isDirectory() || !/^[0-9a-f]{32}$/.test(ent.name)) continue;
+      const dir = path.join(this.sessionRoot, ent.name);
+      try {
+        // 每轮都会重写 openarc-session.json，用它的修改时间判断"多久没聊"。
+        let mtime;
+        try { mtime = fs.statSync(path.join(dir, "openarc-session.json")).mtimeMs; } catch { mtime = fs.statSync(dir).mtimeMs; }
+        if (mtime < cutoff) fs.rmSync(dir, { recursive: true, force: true });
+      } catch { /* ignore */ }
+    }
+  }
+
+  /** 运行中进度（计划 / 正在用的工具 / 流式文字）推给界面的出口；只给界面看，不落库。 */
+  setProgressSink(fn) { this.progressSink = typeof fn === "function" ? fn : null; }
+
+  #watchProgress(adapter, taskId) {
+    if (!this.progressSink || !adapter || typeof adapter.subscribe !== "function") return;
+    const sink = this.progressSink;
+    let pending = "";
+    let timer = null;
+    const flush = () => { timer = null; if (!pending) return; const text = pending; pending = ""; try { sink(taskId, { kind: "text", text }); } catch { /* ignore */ } };
+    adapter.subscribe((ev) => {
+      if (!ev) return;
+      if (ev.type === "text.delta" && typeof ev.text === "string") {
+        pending += ev.text;
+        if (!timer) timer = setTimeout(flush, 120);
+        return;
+      }
+      if (ev.type === "plan" && Array.isArray(ev.plan)) { try { sink(taskId, { kind: "plan", items: ev.plan }); } catch { /* ignore */ } return; }
+      if (ev.type === "tool.proposed" && ev.raw === "tool_call" && ev.title && ev.title !== "todo_write") {
+        flush();
+        try { sink(taskId, { kind: "tool", name: String(ev.title).slice(0, 80) }); } catch { /* ignore */ }
+      }
+    });
   }
 
   #service() { return this.taskService; }
@@ -171,6 +246,23 @@ class TaskHarnessOrchestrator {
    * D4-05 S4 / A36：为**每一次 run**（含 resumeBudgetExhausted 的新 run）独立创建装配闭包。
    * 闭包按当前 context/taskId/goal 重新 assemble，绝不跨 run 复用旧结果。
    */
+  /** 该任务的会话目录与上一轮的 dsh sessionId（没有配置 sessionRoot 时为 null）。 */
+  #sessionFor(taskId) {
+    if (!this.sessionRoot) return null;
+    const root = path.join(this.sessionRoot, sessionDirName(taskId));
+    let resumeSessionId = null;
+    try {
+      const saved = JSON.parse(fs.readFileSync(path.join(root, "openarc-session.json"), "utf8"));
+      if (saved && saved.taskId === String(taskId) && typeof saved.sessionId === "string") resumeSessionId = saved.sessionId;
+    } catch { /* 第一轮：还没有会话 */ }
+    return { root, resumeSessionId };
+  }
+
+  #rememberSession(taskId, session, sessionId) {
+    if (!session || !sessionId) return;
+    try { fs.writeFileSync(path.join(session.root, "openarc-session.json"), JSON.stringify({ taskId: String(taskId), sessionId: String(sessionId), updatedAt: this.clock() }), { mode: 0o600 }); } catch { /* 下一轮开新会话即可 */ }
+  }
+
   #memoryFor({ context, taskId, goal }) {
     if (!this.memoryContext || typeof this.memoryContext.assemble !== "function") return null;
     return { assemble: () => this.memoryContext.assemble({ context, taskId, goal }) };
@@ -219,7 +311,7 @@ class TaskHarnessOrchestrator {
     const usedKinds = [BUDGET_KIND.MODEL_CALLS];
     if (toolsEnabled) usedKinds.push(BUDGET_KIND.TOOL_CALLS);
     if (readLoopUsed || sideEffectLoopUsed) usedKinds.push(BUDGET_KIND.TOOL_ROUNDS);
-    const promptText = buildPrompt({ goal: task.goal, stepInput: effectiveInput, toolsEnabled });
+    let promptText = buildPrompt({ goal: task.goal, stepInput: effectiveInput, toolsEnabled });
 
     // D4-06 Closure：新 capability 额度 ≤ 任务剩余。任一 "会用到的" kind remaining==0 →
     // 不创建 run、不消耗，直接 BUDGET_EXHAUSTED（保持停止，用户需显式追加该 kind）。
@@ -263,7 +355,11 @@ class TaskHarnessOrchestrator {
       adapter = this.#makeAdapter({ context, taskId, stepId, runId: run.runId, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion });
       // D5-03 第十批：adapter.start() 返回**之前**就要能被 cancel / dispose 找到。
       this.registry.set(run.runId, { taskId, stepId, capabilityId: null, adapter, bridge: facade ? facade.bridge : null, starting: true });
-      info = await adapter.start({ context, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }) });
+      const session = this.#sessionFor(taskId);
+      info = await adapter.start({ context, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }), ...(session ? { session } : {}), ...(this.persona ? { persona: this.persona } : {}), ...(this.modelTtlMs ? { ttlMs: this.modelTtlMs } : {}), ...(this.planTool ? { planTool: true } : {}) });
+      this.#watchProgress(adapter, taskId);
+      if (session && info && info.sessionId) this.#rememberSession(taskId, session, info.sessionId);
+      if (info && info.resumed) { const follow = buildFollowupPrompt({ stepInput: effectiveInput }); if (follow) promptText = follow; }
     } catch (e) {
       try { this.logger?.log?.({ event: "task.harness.start_failed", error_code: String((e && e.code) || "UNCLASSIFIED"), detail: String((e && e.message) || e).slice(0, 300) }); } catch { /* ignore */ }
       // 启动段失败：立刻注销登记，避免把 adapter 留在 registry 里被重复收尾。
@@ -956,4 +1052,4 @@ class TaskHarnessOrchestrator {
   }
 }
 
-module.exports = { TaskHarnessOrchestrator, ORCHESTRATOR_ERROR, PROMPT_SCHEMA_VERSION, buildPrompt, mapAcpEvents, classifyHarnessError, sha256, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS };
+module.exports = { TaskHarnessOrchestrator, ORCHESTRATOR_ERROR, PROMPT_SCHEMA_VERSION, buildPrompt, buildFollowupPrompt, sessionDirName, mapAcpEvents, classifyHarnessError, sha256, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS };

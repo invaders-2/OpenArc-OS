@@ -304,6 +304,8 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     // Renderer / Harness / ACP / Tool args 一律无法选择 launcher。
     executorLauncher,
     executorTestHook,
+    // 全局 AI 会话化：每个对话一个持久 dsh 会话目录（多轮接着上下文）。
+    agentSession: { sessionRoot: path.join(userDataDir, "agent-sessions") },
   });
   // D5-02 Closure：拿到会话时对该会话的组织再 seed 一次内置 Model App baseline
   // （首次运行是"先建库、后注册管理员"，一次性 seed 时还没有组织）。upsert 幂等。

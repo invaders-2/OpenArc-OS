@@ -2659,11 +2659,16 @@ input[type="search"]:focus-visible {
 .dialog-footer button:not(.ds-btn):hover {
   background: var(--row-hover);
 }
-.dialog-footer .primary {
+/* 原生 .primary / .ghost 要压过上面 button:not(.ds-btn) 的兜底底色（含 hover），否则主按钮白底白字。 */
+.dialog-footer .primary,
+.dialog-footer button.primary:not(.ds-btn),
+.dialog-footer button.primary:not(.ds-btn):hover {
   background: var(--accent);
   color: var(--on-accent);
 }
-.dialog-footer .ghost {
+.dialog-footer button.primary:not(.ds-btn):hover { filter: brightness(1.08); }
+.dialog-footer .ghost,
+.dialog-footer button.ghost:not(.ds-btn) {
   background: transparent;
   color: var(--muted);
 }

@@ -110,6 +110,8 @@ const TASK_EVENT = Object.freeze({
   // D4-06 Closure · bounded 预算到限 → 用户显式续接（safe projection only）
   TASK_BUDGET_EXHAUSTED: "task.budget_exhausted",
   TASK_BUDGET_GRANTED: "task.budget.granted",
+  // 对话式任务每追加一轮的额度补足（只在 perTurnAllowance 装配下出现；不计入续接次数）
+  TASK_BUDGET_TURN_GRANTED: "task.budget.turn_granted",
   // D4-06 Closure · 旧任务首次建立任务级账本时的保守基线（精确为 false，绝不伪造历史余额）
   TASK_BUDGET_BASELINE_CREATED: "task.budget_baseline_created",
   // D4-05 · 结果未知的人工确认（只追加 safe event；绝不改 call/step/task 状态，绝不授权 resume/retry）
