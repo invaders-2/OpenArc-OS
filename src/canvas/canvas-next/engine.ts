@@ -291,3 +291,79 @@ export async function runTableBatch(store: CanvasStore, id: string): Promise<boo
 
 /** 上游表格变化时，table 节点输入列数（界面显示用） */
 export const tableMediaOf = tableMedia;
+
+/* ---------- 分组运行（TapNow Run Group） ---------- */
+export type GroupPlan = {
+  /** 按依赖分层：同一层互不依赖，可以并行 */
+  levels: string[][];
+  total: number;
+  /** 预计调用次数（张数 / 次数都算进去）、按类型、按模型 */
+  calls: number;
+  byKind: Record<GenKind, number>;
+  byModel: Array<{ name: string; calls: number }>;
+  /** 预计耗时（秒，按每层最慢的节点累加） */
+  secs: number;
+  /** 跳过的节点及原因（手写 / 上传 / 没提示词 / 组外上游没结果 / 没模型） */
+  skipped: Array<{ id: string; title: string; why: string }>;
+};
+
+/** 节点一次运行会产出几份结果（图片张数 / 视频次数），用于预估消耗 */
+export function callsOf(n: CanvasNode): number {
+  const p = genOf(n).params as Partial<ImageParams & VideoParams>;
+  if (n.kind === "image") return Math.max(1, Number(p.count) || 1);
+  if (n.kind === "video") return Math.max(1, Number(p.times) || 1);
+  return 1;
+}
+
+export function planGroup(store: CanvasStore, ids: string[]): GroupPlan {
+  const doc = store.state.doc; const inGroup = new Set(ids);
+  const skipped: GroupPlan["skipped"] = []; const run = new Set<string>();
+  for (const id of ids) {
+    const n = store.node(id); if (!n || !isGenKind(n.kind)) continue;
+    const g = genOf(n); const ins = inputsOf(doc, id);
+    if (g.manual || g.uploaded) continue; // 手写文本 / 上传素材本身就是结果，不算跳过
+    if (!g.prompt.trim() && !ins.length) { skipped.push({ id, title: g.title, why: "没有提示词也没有输入" }); continue; }
+    if (!store.modelOf(n)) { skipped.push({ id, title: g.title, why: "没有可用模型" }); continue; }
+    run.add(id);
+  }
+  // 组外上游没结果：这个节点和它在组内的下游都跑不了
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const id of [...run]) {
+      const bad = inputsOf(doc, id).find((x) => isGenKind(x.node.kind) && !outOf(x.node) && !(inGroup.has(x.node.id) && run.has(x.node.id)));
+      if (bad) { run.delete(id); skipped.push({ id, title: genOf(store.node(id)!).title, why: `上游「${genOf(bad.node).title}」还没有结果` }); changed = true; }
+    }
+  }
+  // 分层（Kahn）：只看组内、要运行的节点之间的依赖
+  const levels: string[][] = []; const done = new Set<string>(); let left = [...run];
+  while (left.length) {
+    const lv = left.filter((id) => inputsOf(doc, id).every((x) => !run.has(x.node.id) || done.has(x.node.id)));
+    if (!lv.length) break; // 不会成环（连线时已禁止），保险起见
+    levels.push(lv); lv.forEach((id) => done.add(id)); left = left.filter((id) => !done.has(id));
+  }
+  const byKind: Record<GenKind, number> = { text: 0, image: 0, video: 0, audio: 0 }; const models = new Map<string, number>(); let calls = 0; let secs = 0;
+  for (const lv of levels) {
+    let slow = 0;
+    for (const id of lv) { const n = store.node(id)!; const c = callsOf(n); const m = store.modelOf(n)!; calls += c; byKind[n.kind as GenKind] += c; models.set(m.name, (models.get(m.name) || 0) + c); slow = Math.max(slow, m.secs || 10); }
+    secs += slow;
+  }
+  return { levels, total: done.size, calls, byKind, byModel: [...models].map(([name, c]) => ({ name, calls: c })).sort((a, b) => b.calls - a.calls), secs, skipped };
+}
+
+/** 按计划逐层运行：同层并行；某个节点失败时，它在组内的下游不再运行 */
+export async function runGroup(store: CanvasStore, plan: GroupPlan): Promise<{ ok: number; failed: number; skipped: number }> {
+  const failed = new Set<string>(); let ok = 0; let skippedDown = 0;
+  const blocked = (id: string) => inputsOf(store.state.doc, id).some((x) => failed.has(x.node.id));
+  for (const lv of plan.levels) {
+    const results = await Promise.all(lv.map(async (id) => {
+      if (!store.node(id)) return null;
+      if (blocked(id)) { failed.add(id); skippedDown++; return null; }
+      const res = await runNode(store, id, { chain: true }).catch(() => false);
+      if (!res) failed.add(id); else ok++;
+      return res;
+    }));
+    void results;
+  }
+  return { ok, failed: failed.size - skippedDown, skipped: skippedDown };
+}

@@ -10,6 +10,8 @@ import { bgColor, clampTrim, formatClock, genOf, isGenKind, outOf, tagColor, TYP
 import type { RunState } from "../store";
 import { Icon } from "./Icon";
 import { TableNodeBody } from "./TableNode";
+import { StackBody } from "./StackNode";
+import { isStack } from "../stack";
 import { useAssetUrl } from "./useAsset";
 import { useCtl } from "./ctx";
 import type { GenData } from "../model";
@@ -45,6 +47,12 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
     <div className={cls + " tnode-wrap"} data-id={node.id} style={style}>
       <TableNodeBody node={node} sel={p.sel} />
       <Ports h={node.h} />
+    </div>
+  );
+  if (isStack(node)) return (
+    <div className={cls + " snode"} data-id={node.id} style={style}>
+      <div className="nhead"><Icon name="layers" size="xs" /><span className="t">堆叠</span></div>
+      <div className="nbody sbody" style={{ height: node.h }}><StackBody node={node} /></div>
     </div>
   );
   if (node.kind === "group") return (

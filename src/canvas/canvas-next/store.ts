@@ -43,6 +43,8 @@ export type UIState = {
   dragging: boolean;
   theme: "dark" | "light";
   themePref: "dark" | "light" | "system";
+  /** 左键拖动空白：select = 框选（TapNow 默认，右键 / 中键 / 空格拖动平移）；pan = 平移（旧习惯，Shift 拖动框选） */
+  leftDrag: "select" | "pan";
 };
 
 export type CanvasState = {
@@ -83,11 +85,12 @@ export class CanvasStore {
   constructor(backend: CanvasBackend, canvasId: string, name = "未命名画布") {
     this.backend = backend;
     let pref: UIState["themePref"] = "system";
-    try { pref = (localStorage.getItem("openarc-canvas-theme") as UIState["themePref"]) || "system"; } catch { /* 无存储时用默认 */ }
+    let leftDrag: UIState["leftDrag"] = "select";
+    try { pref = (localStorage.getItem("openarc-canvas-theme") as UIState["themePref"]) || "system"; leftDrag = localStorage.getItem("openarc-canvas-leftdrag") === "pan" ? "pan" : "select"; } catch { /* 无存储时用默认 */ }
     this.state = {
       canvasId, name, doc: { nodes: [], edges: [], comments: [] }, version: null, saving: "idle", loaded: false,
       view: { x: 0, y: 0, k: 1 },
-      ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, theme: "dark", themePref: pref },
+      ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, theme: "dark", themePref: pref, leftDrag },
       runtime: {}, runs: [], models: [], toasts: [], undo: [], redo: [],
       collab: { clientId: null, transport: null, peers: [] },
     };

@@ -84,21 +84,42 @@ function ItemTile({ it, onUse }: { it: Item; onUse: () => void }) {
 }
 
 /** 节点右键「存入资产库」：图片 / 视频 / 音频结果，或文本节点的内容（存成提示词） */
-export async function saveNodeToLibrary(ctl: Ctl, n: CanvasNode, anchor: { x: number; y: number }) {
-  const cmd = cmdOf(); const store = ctl.store; if (!cmd) return store.toast("资产库只在桌面版里可用");
+/** 把一个节点的当前结果存进指定资产库；返回失败原因（成功返回 null） */
+async function saveOne(cmd: Cmd, store: Ctl["store"], lib: Lib, n: CanvasNode): Promise<string | null> {
+  const g = genOf(n); const o = outOf(n);
+  if (n.kind === "text") { const x = await cmd({ type: "canvas/assetLibrary/upsert", libraryId: lib.id, item: { kind: "prompt", title: g.title, prompt: o?.text || g.prompt } }).catch(() => null); return x && x.ok ? null : String(x?.error || "存入失败"); }
+  if (!o?.url) return "还没有结果";
+  const dataUrl = o.url.startsWith("data:") ? o.url : await store.backend.resolveAsset(o.url);
+  if (!dataUrl || !dataUrl.startsWith("data:")) return "读取素材失败";
+  const mime = /^data:([^;,]+)/.exec(dataUrl)?.[1] || "image/png";
+  const x = await cmd({ type: "canvas/assetLibrary/import", libraryId: lib.id, name: g.title + "." + (mime.split("/")[1] || "png"), title: g.title, mime, dataUrl }).catch(() => null);
+  return x && x.ok ? null : String(x?.error || "存入失败");
+}
+async function pickLibrary(cmd: Cmd, anchor: { x: number; y: number } | Element, then: (lib: Lib) => void) {
   const r = await cmd({ type: "canvas/assetLibrary/list" }).catch(() => null); const libs: Lib[] = r && r.ok ? r.libraries || [] : [];
   if (!libs.length) { const e = await cmd({ type: "canvas/assetLibrary/ensure" }).catch(() => null); if (e && e.ok && e.library) libs.push(e.library); }
-  const save = async (lib: Lib) => {
-    const g = genOf(n); const o = outOf(n);
-    if (n.kind === "text") { const x = await cmd({ type: "canvas/assetLibrary/upsert", libraryId: lib.id, item: { kind: "prompt", title: g.title, prompt: o?.text || g.prompt } }).catch(() => null); return store.toast(x && x.ok ? `已存入「${lib.name}」` : "存入失败：" + String(x?.error || "")); }
-    if (!o?.url) return store.toast("这个节点还没有结果");
-    const dataUrl = o.url.startsWith("data:") ? o.url : await store.backend.resolveAsset(o.url);
-    if (!dataUrl || !dataUrl.startsWith("data:")) return store.toast("读取素材失败");
-    const mime = /^data:([^;,]+)/.exec(dataUrl)?.[1] || "image/png";
-    const x = await cmd({ type: "canvas/assetLibrary/import", libraryId: lib.id, name: g.title + "." + (mime.split("/")[1] || "png"), title: g.title, mime, dataUrl }).catch(() => null);
-    store.toast(x && x.ok ? `已存入「${lib.name}」${isPersonal(lib) ? "" : "，团队成员都能用"}` : "存入失败：" + String(x?.error || ""));
-  };
-  if (libs.length === 1) return save(libs[0]);
-  openPop(anchor, (close) => <><div className="mh">存入哪个资产库</div>{libs.map((l) => <button key={l.id} className="mi" onClick={() => { close(); void save(l); }}><Icon name={isPersonal(l) ? "user" : "layers"} size="s" />{l.name}<span className="k">{isPersonal(l) ? "个人" : "团队"}</span></button>)}</>);
+  if (!libs.length) return false;
+  if (libs.length === 1) { then(libs[0]); return true; }
+  openPop(anchor, (close) => <><div className="mh">存入哪个资产库</div>{libs.map((l) => <button key={l.id} className="mi" onClick={() => { close(); then(l); }}><Icon name={isPersonal(l) ? "user" : "layers"} size="s" />{l.name}<span className="k">{isPersonal(l) ? "个人" : "团队"}</span></button>)}</>);
+  return true;
+}
+
+export async function saveNodeToLibrary(ctl: Ctl, n: CanvasNode, anchor: { x: number; y: number }) {
+  const cmd = cmdOf(); const store = ctl.store; if (!cmd) return store.toast("资产库只在桌面版里可用");
+  const ok = await pickLibrary(cmd, anchor, (lib) => { void saveOne(cmd, store, lib, n).then((err) => store.toast(err ? (err === "还没有结果" ? "这个节点还没有结果" : "存入失败：" + err) : `已存入「${lib.name}」${isPersonal(lib) ? "" : "，团队成员都能用"}`)); });
+  if (!ok) store.toast("没有可用的资产库");
+}
+
+/** 多个节点一次存进同一个资产库（堆叠 / 多选「存素材库」） */
+export async function saveNodesToLibrary(ctl: Ctl, nodes: CanvasNode[], anchor: { x: number; y: number } | Element) {
+  const cmd = cmdOf(); const store = ctl.store; if (!cmd) return store.toast("资产库只在桌面版里可用");
+  const list = nodes.filter((n) => outOf(n)?.url || outOf(n)?.text);
+  if (!list.length) return store.toast("选中的节点还没有结果");
+  const ok = await pickLibrary(cmd, anchor, (lib) => { void (async () => {
+    let done = 0; const fails: string[] = [];
+    for (const n of list) { const err = await saveOne(cmd, store, lib, n); if (err) fails.push(genOf(n).title); else done++; }
+    store.toast(`已存入「${lib.name}」${done} 个${fails.length ? `，${fails.length} 个失败（${fails.slice(0, 3).join("、")}）` : ""}`, fails.length ? 6000 : 2600);
+  })(); });
+  if (!ok) store.toast("没有可用的资产库");
 }
 export { uid };

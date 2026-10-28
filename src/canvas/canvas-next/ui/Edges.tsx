@@ -3,6 +3,7 @@ import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
 import { inputsOf } from "../model";
 import { useCtl, useS } from "./ctx";
+import { hiddenIds } from "../stack";
 
 const portPos = (n: CanvasNode, side: "in" | "out") => ({ x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 });
 function pathD(a: { x: number; y: number }, b: { x: number; y: number }) { const dx = Math.max(60, Math.abs(b.x - a.x) * .5); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; }
@@ -13,7 +14,9 @@ export function Edges() {
   const seen = useRef<Set<string> | null>(null);
   const isNew = (id: string) => { if (!seen.current) return false; return !seen.current.has(id); };
   useEffect(() => { seen.current = new Set(doc.edges.map((e) => e.id)); });
-  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  // 收在堆叠里的节点不显示，连到它们的线也不画（关系仍然生效）
+  const hidden = hiddenIds(doc.nodes);
+  const byId = new Map(doc.nodes.filter((n) => !hidden.has(n.id)).map((n) => [n.id, n]));
   const items: React.ReactElement[] = [];
   for (const e of doc.edges) {
     const a = byId.get(e.from), b = byId.get(e.to); if (!a || !b) continue;

@@ -11,6 +11,9 @@ import { openPop } from "./overlay";
 import { groupSelection, LEGACY_DEFAULT, ungroup } from "./LegacyNodes";
 import { saveNodeToLibrary } from "./Library";
 import { blobToBase64, shortenPath } from "../exportCanvas";
+import { isStack, stackItems, stackSelection, unstack } from "../stack";
+import { confirmRunGroup, groupLabel, runnableIds, saveAsTemplate } from "./StackNode";
+import { makeZip } from "../zip";
 
 type At = Element | { x: number; y: number };
 const ITEMS: Array<[GenKind | "table", string, string]> = [["text", "文本", "脚本、广告词、品牌文案"], ["image", "图片", "宣传图、海报、封面"], ["video", "视频", "宣传视频、动画、电影"], ["audio", "音频", "音乐、配音、音效"], ["table", "多维表格", "逐行批量：一行一条生成任务"]];
@@ -90,11 +93,14 @@ export function nodeMenu(ctl: Ctl, at: { x: number; y: number }) {
       {/* 分组：资产 ┃ 版本 ┃ 运行 ┃ 编辑 ┃ 删除 ┃ 剪贴板（TapNow 的节点菜单也是按用途分组） */}
       <button className="mi" data-k="lib" disabled={!(n.kind === "image" && out)} onClick={act(() => { store.patchGen(n.id, { fav: true }); store.toast(`「${title(n)}」已收藏`); })}><Icon name="star" size="s" />收藏</button>
       <button className="mi" data-k="assetlib" disabled={!gen || !(out?.url || out?.text)} onClick={act(() => void saveNodeToLibrary(ctl, n, at))}><Icon name="libadd" size="s" />存入资产库<span className="k">个人 / 团队</span></button>
-      <button className="mi" data-k="dl" disabled={!out} onClick={act(() => void download(n, store))}><Icon name="download" size="s" />下载</button>
+      {multi || isStack(n) ? <button className="mi" data-k="dl" onClick={act(() => void downloadMany(sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x), store))}><Icon name="download" size="s" />全部下载<span className="k">zip</span></button>
+        : <button className="mi" data-k="dl" disabled={!out} onClick={act(() => void download(n, store))}><Icon name="download" size="s" />下载</button>}
       <div className="msep" />
       <button className="mi" data-k="extractver" disabled={!g || g.hist.length < 2} onClick={act(() => extractCurrentVersion(store, n.id))}><Icon name="copy" size="s" />提取当前版本<span className="k">{g && g.hist.length > 1 ? "第 " + (g.hi + 1) + " 版" : ""}</span></button>
       <button className="mi" data-k="allhist" disabled={!g || g.hist.length < 2} onClick={act(() => spreadHistory(store, n.id))}><Icon name="layers" size="s" />应用所有历史<span className="k">{g && g.hist.length > 1 ? g.hist.length + " 个版本" : ""}</span></button>
       <div className="msep" />
+      {multi || n.kind === "group" ? <button className="mi" data-k="rungroup" onClick={act(() => { const ns = sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x); confirmRunGroup(ctl, runnableIds(store, ns), multi ? `选中的 ${ns.length} 个节点` : groupLabel(n)); })}><Icon name="play" size="s" />{multi ? "运行选中节点" : isStack(n) ? "运行堆叠" : "运行分组"}</button> : null}
+      {multi || n.kind === "group" ? <button className="mi" data-k="savetpl" onClick={act(() => { const ns = sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x); saveAsTemplate(ctl, ns, multi ? store.state.name + " 模板" : groupLabel(n) + " 模板"); })}><Icon name="layout" size="s" />存为我的模板</button> : null}
       <button className="mi" data-k="runup" disabled={!gen} onClick={act(() => void runChain(store, n.id, "up"))}><Icon name="runup" size="s" />运行到此（含上游）</button>
       <button className="mi" data-k="rundown" onClick={act(() => void runChain(store, n.id, "down"))}><Icon name="rundown" size="s" />从此运行下游</button>
       <div className="msep" />
@@ -102,7 +108,10 @@ export function nodeMenu(ctl: Ctl, at: { x: number; y: number }) {
       <button className="mi" data-k="paste" disabled={!hasClip()} onClick={act(() => paste(store))}><Icon name="copy" size="s" />粘贴<span className="k">⌘V</span></button>
       <button className="mi" data-k="dup" onClick={act(() => duplicate(store))}><Icon name="layers" size="s" />副本<span className="k">⌘D</span></button>
       {multi ? <button className="mi" data-k="group" onClick={act(() => groupSelection(store))}><Icon name="layers" size="s" />编组<span className="k">⌘G</span></button> : null}
-      {n.kind === "group" ? <button className="mi" data-k="ungroup" onClick={act(() => ungroup(store, n.id))}><Icon name="layers" size="s" />取消分组<span className="k">⇧⌘G</span></button> : null}
+      {multi ? <button className="mi" data-k="stack" onClick={act(() => stackSelection(store))}><Icon name="layers" size="s" />堆叠<span className="k">⇧S</span></button> : null}
+      {isStack(n) ? <><button className="mi" data-k="stackopen" onClick={act(() => window.dispatchEvent(new CustomEvent("cn:stack", { detail: n.id })))}><Icon name="expand" size="s" />展开堆叠</button>
+        <button className="mi" data-k="unstack" onClick={act(() => unstack(store, n.id))}><Icon name="split" size="s" />取消堆叠</button></>
+        : n.kind === "group" ? <button className="mi" data-k="ungroup" onClick={act(() => ungroup(store, n.id))}><Icon name="layers" size="s" />取消分组<span className="k">⇧⌘G</span></button> : null}
       <div className="msep" />
       <button className="mi" data-k="clip" onClick={act(async () => { try { await navigator.clipboard.writeText(out?.text || g?.prompt || title(n)); store.toast("已复制到剪贴板"); } catch { store.toast("剪贴板不可用"); } })}><Icon name="copy" size="s" />复制到剪贴板</button>
       <div className="msep" />
@@ -179,17 +188,56 @@ async function clipVideoBlob(blob: Blob, opts: { name: string; inSec: number; ou
   return { ok: false, error: String(res?.error || "CLIP_FAILED"), detail: res && typeof res.detail === "string" ? res.detail : "" };
 }
 
+const saveBlob = (blob: Blob, file: string) => { const a = document.createElement("a"); const u = URL.createObjectURL(blob); a.href = u; a.download = file; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60_000); };
+const fileBase = (n: CanvasNode) => (genOf(n).title || "openarc").replace(/[\\/:*?"<>|]/g, "_");
+
+/** 取节点当前结果的字节：资源库引用 / 远程地址先换成可取的地址，按类型补扩展名 */
+export async function nodeFile(n: CanvasNode, store?: CanvasStore): Promise<{ blob: Blob; name: string; ext: string } | null> {
+  if (!isGenKind(n.kind)) return null;
+  const o = outOf(n); if (!o) return null; const name = fileBase(n);
+  if (o.text && !o.url) return { blob: new Blob([o.text], { type: "text/markdown" }), name, ext: "md" };
+  let url = o.url || o.frame || ""; if (!url) return null;
+  if (url.startsWith("openarc-asset:")) { const d = store ? await store.backend.resolveAsset(url) : null; if (!d) throw new Error("资源不可用"); url = d; }
+  else if (/^https?:\/\//i.test(url) && store?.backend.importRemote) { const ref = await store.backend.importRemote(store.state.canvasId, url, name); const d = ref.startsWith("openarc-asset:") ? await store.backend.resolveAsset(ref) : null; if (d) url = d; }
+  const blob = await (await fetch(url)).blob();
+  const ext = (blob.type.split("/")[1] || (n.kind === "video" ? "mp4" : n.kind === "audio" ? "mp3" : "png")).replace("jpeg", "jpg").replace("quicktime", "mov").replace("mpeg", "mp3").replace(/[^a-z0-9]/g, "");
+  return { blob, name, ext };
+}
+
+/**
+ * 批量下载（TapNow：多选 / 堆叠「全部下载」）：堆叠展开成成员，有结果的节点打成一个 zip。
+ * 只有一个文件时直接下载；没有结果的节点跳过并说明。
+ */
+export async function downloadMany(nodes: CanvasNode[], store: CanvasStore, zipName?: string) {
+  const doc = store.state.doc; const seen = new Set<string>(); const list: CanvasNode[] = [];
+  for (const n of nodes) for (const m of isStack(n) ? stackItems(doc, n) : [n]) if (!seen.has(m.id)) { seen.add(m.id); list.push(m); }
+  const withOut = list.filter((n) => isGenKind(n.kind) && outOf(n));
+  const skipped = list.length - withOut.length;
+  if (!withOut.length) { store.toast("选中的节点还没有可下载的结果"); return; }
+  if (withOut.length === 1) { await download(withOut[0], store); return; }
+  store.toast(`正在打包 ${withOut.length} 个文件…`);
+  const files: Array<{ name: string; data: Blob }> = []; const failed: string[] = [];
+  for (const n of withOut) {
+    try { const f = await nodeFile(n, store); if (f) files.push({ name: f.name + "." + f.ext, data: f.blob }); else failed.push(title(n)); }
+    catch { failed.push(title(n)); }
+  }
+  if (!files.length) { store.toast("下载失败：结果都取不到"); return; }
+  const zip = await makeZip(files);
+  const base = (zipName || store.state.name || "openarc").replace(/[\\/:*?"<>|]/g, "_");
+  saveBlob(zip, `${base}-${files.length}个文件.zip`);
+  const notes = [skipped ? `${skipped} 个没有结果已跳过` : "", failed.length ? `${failed.length} 个读取失败（${failed.slice(0, 3).join("、")}${failed.length > 3 ? "…" : ""}）` : ""].filter(Boolean).join("；");
+  store.toast(`已打包下载 ${files.length} 个文件${notes ? "；" + notes : ""}`, notes ? 6000 : 2600);
+}
+
 /** 下载节点结果：资源库引用 / 远程地址先取成字节，按类型补扩展名（Electron 里 a[download] 只认能直接取到的地址） */
 export async function download(n: CanvasNode, store?: CanvasStore) {
-  const o = outOf(n); if (!o) return; const name = (genOf(n).title || "openarc").replace(/[\\/:*?"<>|]/g, "_");
-  const save = (blob: Blob, ext: string) => { const a = document.createElement("a"); const u = URL.createObjectURL(blob); a.href = u; a.download = name + "." + ext; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60_000); };
-  if (o.text && !o.url) return save(new Blob([o.text], { type: "text/markdown" }), "md");
-  let url = o.url || o.frame || ""; if (!url) return;
+  if (!outOf(n)) return; const name = fileBase(n);
+  const save = (blob: Blob, ext: string) => saveBlob(blob, name + "." + ext);
   try {
-    if (url.startsWith("openarc-asset:")) { const d = store ? await store.backend.resolveAsset(url) : null; if (!d) throw new Error("资源不可用"); url = d; }
-    else if (/^https?:\/\//i.test(url) && store?.backend.importRemote) { const ref = await store.backend.importRemote(store.state.canvasId, url, name); const d = ref.startsWith("openarc-asset:") ? await store.backend.resolveAsset(ref) : null; if (d) url = d; }
-    const blob = await (await fetch(url)).blob();
-    const ext = (blob.type.split("/")[1] || (n.kind === "video" ? "mp4" : n.kind === "audio" ? "mp3" : "png")).replace("jpeg", "jpg").replace("quicktime", "mov").replace("mpeg", "mp3").replace(/[^a-z0-9]/g, "");
+    const f = await nodeFile(n, store); if (!f) return;
+    const { blob, ext } = f;
+    if (ext === "md") return save(blob, ext);
+    const o = outOf(n)!;
     const trim = n.kind === "video" ? o.trim : undefined;
     // 视频设了「使用区间」：先让主进程 ffmpeg 真裁；没有 ffmpeg / 裁剪失败再退回完整下载（如实说明，不静默）
     if (trim && !trimIsFull(o.dur, trim)) {
