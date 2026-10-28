@@ -508,6 +508,16 @@ function registerRuntimeDomains(context) {
           approval: mcpApprovalPort,
         })
       : null;
+    // 全局 AI：打开了「允许 AI 调用 MCP 工具」时，每轮把已连接服务器的 MCP 工具交给 AI（一律先审批再执行）。
+    if (mcpAgentBridge && identity.orchestrator && typeof identity.orchestrator.setDynamicWriteTools === "function") {
+      identity.orchestrator.setDynamicWriteTools(() => {
+        if (!mcpSwitch || typeof mcpSwitch.isToolInvocationEnabled !== "function" || mcpSwitch.isToolInvocationEnabled() !== true) return [];
+        const snap = mcpAgentBridge.snapshot();
+        if (!snap || snap.ok !== true) return [];
+        const report = mcpAgentBridge.toolContractReport();
+        return report && Array.isArray(report.toolIds) ? report.toolIds : [];
+      });
+    }
     agentBundle = createAgentBundle({
       identityStore: identity.store,
       authorization: identity.authorization,

@@ -66,6 +66,20 @@ function summarizeArguments(args) {
  * @param {object} options.registry   ToolRegistry（动态 allowlist 与执行合同复核）。
  * @param {()=>number} [options.clock] @param {number} [options.bindingTtlMs] @param {number} [options.maxBindings]
  */
+/** MCP content 数组 → 给模型看的有界文字（文字原样，其余类型只留占位）。 */
+function contentText(content, structured) {
+  const parts = [];
+  for (const item of Array.isArray(content) ? content : []) {
+    if (!item || typeof item !== "object") continue;
+    if (item.type === "text" && typeof item.text === "string") parts.push(item.text);
+    else if (item.type === "resource" && item.resource && typeof item.resource.text === "string") parts.push(item.resource.text);
+    else parts.push("[" + String(item.type || "content") + "]");
+  }
+  if (!parts.length && structured != null) { try { parts.push(JSON.stringify(structured)); } catch { /* ignore */ } }
+  const text = parts.join("\n");
+  return text.length > 20000 ? text.slice(0, 20000) + "\n…(truncated)" : text;
+}
+
 function createMcpSideEffectProvider({ transport = null, registry = null, clock = null, bindingTtlMs = BINDING_TTL_MS, maxBindings = MAX_BINDINGS } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
   /** bindRef → { args, serverId, toolName, argsDigest, createdAt }；只活进程内存，绝不落库 / 事件 / 日志。 */
@@ -164,6 +178,8 @@ function createMcpSideEffectProvider({ transport = null, registry = null, clock 
           argsDigest: binding.argsDigest, responseDigest,
           content, isError: false,
           structuredContent: res.structuredContent === undefined ? null : res.structuredContent,
+          // 全局 AI：模型要看到工具返回的内容才能继续；只给有界的文字投影（外部内容，按不可信数据对待）。
+          forModel: { mcpServer: binding.serverId, mcpTool: binding.toolName, untrusted: true, content: contentText(content, res.structuredContent) },
         },
       };
     },
