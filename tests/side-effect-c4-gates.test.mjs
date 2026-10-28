@@ -475,10 +475,11 @@ test("No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 all
 
   // (c) in-process 白名单是显式静态封闭集合：恰好三个进程局部 Domain，且不从 arguments / plan 解析。
   // D5-04：新增 McpExternal —— MCP 活连接只存在于 main 进程，受监督 executor 子进程里没有这条连接。
+  // 全局 AI 第 2 期：新增 Workspace —— 工作文件夹句柄只在 main 进程；写文件 / 运行命令仍要先经用户审批。
   const whitelistDecl = runtime.match(/const IN_PROCESS_EXECUTION_PROVIDERS = Object\.freeze\(new Set\(\[([^\]]*)\]\)\);/);
   assert.ok(whitelistDecl, "IN_PROCESS_EXECUTION_PROVIDERS 必须由 Object.freeze(new Set([...])) 字面量构造");
   assert.match(whitelistDecl[1], /^\s*"[^"]+"(\s*,\s*"[^"]+"\s*)*$/, "白名单成员只允许字符串字面量，不得从参数读入：" + whitelistDecl[1]);
-  assert.deepEqual([...whitelistDecl[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]), ["BrowserControl", "CanvasControl", "McpExternal"], "in-process 白名单必须恰好等于 BrowserControl + CanvasControl + McpExternal");
+  assert.deepEqual([...whitelistDecl[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]), ["BrowserControl", "CanvasControl", "McpExternal", "Workspace"], "in-process 白名单必须恰好等于 BrowserControl + CanvasControl + McpExternal + Workspace");
   assert.equal((runtime.match(/IN_PROCESS_EXECUTION_PROVIDERS\s*=/g) || []).length, 1, "白名单只允许一处静态声明");
   assert.equal((runtime.match(/IN_PROCESS_EXECUTION_PROVIDERS\.has\(/g) || []).length, 2, "白名单只允许两处只读 .has()（executeInProcess 守卫 + executeApproved 分流）");
   assert.ok(!/IN_PROCESS_EXECUTION_PROVIDERS\.(add|delete|clear)\(/.test(runtime), "白名单绝不允许运行时扩充");

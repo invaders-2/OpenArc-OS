@@ -255,7 +255,7 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
       <div className="approval" data-approval-request-id={request.approvalRequestId} data-approval-tool={request.toolId}>
         <dl className="approval-grid">
           <dt>应用 / Agent</dt>
-          <dd data-approval-app>{request.toolId.startsWith("resource.") ? "AI 助手（本机会话）" : "本机 Agent"}</dd>
+          <dd data-approval-app>{request.toolId.startsWith("resource.") || request.toolId.startsWith("workspace.") ? "AI 助手（本机会话）" : "本机 Agent"}</dd>
           <dt>工具</dt>
           <dd data-approval-tool-name>{request.toolDisplayName}（{request.toolId}）</dd>
           <dt>风险</dt>
@@ -275,7 +275,7 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
           <dd data-approval-effect>{effectText(request)}</dd>
           {request.contentPreview != null ? (
             <>
-              <dt>正文</dt>
+              <dt>{request.toolId === "workspace.exec" ? "命令" : "正文"}</dt>
               <dd data-approval-content>
                 <pre className="approval-content">{request.contentPreview}{request.contentBytes && request.contentBytes > new Blob([request.contentPreview]).size ? "\n…（共 " + request.contentBytes + " 字节，以上为开头部分）" : ""}</pre>
               </dd>
@@ -283,7 +283,10 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
           ) : null}
           <dt>前置条件</dt>
           <dd data-approval-version>
-            {request.currentVersion == null ? "版本未知" : "版本 " + request.currentVersion}
+            {request.toolId === "workspace.write"
+              ? (String(request.targetDisplayName || "").includes("新建") ? "这个文件现在还不存在；写入前会再核对，已被创建就取消" : "写入前会再核对文件内容，和现在不一样就取消")
+              : request.toolId === "workspace.exec" ? "无（只在工作文件夹里运行，超时会被停止）"
+              : request.currentVersion == null ? "版本未知" : "版本 " + request.currentVersion}
           </dd>
         </dl>
         <p className="approval-note">

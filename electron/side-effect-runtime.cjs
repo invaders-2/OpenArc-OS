@@ -50,8 +50,12 @@ const EXECUTOR_TIMEOUT_MS = 15000;
  * 子进程里既没有这条连接，也不应该为了执行它在 child 里再造一份传输权威。因此 MCP 外部工具与上两者
  * 同类：execution placement 显式 IN_PROCESS，但 approval / lease / claim / exactly-once / verify / audit
  * 仍全部由**同一个** SideEffectAuthority 裁决。
+ *
+ * 全局 AI 第 2 期追加 `Workspace`：工作文件夹的路径根由 main 装配决定，运行命令本身就会起独立子进程
+ * （有自己的时限和输出上限）；在受监督 executor 里再套一层只会把命令时限卡在 executor 的 15 秒上。
+ * 与上面三者同类：placement 显式 IN_PROCESS，approval / lease / claim / verify / audit 不变。
  */
-const IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set(["BrowserControl", "CanvasControl", "McpExternal"]));
+const IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set(["BrowserControl", "CanvasControl", "McpExternal", "Workspace"]));
 
 /** approval 快照 / tool result 只允许 safe 字段。 */
 const SAFE_SNAPSHOT_SECRET_RE = /^(secret|token|authorization|api[_-]?key|credential|password|bearer|capability)/i;
@@ -216,6 +220,15 @@ class SideEffectRuntime {
       targetName = "资源库新文件 · " + pre.name.slice(0, 120);
       if (typeof pre.content === "string") contentPreview = pre.content.slice(0, 800);
     }
+    // 全局 AI 工作文件夹：写文件要让用户看见路径和正文，运行命令要让用户看见**完整命令**。
+    if (call.toolId === "workspace.write" && typeof pre.targetRef === "string") {
+      targetName = "工作文件夹 · " + pre.targetRef.slice(0, 200) + (pre.expectedHash === "absent" ? "（新建）" : "（覆盖，旧文件会备份）");
+      if (typeof pre.content === "string") contentPreview = pre.content.slice(0, 800);
+    }
+    if (call.toolId === "workspace.exec" && typeof pre.script === "string") {
+      targetName = "在工作文件夹里运行命令" + (pre.timeoutSec ? "（最长 " + Number(pre.timeoutSec) + " 秒）" : "");
+      contentPreview = pre.script.slice(0, 8000);
+    }
     const approval = this.authority.effectiveApproval(call.callId);
     const allowed = new Set(["approvalRequestId", "status", "toolId", "toolDisplayName", "riskClass", "effectClass", "targetDisplayName", "resourceRef", "targetRef", "url", "expectedEffects", "expectedVersion", "currentVersion", "expiresAt", "requiresApproval", "contentPreview", "contentBytes"]);
     const snap = {
@@ -324,7 +337,10 @@ class SideEffectRuntime {
       if (after && !CALL_TERMINAL.includes(String(after.status)) && after.status === CALL_STATUS.APPROVED) this.#blockPending(callId, (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE);
       return { ok: false, inProcess: true, error: (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE, call: this.store.callById(callId) };
     }
-    const authorityResult = await this.authority.executeSideEffect({ callId, leaseId: lease.lease.leaseId, holderId, timeoutMs: Number(timeoutMs) > 0 ? Number(timeoutMs) : this.executorTimeoutMs });
+    // 合同可以声明更长的执行时限（工作文件夹运行命令）；只会放宽、不会比默认更短。
+    const contractTimeout = Number(contract.executionTimeoutMs) > 0 ? Number(contract.executionTimeoutMs) : 0;
+    const baseTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : this.executorTimeoutMs;
+    const authorityResult = await this.authority.executeSideEffect({ callId, leaseId: lease.lease.leaseId, holderId, timeoutMs: Math.max(baseTimeout, contractTimeout) });
     let after = this.store.callById(callId);
     if (after && after.status === CALL_STATUS.SUCCEEDED) return { ok: true, inProcess: true, call: after, safeResult: safeToolResult(after), result: authorityResult ? authorityResult.result : null, error: null };
     // 与 out-of-process 路径**同一套**收敛语义：UNKNOWN_EFFECT 一律走只读恢复核查，

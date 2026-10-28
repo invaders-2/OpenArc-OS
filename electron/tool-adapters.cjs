@@ -35,8 +35,10 @@ function projectFields(source, fields, { maxString = MAX_STRING } = {}) {
 }
 
 /** 静态 allowlist：provider → adapter（绝不从 arguments 解析 module/path）。*/
-function createToolAdapters({ resourceService = null, searchService = null, browserControl = null, canvasService = null, webAccess = null, extra = {} } = {}) {
+function createToolAdapters({ resourceService = null, searchService = null, browserControl = null, canvasService = null, webAccess = null, workspace = null, extra = {} } = {}) {
   const providers = {};
+  // 全局 AI 工作文件夹（第 2 期）：读 / 列 / 搜只读，写文件和运行命令走 SideEffectAuthority。
+  if (workspace) providers.Workspace = require("./agent-workspace.cjs").createWorkspaceProvider({ workspace });
 
   providers.test = {
     toolIds: ["test.echo", "test.write", "test.noverify"],

@@ -28,6 +28,7 @@ const { SideEffectRuntime } = require("./side-effect-runtime.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { READ_TOOL_IDS, WRITE_TOOL_IDS } = require("./dsh-tool-profile.cjs");
 const { AI_TASK_BUDGET } = require("./task-domain.cjs");
+const { createAgentWorkspace } = require("./agent-workspace.cjs");
 
 /** D4-04 / D4-06：官方 dsh Tool Facade 的 run 级预算（与 orchestrator 实际使用同一份配置）。 */
 // toolIds / writeToolIds 一律取 allowlist 常量（唯一真源；不在装配处再写一份字面量）。
@@ -60,7 +61,9 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   const toolRegistry = new ToolRegistry();
   // D4-03B/C2：静态 allowlist adapter（executionProvider → 既有 Domain）。
   // D5-01 Closure-2：BrowserControl 与 Resource/Search 同一条装配路径 —— 不存在第二套执行通道。
-  const adapters = createToolAdapters({ resourceService, searchService, browserControl, canvasService, webAccess });
+  // 全局 AI 工作文件夹：只在会话化装配（agentSession.workspaceDir）里打开。
+  const workspace = agent && agent.workspaceDir ? createAgentWorkspace({ root: agent.workspaceDir, clock, logger }) : null;
+  const adapters = createToolAdapters({ resourceService, searchService, browserControl, canvasService, webAccess, workspace });
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: authorization, taskStore, taskService, adapters, clock, logger });
   // D4-03C4：trusted runtime supervisor（唯一 observeExit / registerRuntime 调用方）。
   const supervisor = new RuntimeSupervisor({
@@ -118,10 +121,11 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
         modelTtlMs: AGENT_SESSION_DEFAULTS.capabilityTtlMs,
         turnTimeoutMs: AGENT_SESSION_DEFAULTS.turnTimeoutMs,
         planTool: true,
+        workspaceTools: !!workspace,
       } : {}),
     });
   }
-  return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, memoryContext, orchestrator, browserControl };
+  return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, workspace, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, memoryContext, orchestrator, browserControl };
 }
 
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */

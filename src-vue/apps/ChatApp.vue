@@ -300,6 +300,13 @@ const TOOL_LABEL: Array<[RegExp, string]> = [
   [/^(read_skill_file|readSkillFile)$/i, "读取技能"],
   [/^(find_files|search_files)$/i, "查找文件"],
   [/^(task_ask|ask_user|ask_question)$/i, "向你确认"],
+  [/^skill_list$/i, "查看技能"],
+  [/^skill_load$/i, "读取技能"],
+  [/^workspace_list$/i, "查看工作文件夹"],
+  [/^workspace_read$/i, "读取文件"],
+  [/^workspace_search$/i, "查找文件"],
+  [/^workspace_write$/i, "写入文件"],
+  [/^workspace_exec$/i, "运行命令"],
   [/^(thinking|reasoning)$/i, "已思考"],
 ];
 function toolLabel(title: string) {
@@ -315,17 +322,20 @@ const TOOL_CATEGORY: Array<[RegExp, string]> = [
   [/^(canvas_generate_image|generate_image|generate_video|submit_generation|prepare_generation|prepareGenerations)$/i, "gen"],
   [/^(image_search|search_images)$/i, "search"],
   [/^web_search$/i, "webSearch"],
-  [/^(read_file|read_files|write_file|web_fetch|browser_read_page|read_skill_file|readSkillFile|find_files|search_files)$/i, "read"],
+  [/^(read_file|read_files|write_file|web_fetch|browser_read_page|read_skill_file|readSkillFile|find_files|search_files|workspace_list|workspace_read|workspace_search)$/i, "read"],
+  [/^(skill_list|skill_load)$/i, "skill"],
+  [/^workspace_write$/i, "fileWrite"],
+  [/^workspace_exec$/i, "exec"],
 ];
 function toolCategory(title: string) {
   const head = String(title || "").trim().split(/\s+/)[0] || "";
   for (const [re, kind] of TOOL_CATEGORY) if (re.test(head)) return kind;
   return "other";
 }
-const ICON_BY_CATEGORY: Record<string, string> = { canvasView: "canvas", canvasEdit: "canvas", gen: "gen", search: "image", webSearch: "globe", read: "doc", other: "tool" };
+const ICON_BY_CATEGORY: Record<string, string> = { canvasView: "canvas", canvasEdit: "canvas", gen: "gen", search: "image", webSearch: "globe", read: "doc", skill: "doc", fileWrite: "doc", exec: "tool", other: "tool" };
 function rowIcon(title: string) { return ICON_BY_CATEGORY[toolCategory(title)] || "tool"; }
 function summarize(tools: any[]) {
-  const c: Record<string, number> = { canvasView: 0, canvasEdit: 0, gen: 0, search: 0, webSearch: 0, read: 0, other: 0 };
+  const c: Record<string, number> = { canvasView: 0, canvasEdit: 0, gen: 0, search: 0, webSearch: 0, read: 0, skill: 0, fileWrite: 0, exec: 0, other: 0 };
   for (const t of tools) c[toolCategory(String(t.title || ""))] += 1;
   const parts: string[] = [];
   if (c.canvasView) parts.push("查看了画布 " + c.canvasView + " 次");
@@ -334,6 +344,9 @@ function summarize(tools: any[]) {
   if (c.search) parts.push("搜索了 " + c.search + " 次参考图");
   if (c.webSearch) parts.push("联网搜索了 " + c.webSearch + " 次");
   if (c.read) parts.push("读取了 " + c.read + " 个文件/网页");
+  if (c.skill) parts.push("查看了 " + c.skill + " 次技能");
+  if (c.fileWrite) parts.push("写入了 " + c.fileWrite + " 个文件");
+  if (c.exec) parts.push("运行了 " + c.exec + " 条命令");
   if (!parts.length) return tools.length ? "完成了 " + tools.length + " 个操作" : "";
   return parts.join("，") + (tools.length ? " · 共 " + tools.length + " 个操作" : "");
 }
@@ -499,12 +512,12 @@ onMounted(async () => {
   await Promise.all([loadList(), loadModels(), loadApprovals()]);
   off = taskBridge?.onEvent((ev: any) => {
     if (!ev) return;
-    if (ev.type === "task/result") { void loadList(); if (ev.taskId === currentId.value) { live.value = null; void loadDetail(); } }
+    if (ev.type === "task/result") { void loadList(); void loadApprovals(); if (ev.taskId === currentId.value) { live.value = null; void loadDetail(); } }
     else if (ev.type === "task/progress") onProgress(ev);
     else if (ev.type === "task/event" && ev.taskId === currentId.value) mergeEvents(ev.events);
   }) ?? null;
   offApproval = sideEffectBridge?.onEvent?.((ev: any) => { if (ev?.type === "sideEffect/approvalRequested") { if (ev.request) approvals.value = [ev.request, ...approvals.value.filter((a) => a.approvalRequestId !== ev.request.approvalRequestId)]; else void loadApprovals(); } }) ?? null;
-  poll = window.setInterval(() => { if (detail.value && (running(detail.value.task.status) || sending.value)) void loadDetail(); if (running(detail.value?.task.status)) void loadApprovals(); }, 700);
+  poll = window.setInterval(() => { if (detail.value && (running(detail.value.task.status) || sending.value)) void loadDetail(); if (running(detail.value?.task.status) || approvals.value.length) void loadApprovals(); }, 700);
 });
 onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); });
 </script>

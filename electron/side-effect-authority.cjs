@@ -104,9 +104,11 @@ const PRECONDITION_KEYS = new Set(["resourceRef", "expectedVersion", "expectedHa
   "revision", "commandFingerprint", "command",
   // 10-16 素材库 AI 写回（resource.save.text）：审批时看到的**正文本身**随 plan 持久化，
   // 执行只读这份快照并按 contentSha256 复核 —— 与 url / command 同一口径，绝不再从 Harness 入参取内容。
-  "name", "contentSha256", "bytes", "content", "description"]);
+  "name", "contentSha256", "bytes", "content", "description",
+  // 全局 AI 工作文件夹：运行命令时批准的就是这段命令本身（与 content 同一口径，执行只读这份快照）。
+  "script", "timeoutSec"]);
 /** 每个 key 的字符串上界；未列出的沿用 300。超界一律丢弃该 key（fail closed），不截断。 */
-const PRECONDITION_STRING_MAX = Object.freeze({ url: 2000, commandFingerprint: 2000, content: 200000, description: 500, contentSha256: 64, name: 200 });
+const PRECONDITION_STRING_MAX = Object.freeze({ url: 2000, commandFingerprint: 2000, content: 200000, description: 500, contentSha256: 64, name: 200, script: 8000 });
 /** command 是结构化执行入参：与 commandFingerprint 同一预算；超界一律丢弃该 key（fail closed，绝不截断）。 */
 const PRECONDITION_OBJECT_MAX = 2000;
 function sanitizePreconditions(pre) {

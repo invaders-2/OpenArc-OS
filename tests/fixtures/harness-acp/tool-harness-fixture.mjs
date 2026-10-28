@@ -58,7 +58,7 @@ export async function createToolHarnessFixture(opts = {}) {
   const toolRegistry = new ToolRegistry();
   // withAdapters=true 才允许真实 READ_ONLY 执行（D4-03B）；默认保持 D4-03A gate 语义。
   // D5-01 Closure-2：与 production task-bootstrap 逐字同一条装配（browserControl 由宿主注入）。
-  const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService, browserControl: opts.browserControl || null, webAccess: opts.webAccess || null }) : null;
+  const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService, browserControl: opts.browserControl || null, webAccess: opts.webAccess || null, workspace: opts.workspace || null }) : null;
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, taskService: base.taskService, adapters, clock: base.f.clock });
   const sideEffectClock = typeof opts.sideEffectClock === "function" ? opts.sideEffectClock : base.f.clock;
   const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });

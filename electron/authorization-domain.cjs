@@ -192,6 +192,11 @@ const TOOL_ACTION = Object.freeze({
   // 全局 AI 联网：只读搜索与只读抓取分开授予。
   WEB_SEARCH: "tool.web.search",
   WEB_FETCH: "tool.web.fetch",
+  // 全局 AI 第 2 期：技能（只读）与工作文件夹（读 / 写 / 运行命令分开授予）。
+  SKILL_READ: "tool.skill.read",
+  WORKSPACE_READ: "tool.workspace.read",
+  WORKSPACE_WRITE: "tool.workspace.write",
+  WORKSPACE_EXEC: "tool.workspace.exec",
 });
 const TOOL_ACTIONS = Object.freeze(Object.values(TOOL_ACTION));
 function isToolAction(action) { return TOOL_ACTIONS.includes(String(action)); }

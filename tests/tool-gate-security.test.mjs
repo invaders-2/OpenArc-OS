@@ -35,7 +35,8 @@ test("prompt injection 只是普通字符串，不改变 toolId / risk / decisio
     assert.equal(r.decision.riskClass, "READ_ONLY");
     assert.equal(r.proposal.toolId, "test.echo");
     assert.equal(r.executionStatus, "NOT_EXECUTED");
-    assert.ok(!fx.toolRegistry.ids().some((id) => /shell|exec/.test(id)));
+    // 唯一能运行命令的是全局 AI 第 2 期的 workspace.exec：它是外部副作用，只能先提议、经用户审批后在工作文件夹里执行。
+    assert.deepEqual(fx.toolRegistry.ids().filter((id) => /shell|exec/.test(id)), ["workspace.exec"]);
   } finally { await fx.close(); }
 });
 
