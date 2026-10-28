@@ -23,7 +23,7 @@ import { useCtl, useS, type Ctl } from "./ctx";
 import { EdgeBadge } from "./Edges";
 import { Icon, Logo } from "./Icon";
 import { addMenu } from "./menus";
-import { ModalHead, openModal, openPop } from "./overlay";
+import { ModalHead, openModal, openPop, sideBarPop } from "./overlay";
 import { computeExportBounds, exportCanvas, exportFileName, exportPixels, pickExportNodes, saveCanvasBlob, type ExportFormat, type ExportRange } from "../exportCanvas";
 import { applyTheme } from "./theme";
 import { useAssetUrl } from "./useAsset";
@@ -65,7 +65,7 @@ export function Chrome() {
       <button className={"ib tipR" + (ui.cmtMode ? " on" : "")} id="cmtBtn" data-tip="评论 C" onClick={() => toggleCmt(ctl)}><Icon name="msg" /></button>
       <button className={"ib tipR" + (ui.drawer === "history" ? " on" : "")} data-drawer="history" data-tip="生成历史" onClick={() => store.setUI({ drawer: ui.drawer === "history" ? null : "history" })}><Icon name="history" /></button>
       <span className="div" />
-      <button className="av tipR" id="avatar" data-tip="账户" onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">账户</div><div className="row"><span>{ctl.host.user?.name || "本机用户"}</span><span style={{ color: "var(--fg3)", fontSize: 12 }}>{ctl.host.user?.role || ""}</span></div><div className="msep" /><button className="mi" onClick={() => { close(); canvasSettings(ctl); }}><Icon name="settings" size="s" />画布设置</button><button className="mi" onClick={() => { close(); showKeys(); }}><Icon name="grid" size="s" />快捷键</button></>, "right")}>{ctl.host.user?.initial || "我"}</button>
+      <button className="av tipR" id="avatar" data-tip="账户" onClick={(e) => sideBarPop(e.currentTarget, (close) => <><div className="mh">账户</div><div className="row"><span>{ctl.host.user?.name || "本机用户"}</span><span style={{ color: "var(--fg3)", fontSize: 12 }}>{ctl.host.user?.role || ""}</span></div><div className="msep" /><button className="mi" onClick={() => { close(); canvasSettings(ctl); }}><Icon name="settings" size="s" />画布设置</button><button className="mi" onClick={() => { close(); showKeys(); }}><Icon name="grid" size="s" />快捷键</button></>)}>{ctl.host.user?.initial || "我"}</button>
     </div>
     <div id="zb" className="float">
       <div className="cap">

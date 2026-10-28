@@ -234,8 +234,8 @@ export function AgentPanel({ draft }: { draft?: { seq: number; text: string; ski
   }
 
   const onInput = (v: string) => { a.draft = v; a.emit(); if (v === "/" || /\s\/$/.test(v)) slashPalette(); else if (v.endsWith("@")) mentionMenu(); };
-  const slashPalette = () => { const box = boxRef.current!; openPop(box, (close) => <Palette a={a} onPick={(s) => { close(); a.skill = s; a.draft = a.draft.replace(/\/$/, ""); a.emit(); taRef.current?.focus(); }} width={box.offsetWidth} />, "up", "left", "palette"); };
-  const mentionMenu = () => openPop(boxRef.current!, (close) => <MentionPalette nodes={store.state.doc.nodes} onNode={(n) => { close(); if (!a.pinned.includes(n.id)) a.pinned.push(n.id); setDraft(a.draft.replace(/@$/, "@" + title(n) + " ")); }} onRef={(ref) => { close(); if (!a.refs.some((x) => x.id === ref.id)) a.refs.push(ref); setDraft(a.draft.replace(/@$/, "@" + ref.title + " ")); }} />, "up", "left", "palette");
+  const slashPalette = () => { const box = boxRef.current!; openPop(box, (close) => <Palette a={a} onPick={(s) => { close(); a.skill = s; a.draft = a.draft.replace(/\/$/, ""); a.emit(); taRef.current?.focus(); }} width={box.offsetWidth - 8} />, "up", "left", "palette"); };
+  const mentionMenu = () => openPop(boxRef.current!, (close) => <div style={{ width: (boxRef.current?.offsetWidth || 368) - 8 }}><MentionPalette nodes={store.state.doc.nodes} onNode={(n) => { close(); if (!a.pinned.includes(n.id)) a.pinned.push(n.id); setDraft(a.draft.replace(/@$/, "@" + title(n) + " ")); }} onRef={(ref) => { close(); if (!a.refs.some((x) => x.id === ref.id)) a.refs.push(ref); setDraft(a.draft.replace(/@$/, "@" + ref.title + " ")); }} /></div>, "up", "left", "palette");
   useEffect(() => { const on = () => mentionMenu(); addEventListener("cn:agent-mention", on); return () => removeEventListener("cn:agent-mention", on); }, [store]);
   const full = ui.agentFull;
   const ctxItems = ctxNodes();

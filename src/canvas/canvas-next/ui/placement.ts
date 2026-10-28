@@ -35,7 +35,10 @@ export function placePopover(opts: {
   const a = opts.anchor;
   const dir: PopDir = opts.dir ?? "down";
   const align: PopAlign = opts.align ?? "left";
-  const left = align === "right" ? a.x + a.width - w : a.x;
+  // 对齐：按指定方向对齐锚点；这一侧放不下而另一侧放得下时换成另一侧对齐（不被视口边缘挤歪）
+  const leftAligned = a.x, rightAligned = a.x + a.width - w;
+  const fitsL = leftAligned + w <= vw - margin, fitsR = rightAligned >= margin;
+  const left = align === "right" ? (fitsR || !fitsL ? rightAligned : leftAligned) : (fitsL || !fitsR ? leftAligned : rightAligned);
   const below = a.y + a.height + gap;
   const above = a.y - gap - h;
   const spaceBelow = vh - margin - (a.y + a.height + gap);
@@ -44,6 +47,8 @@ export function placePopover(opts: {
   let x = left;
   let y = below;
   let flipped = false;
+  /** 上下两侧都放不下时：留在空间大的一侧，限高并内部滚动（不再被 clamp 推回去盖住锚点区域） */
+  let fitH = 0;
   if (dir === "right") {
     if (spaceRight >= w) { x = a.x + a.width + gap; y = a.y; }
     else if (a.x - margin - gap >= w) { x = a.x - w - gap; y = a.y; flipped = true; }
@@ -51,15 +56,19 @@ export function placePopover(opts: {
   } else if (dir === "up") {
     if (spaceAbove >= h) y = above;
     else if (spaceBelow >= h) { y = below; flipped = true; }
-    else y = spaceAbove >= spaceBelow ? above : below;
+    else if (spaceAbove >= spaceBelow) { fitH = spaceAbove; y = a.y - gap - spaceAbove; }
+    else { fitH = spaceBelow; y = below; flipped = true; }
   } else {
     if (spaceBelow >= h) y = below;
     else if (spaceAbove >= h) { y = above; flipped = true; }
-    else y = spaceBelow >= spaceAbove ? below : above;
+    else if (spaceBelow >= spaceAbove) { fitH = spaceBelow; y = below; }
+    else { fitH = spaceAbove; y = a.y - gap - spaceAbove; flipped = true; }
   }
   const finalX = maxWidth >= vw - margin * 2 ? margin : clamp(x, margin, Math.max(margin, vw - w - margin));
-  const finalY = maxHeight >= vh - margin * 2 ? margin : clamp(y, margin, Math.max(margin, vh - h - margin));
+  const sideFit = !scrollY && fitH > 40 && fitH < h; // 弹层比整个视口还大时沿用原规则（铺满可用区）
+  const outH = sideFit ? fitH : h;
+  const finalY = sideFit ? y : maxHeight >= vh - margin * 2 ? margin : clamp(y, margin, Math.max(margin, vh - h - margin));
   const menu = dir === "down" && finalY > a.y;
   const origin = clamp(a.x + a.width / 2 - finalX, 0, w) + "px " + (a.y > finalY ? h : 0) + "px";
-  return { x: finalX, y: finalY, maxWidth, maxHeight, origin, flipped, menu, scrollX, scrollY };
+  return { x: finalX, y: finalY, maxWidth, maxHeight: sideFit ? Math.min(maxHeight, outH) : maxHeight, origin, flipped, menu, scrollX, scrollY: scrollY || sideFit };
 }

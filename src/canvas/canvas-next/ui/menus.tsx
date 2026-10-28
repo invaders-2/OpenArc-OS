@@ -8,7 +8,7 @@ import { emptyTable, withTable } from "../table";
 import type { Ctl } from "./ctx";
 import type { CanvasStore } from "../store";
 import { Icon } from "./Icon";
-import { openPop } from "./overlay";
+import { openPop, sideBarPop } from "./overlay";
 import { groupSelection, LEGACY_DEFAULT, ungroup } from "./LegacyNodes";
 import { saveNodeToLibrary } from "./Library";
 import { blobToBase64, shortenPath } from "../exportCanvas";
@@ -48,14 +48,17 @@ export function createImageEditor(ctl: Ctl, at: { x: number; y: number }) {
 
 export function addMenu(ctl: Ctl, anchor: At, at: { x: number; y: number }, fromId: string | null = null, dir: "down" | "up" | "right" = "down") {
   const store = ctl.store; const from = fromId ? store.node(fromId) : null;
-  openPop(anchor, (close) => <>
+  const render = (close: () => void) => <>
     <div className="mh">添加节点{from ? ` · 自动连到「${title(from)}」` : ""}</div>
     {ITEMS.map(([t, l, d]) => <button key={t} className="mi" data-t={t} onClick={() => { close(); createAt(ctl, t, at, fromId); }}><span className="ic"><Icon name={iconOf(t)} size="s" /></span><span>{l}<span className="d">{d}</span></span></button>)}
     {from ? null : <><div className="mh">辅助工具</div>
       {([["model3d", "3D", "文生 / 图生 3D 模型", "cube"], ["timeline", "剪辑时间线", "把视频 / 音频排成一条片子并导出", "video"], ["scene3d", "3D 片场", "摆放几何体和模型，调机位", "cube"], ["note", "便签", "随手记一段说明", "pencil"]] as const).map(([k, l, d, ic]) => <button key={k} className="mi" data-t={k} onClick={() => { close(); createLegacy(ctl, k, at); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{l}<span className="d">{d}</span></span></button>)}
       <button className="mi" data-t="image-editor" onClick={() => { close(); createImageEditor(ctl, at); }}><span className="ic"><Icon name="brush" size="s" /></span><span>图片编辑器<span className="d">选择图片后直接裁剪和编辑</span></span></button></>}
     {from ? null : <><div className="mh">添加资源</div><button className="mi" data-t="upload" onClick={() => { close(); window.dispatchEvent(new CustomEvent("cn:upload", { detail: { at } })); }}><span className="ic"><Icon name="upload" size="s" /></span><span>上传<span className="d">图片、视频、音频、文档，也可直接拖入</span></span></button></>}
-  </>, dir, "left", "pop-add");
+  </>;
+  // 左侧工具栏的 ＋：贴着工具栏右边缘弹出，并让开底部缩放栏
+  if (anchor instanceof Element && anchor.closest("#lb")) return sideBarPop(anchor, render, "pop-add");
+  openPop(anchor, render, dir, "left", "pop-add");
 }
 
 export function portMenu(ctl: Ctl, n: CanvasNode, side: "in" | "out", at: { x: number; y: number }) {
