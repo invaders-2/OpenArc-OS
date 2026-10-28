@@ -82,6 +82,20 @@ export function paste(store: CanvasStore, dx = 40) {
 }
 export function duplicate(store: CanvasStore) { const keep = clip; copySelection(store, true, false); paste(store, 30); clip = keep; }
 
+/** 读视频 / 音频的时长和宽高（读不到返回 null，不影响上传） */
+function mediaMeta(src: string, kind: "video" | "audio"): Promise<{ dur: number; w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    try {
+      const el = document.createElement(kind); el.preload = "metadata"; el.muted = true;
+      const done = (v: { dur: number; w: number; h: number } | null) => { el.removeAttribute("src"); resolve(v); };
+      const timer = setTimeout(() => done(null), 8000);
+      el.onloadedmetadata = () => { clearTimeout(timer); const d = Number(el.duration); done(Number.isFinite(d) && d > 0 ? { dur: d, w: kind === "video" ? (el as HTMLVideoElement).videoWidth : 0, h: kind === "video" ? (el as HTMLVideoElement).videoHeight : 0 } : null); };
+      el.onerror = () => { clearTimeout(timer); done(null); };
+      el.src = src;
+    } catch { resolve(null); }
+  });
+}
+
 /** 资源库导入失败时允许内嵌进文档的上限（字符数，约 1.5MB 文件） */
 const INLINE_FALLBACK_MAX = 2 * 1024 * 1024;
 
@@ -94,20 +108,23 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
     if (f.size > (kind === "image" ? 20 : 200) * 1024 * 1024) { store.toast(`${f.name} 超过 ${kind === "image" ? 20 : 200}MB，未添加`); continue; }
     const dataUrl = await new Promise<string>((r, j) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result)); fr.onerror = () => j(fr.error); fr.readAsDataURL(f); }).catch(() => "");
     if (!dataUrl) { store.toast("读取失败：" + f.name); continue; }
-    const wh = kind === "image" ? await new Promise<[number, number]>((r) => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.onerror = () => r([1, 1]); im.src = dataUrl; }) : [16, 9];
+    // 视频 / 音频读一下元数据：时长（使用区间、切镜要用）和视频宽高
+    const meta = kind === "image" ? null : await mediaMeta(dataUrl, kind);
+    const wh = kind === "image" ? await new Promise<[number, number]>((r) => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.onerror = () => r([1, 1]); im.src = dataUrl; }) : meta?.w && meta.h ? [meta.w, meta.h] : [16, 9];
+    const dur = meta?.dur ? Math.round(meta.dur * 100) / 100 : undefined;
     const url = await store.backend.importAsset(store.state.canvasId, dataUrl, f.name);
     // 桌面版存资源库失败时不把整段 data URL 写进画布文档（几十上百 MB 会拖垮保存与本机备份），只放行小图
     if (store.backend.kind === "bridge" && url.startsWith("data:") && url.length > INLINE_FALLBACK_MAX) { store.toast(`${f.name} 存入资源库失败，未添加（文件较大，不能内嵌进画布）`); continue; }
     const name = f.name.replace(/\.[^.]+$/, "").slice(0, 24);
     // 「替换」：只换当前版本，节点本身不动（位置/尺寸/连线/提示词保留）
-    if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1] }); continue; }
+    if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }); continue; }
     if (opts.target && store.node(opts.target)) {
       const t = store.node(opts.target)!; const g = genOf(t);
-      store.updateNode(t.id, (n) => withGen({ ...n, h: kind === "image" ? Math.round(Math.max(100, Math.min(520, n.w * wh[1] / wh[0]))) : n.h }, { hist: [...g.hist, { url, w: wh[0], h: wh[1] }], hi: g.hist.length, uploaded: true }), { history: true });
+      store.updateNode(t.id, (n) => withGen({ ...n, h: kind === "image" ? Math.round(Math.max(100, Math.min(520, n.w * wh[1] / wh[0]))) : n.h }, { hist: [...g.hist, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], hi: g.hist.length, uploaded: true }), { history: true });
       made.push(t.id); opts = { ...opts, target: undefined }; continue;
     }
-    const w = kind === "image" ? 240 : 320; const h = kind === "image" ? Math.round(Math.max(100, Math.min(520, w * wh[1] / wh[0]))) : kind === "video" ? 180 : 120;
-    const n = store.newNode(kind, at.x + dx - w / 2, at.y - h / 2, { title: name, uploaded: true, hist: [{ url, w: wh[0], h: wh[1] }], w, h });
+    const w = kind === "image" ? 240 : 320; const h = kind === "image" ? Math.round(Math.max(100, Math.min(520, w * wh[1] / wh[0]))) : kind === "video" ? (meta?.w && meta.h ? Math.round(Math.max(100, Math.min(520, w * meta.h / meta.w))) : 180) : 120;
+    const n = store.newNode(kind, at.x + dx - w / 2, at.y - h / 2, { title: name, uploaded: true, hist: [{ url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], w, h });
     store.addNodes([n]); made.push(n.id); dx += w + 30;
     if (opts.linkTo && store.node(opts.linkTo)) connect(store, n.id, opts.linkTo, { quiet: true, select: false });
   }
@@ -118,7 +135,7 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
 /**
  * 「替换」：只换当前版本的媒体（url / 封帧 / 宽高），节点位置、尺寸、连线、提示词、参数都不动。
  */
-export function replaceNodeMedia(store: CanvasStore, id: string, next: { url?: string; frame?: string; w?: number; h?: number }) {
+export function replaceNodeMedia(store: CanvasStore, id: string, next: { url?: string; frame?: string; w?: number; h?: number; dur?: number }) {
   const n = store.node(id); if (!n || !next.url) return false;
   store.patchGen(id, (g) => ({
     hist: g.hist.map((h, i) => (i === g.hi ? { ...h, ...next, ...(n.kind === "video" && !next.frame ? { frame: h.frame || next.url } : {}) } : h)),

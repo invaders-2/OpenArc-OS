@@ -214,4 +214,4 @@ async function clipVideo(input = {}, deps = {}) {
   }
 }
 
-module.exports = { clipVideo, findFfmpeg, findFfprobe, probeDuration, safeStem, uniquePath, DEFAULT_TIMEOUT_MS, COPY_DURATION_TOLERANCE, FORMATS };
+module.exports = { clipVideo, findFfmpeg, findFfprobe, probeDuration, runProcess, parseDataUrl, safeStem, uniquePath, DEFAULT_TIMEOUT_MS, COPY_DURATION_TOLERANCE, FORMATS };
