@@ -321,7 +321,7 @@ class ControlledToolProxy {
       await adapter.prepare({ context: trusted, args });
       let timer = null;
       const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("TOOL_TIMEOUT"), { code: TOOL_ERROR.TOOL_TIMEOUT })), Math.max(1, Number(timeoutMs) || 15000)); });
-      execResult = await Promise.race([adapter.execute({ context: trusted, args, signal, contract }), timeout]).finally(() => clearTimeout(timer));
+      execResult = await Promise.race([adapter.execute({ context: trusted, args, signal, contract, taskId }), timeout]).finally(() => clearTimeout(timer));
     } catch (e) {
       const aborted = !!(signal && signal.aborted);
       const code = aborted ? TOOL_ERROR.TASK_CANCELLED : ((e && e.code) ? e.code : TOOL_ERROR.TOOL_EXECUTION_FAILED);

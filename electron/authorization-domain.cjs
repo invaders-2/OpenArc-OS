@@ -194,6 +194,7 @@ const TOOL_ACTION = Object.freeze({
   WEB_FETCH: "tool.web.fetch",
   // 全局 AI 第 2 期：技能（只读）与工作文件夹（读 / 写 / 运行命令分开授予）。
   SKILL_READ: "tool.skill.read",
+  MEMORY_USE: "tool.memory.use",
   WORKSPACE_READ: "tool.workspace.read",
   WORKSPACE_WRITE: "tool.workspace.write",
   WORKSPACE_EXEC: "tool.workspace.exec",

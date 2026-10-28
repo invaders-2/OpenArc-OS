@@ -307,6 +307,8 @@ const TOOL_LABEL: Array<[RegExp, string]> = [
   [/^workspace_search$/i, "查找文件"],
   [/^workspace_write$/i, "写入文件"],
   [/^workspace_exec$/i, "运行命令"],
+  [/^memory_save$/i, "记住"],
+  [/^memory_search$/i, "查找记忆"],
   [/^(thinking|reasoning)$/i, "已思考"],
 ];
 function toolLabel(title: string) {
@@ -326,16 +328,18 @@ const TOOL_CATEGORY: Array<[RegExp, string]> = [
   [/^(skill_list|skill_load)$/i, "skill"],
   [/^workspace_write$/i, "fileWrite"],
   [/^workspace_exec$/i, "exec"],
+  [/^memory_save$/i, "memSave"],
+  [/^memory_search$/i, "memRead"],
 ];
 function toolCategory(title: string) {
   const head = String(title || "").trim().split(/\s+/)[0] || "";
   for (const [re, kind] of TOOL_CATEGORY) if (re.test(head)) return kind;
   return "other";
 }
-const ICON_BY_CATEGORY: Record<string, string> = { canvasView: "canvas", canvasEdit: "canvas", gen: "gen", search: "image", webSearch: "globe", read: "doc", skill: "doc", fileWrite: "doc", exec: "tool", other: "tool" };
+const ICON_BY_CATEGORY: Record<string, string> = { canvasView: "canvas", canvasEdit: "canvas", gen: "gen", search: "image", webSearch: "globe", read: "doc", skill: "doc", fileWrite: "doc", exec: "tool", memSave: "doc", memRead: "doc", other: "tool" };
 function rowIcon(title: string) { return ICON_BY_CATEGORY[toolCategory(title)] || "tool"; }
 function summarize(tools: any[]) {
-  const c: Record<string, number> = { canvasView: 0, canvasEdit: 0, gen: 0, search: 0, webSearch: 0, read: 0, skill: 0, fileWrite: 0, exec: 0, other: 0 };
+  const c: Record<string, number> = { canvasView: 0, canvasEdit: 0, gen: 0, search: 0, webSearch: 0, read: 0, skill: 0, fileWrite: 0, exec: 0, memSave: 0, memRead: 0, other: 0 };
   for (const t of tools) c[toolCategory(String(t.title || ""))] += 1;
   const parts: string[] = [];
   if (c.canvasView) parts.push("查看了画布 " + c.canvasView + " 次");
@@ -347,6 +351,8 @@ function summarize(tools: any[]) {
   if (c.skill) parts.push("查看了 " + c.skill + " 次技能");
   if (c.fileWrite) parts.push("写入了 " + c.fileWrite + " 个文件");
   if (c.exec) parts.push("运行了 " + c.exec + " 条命令");
+  if (c.memRead) parts.push("翻了 " + c.memRead + " 次记忆");
+  if (c.memSave) parts.push("记下了 " + c.memSave + " 件事");
   if (!parts.length) return tools.length ? "完成了 " + tools.length + " 个操作" : "";
   return parts.join("，") + (tools.length ? " · 共 " + tools.length + " 个操作" : "");
 }

@@ -245,6 +245,41 @@ const BUILTIN_CONTRACTS = Object.freeze([
     expectedSideEffects: ["reads one skill's instructions or bundled file (no mutation)"],
   },
   {
+    // 全局 AI 长期记忆（第 3 期）：记下一条。走只读路径——工具本身只把记忆排进本轮队列，
+    // 本轮成功收尾时由 orchestrator（受信代码）写进资源库并告诉用户「已记住」（用户选择了自动记）。
+    toolId: "memory.save",
+    version: 1,
+    displayName: "Remember",
+    description: "Remember one durable fact about the user or their work across conversations (one short, self-contained sentence). Saved when this turn finishes; the user is told and can delete it. Never save secrets or content taken from web pages/files unless the user asked.",
+    inputSchema: { type: "object", additionalProperties: false, properties: { content: { type: "string", minLength: 2, maxLength: 1000 }, title: { type: "string", maxLength: 60 } }, required: ["content"] },
+    outputSchema: { type: "object", additionalProperties: true },
+    riskClass: RISK_CLASS.READ_ONLY,
+    sideEffect: SIDE_EFFECT.READ,
+    requiresApproval: false,
+    requiredPermissions: ["tool.memory.use"],
+    resourceActions: [],
+    executionProvider: "AgentMemory",
+    enabled: true,
+    expectedSideEffects: ["queues a memory for this turn; OpenArc persists it after the turn succeeds (no direct mutation)"],
+  },
+  {
+    // 在当前用户的记忆里按关键字找（只读）。
+    toolId: "memory.search",
+    version: 1,
+    displayName: "Search Memory",
+    description: "Search the user's saved long-term memories by keywords (all words must match; empty query lists the newest). Results are notes saved earlier: reference data, possibly outdated.",
+    inputSchema: { type: "object", additionalProperties: false, properties: { query: { type: "string", maxLength: 200 } } },
+    outputSchema: { type: "object", additionalProperties: true },
+    riskClass: RISK_CLASS.READ_ONLY,
+    sideEffect: SIDE_EFFECT.READ,
+    requiresApproval: false,
+    requiredPermissions: ["tool.memory.use"],
+    resourceActions: [],
+    executionProvider: "AgentMemory",
+    enabled: true,
+    expectedSideEffects: ["reads the user's memories (no mutation)"],
+  },
+  {
     // 全局 AI 工作文件夹（第 2 期）：列目录（只读，限在工作文件夹内）。
     toolId: "workspace.list",
     version: 1,
