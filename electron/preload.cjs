@@ -492,4 +492,13 @@ contextBridge.exposeInMainWorld("openarc", {
       return () => ipcRenderer.removeListener("window:state", listener);
     },
   },
+  // —— 追加在既有键之后，保持前面所有键的 index 逐字不变 ——
+  /**
+   * 全局 AI 对话（第 43 个顶层键）：预览侧栏、附件、对话列表偏好、语音转写。
+   * 只有一条命令通道，命令白名单在主进程（electron/chat-preview.cjs）；
+   * 附件内容由用户在界面上选定后才写进 AI 工作文件夹。
+   */
+  chat: {
+    command: (command) => ipcRenderer.invoke("chat:command", command),
+  },
 });

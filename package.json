@@ -85,8 +85,14 @@
     "showcase": "npm run build && node tests/showcase.mjs"
   },
   "dependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "dompurify": "^3.2.6",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.22",
     "lucide-react": "^0.468.0",
     "lucide-vue-next": "^0.468.0",
+    "markdown-it": "^14.1.0",
+    "markdown-it-texmath": "^1.0.0",
     "motion": "^13.2.0",
     "orb-ui": "^0.8.0",
     "pinia": "^2.3.1",

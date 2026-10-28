@@ -70,7 +70,8 @@ function collapse(text) {
     .trim();
 }
 
-function stripTags(html) { return collapse(decodeEntities(String(html || "").replace(/<[^>]*>/g, " "))); }
+// 属性值里可能带 ">"（如 data-action="a->b"），按引号成对跳过，避免把属性残片当正文。
+function stripTags(html) { return collapse(decodeEntities(String(html || "").replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, " ").replace(/<[^>]*>/g, " "))); }
 
 function htmlTitle(html) {
   const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
@@ -98,7 +99,7 @@ function htmlToText(html) {
   s = s.replace(/<\/(p|div|section|article|main|header|ul|ol|table|tr|h[1-6]|blockquote|pre|dd|dt|figure|figcaption)\s*>/gi, "\n");
   s = s.replace(/<(h[1-6])\b[^>]*>/gi, "\n\n");
   s = s.replace(/<\/t[dh]\s*>/gi, " \t");
-  s = s.replace(/<[^>]*>/g, " ");
+  s = s.replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, " ").replace(/<[^>]*>/g, " ");
   return collapse(decodeEntities(s));
 }
 
@@ -354,7 +355,29 @@ function createWebAccess({ getFetch = null, isProxied = null, lookup = dnsLookup
     return { ok: false, error: allEmpty ? WEB_ERROR.NO_RESULTS : WEB_ERROR.UNAVAILABLE, detail: errors.join(",").slice(0, 200) };
   }
 
-  return { search, fetch: fetchPage };
+  /**
+   * 原样取回一个 http(s) 地址（对话预览侧栏用：图片 / 视频 / PDF / 文本 / 网页）。
+   * 同一套 SSRF 防护与重定向校验；不解析内容，只限大小。
+   */
+  async function fetchRaw({ url, maxBytes: cap = 50 * 1024 * 1024, signal = null, timeout = 30000 } = {}) {
+    try {
+      const { response, url: finalUrl, status } = await get(url, { signal, timeout, accept: "*/*" });
+      if (status < 200 || status >= 300) {
+        try { await response.body?.cancel?.(); } catch { /* ignore */ }
+        throw new WebAccessError(WEB_ERROR.HTTP_ERROR, String(status));
+      }
+      const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+      const { buffer, truncated } = await readCapped(response, Math.max(1024, Number(cap) || 0));
+      log("fetchRaw", { ok: true, url: auditUrl(finalUrl.href), status, bytes: buffer.length });
+      return { ok: true, buffer, contentType, finalUrl: finalUrl.href, truncated };
+    } catch (err) {
+      const code = err instanceof WebAccessError ? err.code : WEB_ERROR.NETWORK;
+      log("fetchRaw", { ok: false, url: auditUrl(url), error: code });
+      return { ok: false, error: code, detail: err instanceof WebAccessError ? err.detail : null };
+    }
+  }
+
+  return { search, fetch: fetchPage, fetchRaw };
 }
 
 /** 把搜索结果整理成给模型看的参考资料块（画布联网开关用）。 */

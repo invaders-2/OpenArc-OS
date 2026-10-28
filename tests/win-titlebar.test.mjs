@@ -70,11 +70,12 @@ function loadExposedPreload() {
 
 const WINDOW_MEMBERS = ["state", "minimize", "toggleMaximize", "close", "onStateChange"];
 
-test("preload · windowControl 是最后一个顶层键，且只有五个成员", () => {
+test("preload · windowControl 追加在既有键之后（之后只有 chat），且只有五个成员", () => {
   const { api } = loadExposedPreload();
   const keys = Object.keys(api);
-  assert.equal(keys.length, 42, "顶层键必须恰为 42（当前 " + keys.length + "）");
+  assert.equal(keys.length, 43, "顶层键必须恰为 43（当前 " + keys.length + "）");
   assert.equal(keys.indexOf("windowControl"), 41, "windowControl 必须追加在末尾，前面键序不变");
+  assert.deepEqual(keys.slice(42), ["chat"], "windowControl 之后只追加了全局 AI 对话键");
   assert.deepEqual(Object.keys(api.windowControl).sort(), WINDOW_MEMBERS.slice().sort(), "成员集合必须逐字一致");
   for (const member of WINDOW_MEMBERS) {
     assert.equal(typeof api.windowControl[member], "function", "windowControl." + member + " 必须是函数");

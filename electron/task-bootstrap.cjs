@@ -16,7 +16,7 @@ const path = require("node:path");
 const { TaskStore } = require("./task-store.cjs");
 const { TaskService } = require("./task-service.cjs");
 const { TaskHarnessOrchestrator } = require("./task-harness-orchestrator.cjs");
-const { HarnessAdapter } = require("./harness-adapter.cjs");
+const { HarnessAdapter, modelLimits } = require("./harness-adapter.cjs");
 const { MemoryContext } = require("./memory-context.cjs");
 const { ToolStore } = require("./tool-store.cjs");
 const { ToolRegistry } = require("./tool-registry.cjs");
@@ -136,6 +136,9 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */
 const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume", "task/appendStep", "task/recovery", "task/acknowledgeUnknownEffect"]);
 
+/** 对话一条消息（目标）的长度上限：附件清单、长段落都放得下。 */
+const MAX_GOAL_CHARS = 20000;
+
 /** 画布 Agent 思考强度（TapNow Off / Light / Standard / Heavy） */
 const THINKING_LEVELS = Object.freeze(["off", "light", "standard", "heavy"]);
 
@@ -159,6 +162,14 @@ function normalizeCanvasTaskContext(raw) {
   return { ok: true, context };
 }
 
+function contextWindowOf(taskService, task) {
+  try {
+    const store = taskService.modelService && taskService.modelService.store;
+    const cfg = store && task && task.modelConfigId ? store.configById(task.modelConfigId) : null;
+    return cfg ? modelLimits(cfg.remote_model_id).contextWindow : null;
+  } catch { return null; }
+}
+
 function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai", canvasService = null, onResult = null } = {}) {
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("task:command"); } catch { /* not registered */ } }
   // 全局 AI 运行中进度（计划 / 正在用的工具 / 流式文字）：只推给可信窗口，不落库。
@@ -166,6 +177,8 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
     orchestrator.setProgressSink((taskId, update) => {
       if (!update || typeof update !== "object") return;
       if (update.kind === "text") send({ type: "task/progress", taskId, kind: "text", text: String(update.text || "").slice(0, 4000) });
+      else if (update.kind === "usage") send({ type: "task/progress", taskId, kind: "usage", used: Number(update.used) || 0, size: Number(update.size) || null });
+      else if (update.kind === "thinking") send({ type: "task/progress", taskId, kind: "thinking", text: String(update.text || "").slice(0, 8000) });
       else if (update.kind === "plan") send({ type: "task/progress", taskId, kind: "plan", items: Array.isArray(update.items) ? update.items.slice(0, 20) : [] });
       else if (update.kind === "tool") send({ type: "task/progress", taskId, kind: "tool", name: String(update.name || "").slice(0, 80) });
     });
@@ -205,7 +218,7 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
     try {
       switch (command) {
         case "task/run": {
-          const goal = typeof payload.goal === "string" ? payload.goal.slice(0, 2000) : "";
+          const goal = typeof payload.goal === "string" ? payload.goal.slice(0, MAX_GOAL_CHARS) : "";
           if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
           const canvasInput = normalizeCanvasTaskContext(payload.canvasContext);
           if (!canvasInput.ok) return { ok: false, error: canvasInput.error };
@@ -215,11 +228,14 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
             if (!target || !target.ok) return { ok: false, error: "CANVAS_NOT_FOUND_OR_FORBIDDEN" };
           }
           // D4-03：产品任务的 model config 一律由**后端**按可信 context 解析后冻结（createTask 内再按当时
-          // version 落库）；renderer 自报的 modelConfigId / modelConfigVersion 一概忽略。解析不出来就明确
+          // version 落库）；renderer 自报的 modelConfigVersion 一概忽略。解析不出来就明确
           // 拒绝，绝不静默回退、绝不建未绑定任务（旧任务的懒绑定见 TaskService.startHarnessRun）。
+          // 对话的「切换模型」：renderer 只能点名一个 configId，能不能用（启用 / 有 chat 能力 / 当前身份有 model.use 授权）
+          // 仍由 resolveModel 判定；点名的模型不可用就明确拒绝，不回退到默认模型。
           const modelService = taskService.modelService;
+          const wanted = typeof payload.modelConfigId === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(payload.modelConfigId) ? payload.modelConfigId : null;
           const resolved = modelService && typeof modelService.resolveModel === "function"
-            ? modelService.resolveModel({ context, capability: "chat" })
+            ? modelService.resolveModel({ context, capability: "chat", configId: wanted })
             : { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
           if (!resolved.ok) return { ok: false, error: resolved.error };
           const created = taskService.createTask({ context, goal, modelConfigId: resolved.snapshot.modelConfigId });
@@ -263,6 +279,8 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
             budgetLedger: ledger.ok ? ledger.ledger : null,
             recovery: recovery.ok ? recovery : null,
             appendable: !!(appendEligibility.ok && appendEligibility.appendable),
+            // 上下文窗口（按任务绑定的模型估算，与 Harness 用的同一张表）：对话界面画上下文用量。
+            contextWindow: contextWindowOf(taskService, got.task),
             appendReason: appendEligibility.ok ? (appendEligibility.reason || null) : (appendEligibility.error || null),
           };
         }
@@ -288,7 +306,7 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
         }
         case "task/appendStep": {
           const taskId = String(payload.taskId == null ? "" : payload.taskId);
-          const goal = typeof payload.goal === "string" ? payload.goal : "";
+          const goal = typeof payload.goal === "string" ? payload.goal.slice(0, MAX_GOAL_CHARS) : "";
           if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
           const got = taskService.getTask({ context, taskId });
           if (!got.ok) return got;
@@ -318,4 +336,4 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
   });
 }
 
-module.exports = { AGENT_SESSION_DEFAULTS, AGENT_PERSONA, createTaskBundle, registerTaskIpc, normalizeCanvasTaskContext, TASK_COMMANDS, TOOL_FACADE_CONFIG };
+module.exports = { MAX_GOAL_CHARS, AGENT_SESSION_DEFAULTS, AGENT_PERSONA, createTaskBundle, registerTaskIpc, normalizeCanvasTaskContext, TASK_COMMANDS, TOOL_FACADE_CONFIG };

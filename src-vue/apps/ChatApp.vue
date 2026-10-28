@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, Circle, CircleAlert, CircleDot, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Paperclip, RotateCcw, ShieldQuestion, Sparkles, Square, SquarePen, Wrench } from "lucide-vue-next";
+import { Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Film, PanelRight, Pencil, Pin, PinOff, Play, Trash2, FolderOpen, RotateCcw, ShieldQuestion, Sparkles, SquarePen, Wrench } from "lucide-vue-next";
 import ResourcePicker from "./ResourcePicker.vue";
+import PreviewPanel from "./chat/PreviewPanel.vue";
+import Composer from "./chat/Composer.vue";
+import { buildGoal, goalTitle, parseGoal } from "./chat/goal";
+import type { ChatFile, SendPayload } from "./chat/types";
+import { sizeText } from "./chat/preview";
+import { renderMarkdown } from "./chat/markdown";
+import { preview, openCode, openInBrowser, openLocalMedia, openUrl, openWorkspace } from "./chat/preview";
+import "./chat/chat-rich.css";
 import { useShellStore } from "../stores/shell";
 
 /**
  * 对话（task-53）：DSH Harness 会话面。task 桥是唯一真源。
  * task-52 已把 safeEvent/safeCall 并进 task/get，并在运行结束补发 task/event；
- * 这里按 eventId 增量合并，不伪造 token 流式。模型选择读 model/list + defaults/get，
- * 但 task/run 的模型由主进程冻结，所选模型不会下发（界面明确写出）。
+ * 这里按 eventId 增量合并，不伪造 token 流式。新对话可在输入区选模型（task/run 的 modelConfigId），
+ * 对话开始后模型固定。
  */
 type Task = { taskId: string; goal: string; status: string; updatedAt: number; createdAt?: number; revision: number; modelConfigId?: string | null };
 type Step = { stepId: string; sequence: number; status: string; input: { goal?: string } | null; kind?: string };
@@ -18,7 +26,7 @@ type SafeCall = { callId: string; stepId: string | null; status: string; started
 type Detail = {
   task: Task; steps: Step[]; artifacts: Artifact[]; events: SafeEvent[]; calls: SafeCall[];
   appendable: boolean; appendReason: string | null; resumable: boolean; stopReason: string | null;
-  recovery: any; budgetLedger: any; verifications: any[];
+  recovery: any; budgetLedger: any; verifications: any[]; contextWindow?: number | null;
 };
 type ModelOption = { configId: string; displayName: string; providerName: string; isDefault: boolean };
 type Approval = { approvalRequestId: string; toolId: string; toolDisplayName?: string; riskClass?: string | null; effectClass?: string; targetDisplayName?: string | null };
@@ -47,13 +55,31 @@ const approvals = ref<Approval[]>([]);
 const approvalError = ref("");
 /** 运行中的实时进度（只给界面看，不落库）：流式文字、当前计划、正在用的工具。 */
 type PlanItem = { content: string; status: "pending" | "in_progress" | "completed" };
-const live = ref<{ taskId: string; text: string; plan: PlanItem[]; tool: string } | null>(null);
+type Live = { taskId: string; text: string; plan: PlanItem[]; tool: string; thinking: string; thinkStart: number; thinkMs: number; usage: { used: number; size: number | null } | null };
+const live = ref<Live | null>(null);
+/** 思考过程不落库（后端规则），只在本次运行期间留在界面上：按轮次记下来，重开应用后不再显示。 */
+const thoughts = ref<Record<string, { text: string; ms: number }>>({});
+const openThoughts = ref<Set<string>>(new Set());
+function toggleThought(key: string) { const next = new Set(openThoughts.value); if (next.has(key)) next.delete(key); else next.add(key); openThoughts.value = next; }
 function onProgress(ev: any) {
   if (!ev || ev.taskId !== currentId.value) return;
-  const cur = live.value && live.value.taskId === ev.taskId ? live.value : { taskId: ev.taskId, text: "", plan: [], tool: "" };
-  if (ev.kind === "text" && typeof ev.text === "string") live.value = { ...cur, text: (cur.text + ev.text).slice(-20000), tool: "" };
+  const cur: Live = live.value && live.value.taskId === ev.taskId ? live.value : { taskId: ev.taskId, text: "", plan: [], tool: "", thinking: "", thinkStart: 0, thinkMs: 0, usage: null };
+  // 思考结束 = 出现了正文或工具调用：记下思考用时
+  const endThink = (c: Live) => (c.thinkStart && !c.thinkMs ? { ...c, thinkMs: Date.now() - c.thinkStart } : c);
+  if (ev.kind === "text" && typeof ev.text === "string") live.value = { ...endThink(cur), text: (cur.text + ev.text).slice(-20000), tool: "" };
+  else if (ev.kind === "thinking" && typeof ev.text === "string") {
+    const restart = cur.thinkMs > 0; // 工具调用之后又开始想：接着累计
+    live.value = { ...cur, thinking: (cur.thinking + (restart && cur.thinking ? "\n\n" : "") + ev.text).slice(-40000), thinkStart: restart ? Date.now() - cur.thinkMs : cur.thinkStart || Date.now(), thinkMs: 0 };
+  }
   else if (ev.kind === "plan" && Array.isArray(ev.items)) live.value = { ...cur, plan: ev.items };
-  else if (ev.kind === "tool" && typeof ev.name === "string") live.value = { ...cur, tool: ev.name };
+  else if (ev.kind === "tool" && typeof ev.name === "string") live.value = { ...endThink(cur), tool: ev.name };
+  else if (ev.kind === "usage" && Number.isFinite(Number(ev.used))) live.value = { ...cur, usage: { used: Number(ev.used), size: Number(ev.size) || null } };
+}
+/** 一轮结束：把这轮的思考过程留在界面上（按轮次 key）。 */
+function keepThought() {
+  const lv = live.value; if (!lv || !lv.thinking) return;
+  const tail = turns.value[turns.value.length - 1]; if (!tail) return;
+  thoughts.value = { ...thoughts.value, [tail.key]: { text: lv.thinking, ms: lv.thinkMs || (lv.thinkStart ? Date.now() - lv.thinkStart : 0) } };
 }
 let off: (() => void) | null = null;
 let offApproval: (() => void) | null = null;
@@ -72,31 +98,17 @@ const running = (s?: string) => ["PENDING", "RUNNING", "WAITING"].includes(Strin
 const terminal = (s?: string) => ["SUCCEEDED", "COMPLETED", "FAILED", "CANCELLED"].includes(String(s || ""));
 const asText = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : JSON.stringify(v, null, 2));
 const when = (t: number) => { const d = new Date(Number(t) || 0); if (!Number.isFinite(d.getTime())) return ""; return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : (d.getMonth() + 1) + "/" + d.getDate(); };
-const selectedModel = computed(() => models.value.find((m) => m.configId === selectedModelId.value) || null);
 const defaultModel = computed(() => models.value.find((m) => m.configId === defaultModelId.value) || null);
-const modelHint = computed(() => {
-  if (!modelBridge) return "";
-  if (modelError.value) return modelError.value;
-  if (!models.value.length) return "还没有可用的对话模型，请在系统设置里添加。";
-  return defaultModel.value ? "默认对话模型：" + defaultModel.value.displayName + "（" + defaultModel.value.providerName + "），在系统设置里更改" : modelHint2.value;
-});
-
-/** 对话用的模型由主进程按默认模型冻结，界面只显示、不提供无效的切换。 */
-const modelLabel = computed(() => {
-  const id = detail.value?.task.modelConfigId;
-  const m = (id && models.value.find((x) => x.configId === id)) || defaultModel.value;
-  return m ? m.displayName : models.value.length ? "默认模型" : "未配置模型";
-});
-const modelHint2 = computed(() => "对话使用「系统设置 › 模型与服务商」里的默认对话模型");
 async function loadModels() {
   if (!modelBridge) return;
   modelError.value = "";
-  const [list, defaults] = await Promise.all([modelBridge.command({ command: "model/list" }).catch(() => null), modelBridge.command({ command: "defaults/get" }).catch(() => null)]);
+  const [list, defaults, providers] = await Promise.all([modelBridge.command({ command: "model/list" }).catch(() => null), modelBridge.command({ command: "defaults/get" }).catch(() => null), modelBridge.command({ command: "provider/list" }).catch(() => null)]);
+  const providerNames = new Map<string, string>((Array.isArray(providers?.items) ? providers.items : []).map((p: any) => [String(p.providerId), String(p.displayName || p.providerId)]));
   const items = Array.isArray(list?.items) ? list.items : [];
   defaultModelId.value = defaults?.personal?.chat || defaults?.organization?.chat || "";
   models.value = items.filter((m: any) => String(m.status || "enabled") !== "disabled" && (!Array.isArray(m.capabilities) || m.capabilities.includes("chat"))).map((m: any) => ({
     configId: String(m.configId), displayName: String(m.displayName || m.remoteModelId || m.configId),
-    providerName: String(m.providerName || m.providerId || "provider"), isDefault: String(m.configId) === defaultModelId.value,
+    providerName: String(m.providerName || providerNames.get(String(m.providerId)) || "服务商"), isDefault: String(m.configId) === defaultModelId.value,
   }));
   if (!selectedModelId.value) selectedModelId.value = defaultModelId.value || models.value[0]?.configId || "";
 }
@@ -121,6 +133,7 @@ async function loadDetail(id = currentId.value) {
     events: prev ? prev.events : [], calls: Array.isArray(r.calls) ? r.calls : [], appendable: r.appendable === true,
     appendReason: r.appendReason || null, resumable: r.resumable === true, stopReason: r.stopReason || null,
     recovery: r.recovery || null, budgetLedger: r.budgetLedger || null, verifications: Array.isArray(r.verifications) ? r.verifications : [],
+    contextWindow: Number(r.contextWindow) || null,
   };
   mergeEvents(r.events);
   await nextTick();
@@ -130,12 +143,120 @@ async function loadDetail(id = currentId.value) {
 /* 会话列表：搜索 + 按「今天 / 更早」分组 */
 const sessionGroups = computed(() => {
   const q = listQuery.value.trim().toLowerCase();
-  const list = q ? tasks.value.filter((t) => String(t.goal || "").toLowerCase().includes(q)) : tasks.value;
+  const hidden = new Set(prefs.value.hidden);
+  const visible = tasks.value.filter((t) => !hidden.has(t.taskId));
+  const list = q ? visible.filter((t) => (titleOf(t) + "\n" + String(t.goal || "")).toLowerCase().includes(q)) : visible;
+  const pinned = new Set(prefs.value.pinned);
+  const pins = prefs.value.pinned.map((id) => list.find((t) => t.taskId === id)).filter(Boolean) as Task[];
+  const rest = list.filter((t) => !pinned.has(t.taskId));
   const today = new Date().toDateString();
-  const a = list.filter((t) => new Date(Number(t.updatedAt) || 0).toDateString() === today);
-  const b = list.filter((t) => new Date(Number(t.updatedAt) || 0).toDateString() !== today);
-  return [{ label: "今天", items: a }, { label: "更早", items: b }].filter((g) => g.items.length);
+  const a = rest.filter((t) => new Date(Number(t.updatedAt) || 0).toDateString() === today);
+  const b = rest.filter((t) => new Date(Number(t.updatedAt) || 0).toDateString() !== today);
+  return [{ label: "置顶", items: pins }, { label: "今天", items: a }, { label: "更早", items: b }].filter((g) => g.items.length);
 });
+/* 对话列表整理：重命名 / 置顶 / 删除（只从列表移除，任务记录和审计保留）。偏好按登录用户存在主进程。 */
+const chatBridge = (window as any).openarc?.chat as { command: (c: Record<string, unknown>) => Promise<any> } | undefined;
+const prefs = ref<{ titles: Record<string, string>; pinned: string[]; hidden: string[] }>({ titles: {}, pinned: [], hidden: [] });
+function setPrefs(r: any) { if (r?.ok) prefs.value = { titles: r.titles || {}, pinned: Array.isArray(r.pinned) ? r.pinned : [], hidden: Array.isArray(r.hidden) ? r.hidden : [] }; }
+async function loadPrefs() { if (chatBridge) setPrefs(await chatBridge.command({ command: "prefs/get" }).catch(() => null)); }
+async function updatePref(taskId: string, action: string, title = "") {
+  if (!chatBridge) return false;
+  const r = await chatBridge.command({ command: "prefs/update", taskId, action, title }).catch(() => null);
+  setPrefs(r); return !!r?.ok;
+}
+const titleOf = (t: Task) => prefs.value.titles[t.taskId] || goalTitle(t.goal);
+const sessionMenu = ref<{ id: string; x: number; y: number } | null>(null);
+const renaming = ref<{ id: string; value: string } | null>(null);
+const undoHide = ref<{ id: string; title: string; pinned: boolean } | null>(null);
+let undoTimer = 0;
+function openSessionMenu(e: MouseEvent, t: Task) {
+  e.preventDefault(); e.stopPropagation();
+  const host = (e.currentTarget as HTMLElement).closest(".chat-side")?.getBoundingClientRect();
+  sessionMenu.value = { id: t.taskId, x: e.clientX - (host?.left || 0), y: e.clientY - (host?.top || 0) };
+}
+function startRename(id: string) {
+  sessionMenu.value = null;
+  const t = tasks.value.find((x) => x.taskId === id); if (!t) return;
+  renaming.value = { id, value: titleOf(t) };
+  nextTick(() => { const el = document.querySelector<HTMLInputElement>("[data-chat-rename-input]"); el?.focus(); el?.select(); });
+}
+async function commitRename() {
+  const r = renaming.value; if (!r) return; renaming.value = null;
+  const t = tasks.value.find((x) => x.taskId === r.id);
+  const v = r.value.trim();
+  await updatePref(r.id, "rename", t && v === goalTitle(t.goal) ? "" : v);
+}
+async function togglePin(id: string) { sessionMenu.value = null; await updatePref(id, prefs.value.pinned.includes(id) ? "unpin" : "pin"); }
+async function hideSession(id: string) {
+  sessionMenu.value = null;
+  const t = tasks.value.find((x) => x.taskId === id);
+  const wasPinned = prefs.value.pinned.includes(id);
+  if (t && running(t.status) && taskBridge) await taskBridge.command({ command: "task/cancel", payload: { taskId: id } }).catch(() => null);
+  if (!(await updatePref(id, "hide"))) { flash("删除失败，请稍后再试"); return; }
+  if (currentId.value === id) newSession();
+  undoHide.value = { id, title: t ? titleOf(t) : "对话", pinned: wasPinned };
+  window.clearTimeout(undoTimer); undoTimer = window.setTimeout(() => { undoHide.value = null; }, 6000);
+}
+async function undoHideSession() { const u = undoHide.value; if (!u) return; undoHide.value = null; await updatePref(u.id, "unhide"); if (u.pinned) await updatePref(u.id, "pin"); }
+function onDocDown(e: MouseEvent) { if (!(e.target as HTMLElement).closest?.("[data-chat-session-menu]")) sessionMenu.value = null; if (!(e.target as HTMLElement).closest?.("[data-chat-files-pop],[data-chat-files-toggle]")) filesOpen.value = false; }
+
+/* 本对话文件：用户发过的附件 + AI 回答里提到的工作文件夹文件 */
+const filesOpen = ref(false);
+const convoFiles = computed(() => {
+  const out: { path: string; name: string; from: "附件" | "AI 生成" }[] = [];
+  const seen = new Set<string>();
+  for (const t of turns.value) {
+    for (const f of parseGoal(t.ask).files) if (!seen.has(f.path)) { seen.add(f.path); out.push({ path: f.path, name: f.name, from: "附件" }); }
+    for (const m of String(t.answer || "").matchAll(/\]\(([^)\s]+)\)/g)) {
+      const href = m[1];
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#") || href.startsWith("/") || href.includes("..")) continue;
+      const path = href.replace(/^\.\//, "");
+      if (seen.has(path)) continue;
+      seen.add(path); out.push({ path, name: path.split("/").pop() || path, from: "AI 生成" });
+    }
+  }
+  return out;
+});
+
+/* 语音输入：录音 → 「模型与服务商」里的语音转写模型 → 文字放进输入框。没配转写模型就如实提示。 */
+const voiceState = ref({ available: false, recording: false, busy: false, model: "" });
+const voice = computed(() => ({
+  available: voiceState.value.available, recording: voiceState.value.recording, busy: voiceState.value.busy,
+  hint: voiceState.value.recording ? "再点一次结束录音" : voiceState.value.busy ? "正在转成文字…" : voiceState.value.available ? "语音输入（" + voiceState.value.model + "）" : "语音输入：需要先在「系统设置 › 模型与服务商」添加支持语音转写的音频模型",
+}));
+let recorder: MediaRecorder | null = null;
+let recChunks: Blob[] = [];
+let recStream: MediaStream | null = null;
+async function loadVoice() {
+  const r = await chatBridge?.command({ command: "voice/status" }).catch(() => null);
+  voiceState.value = { ...voiceState.value, available: !!r?.available, model: String(r?.model || "") };
+}
+const VOICE_ERR: Record<string, string> = { VOICE_NO_MODEL: "还没有语音转写模型：请在「系统设置 › 模型与服务商」添加支持转写的音频模型。", VOICE_EMPTY: "没录到声音。", VOICE_TOO_LONG: "录音太长了（上限 25 MB）。", VOICE_FAILED: "转写失败" };
+async function toggleVoice() {
+  if (voiceState.value.busy) return;
+  if (voiceState.value.recording) { recorder?.stop(); return; }
+  if (!voiceState.value.available) { await loadVoice(); if (!voiceState.value.available) { flash(VOICE_ERR.VOICE_NO_MODEL); return; } }
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch { flash("无法使用麦克风：请在系统设置里允许 OpenArc 访问麦克风。"); return; }
+  const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg"].find((m) => (window as any).MediaRecorder?.isTypeSupported?.(m)) || "";
+  recorder = new MediaRecorder(recStream, mime ? { mimeType: mime } : undefined);
+  recChunks = [];
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = async () => {
+    recStream?.getTracks().forEach((t) => t.stop()); recStream = null;
+    voiceState.value = { ...voiceState.value, recording: false, busy: true };
+    try {
+      const blob = new Blob(recChunks, { type: recorder?.mimeType || "audio/webm" });
+      const r = await chatBridge?.command({ command: "voice/transcribe", data: new Uint8Array(await blob.arrayBuffer()), mime: blob.type }).catch(() => null);
+      if (r?.ok && r.text) { draft.value = (draft.value ? draft.value.replace(/\s+$/, "") + " " : "") + r.text; nextTick(() => composer.value?.focus()); }
+      else if (r?.ok) flash("没听清，再试一次？");
+      else flash((VOICE_ERR[r?.error] || "转写失败") + (r?.detail ? "（" + String(r.detail).slice(0, 80) + "）" : ""));
+    } finally { voiceState.value = { ...voiceState.value, busy: false }; recorder = null; }
+  };
+  recorder.start();
+  voiceState.value = { ...voiceState.value, recording: true };
+}
 const statusTone = (s: string) => (running(s) ? "run" : s === "FAILED" || s === "BLOCKED" ? "bad" : "done");
 const toolTone = (status: string) => (status === "执行完成" ? "ok" : status === "执行中" ? "run" : /等待/.test(status) ? "wait" : /失败|拒|阻止/.test(status) ? "bad" : "idle");
 type Turn = {
@@ -265,7 +386,6 @@ function flash(msg: string) { toastMsg.value = msg; window.clearTimeout(toastTim
 const copiedKey = ref("");
 const copiedText = ref("");
 const lastSent = ref("");
-const mediaPreview = ref<MediaRef | null>(null);
 const pad2 = (n: number) => String(n).padStart(2, "0");
 /** TapNow 的时间戳句式：「10月23日 09:07」 */
 function msgTime(t: number) {
@@ -383,7 +503,7 @@ function mediaRefsIn(payload: any): MediaRef[] {
     if (!v || depth > 3 || typeof v !== "object") return;
     if (typeof v.url === "string" && /^(https?:|asset:|blob:|file:|data:image\/)/.test(v.url) && !out.some((x) => x.url === v.url)) {
       const name = String(v.fileName || v.name || decodeURIComponent(v.url.split("/").pop() || "") || "输出").slice(0, 80);
-      out.push({ url: v.url, name, kind: /\.(mp4|mov|webm|m4v)(\?|$)/i.test(v.url) || v.kind === "video" ? "video" : "image", nodeId: typeof v.nodeId === "string" ? v.nodeId : undefined });
+      out.push({ url: v.url, name, kind: /\.(mp4|mov|webm|m4v)(\?|$)/i.test(v.url) || v.kind === "video" || /^video\//.test(String(v.mime || v.mimeType || "")) ? "video" : "image", nodeId: typeof v.nodeId === "string" ? v.nodeId : undefined });
     }
     for (const k of Object.keys(v)) if (v[k] && typeof v[k] === "object") walk(v[k], depth + 1);
   };
@@ -414,10 +534,76 @@ function focusNode(ref: NodeRef | { id?: string; title?: string }) {
 }
 function openMedia(m: MediaRef) {
   if (m.nodeId) { window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: m.nodeId })); return; }
-  if (m.url) { mediaPreview.value = m; return; }
+  if (!m.url) return;
+  if (/^https?:/i.test(m.url)) void openUrl(m.url, m.name);
+  else openLocalMedia(m.url, m.name, m.kind);
+}
+/**
+ * 消息正文里的点击（事件委托）：链接 / 工作文件夹文件 / 外部图片 → 预览侧栏；代码块的复制 / 预览。
+ * 按住 ⌘ / Ctrl 点链接：直接交给 OpenArc 浏览器。
+ */
+async function onThreadClick(e: MouseEvent) {
+  const el = (e.target as HTMLElement | null)?.closest?.("[data-md-act]") as HTMLElement | null;
+  if (!el) return;
+  const act = el.getAttribute("data-md-act");
+  if (act === "link") {
+    const href = el.getAttribute("href") || "";
+    e.preventDefault();
+    if (!/^https?:/i.test(href)) return;
+    if (e.metaKey || e.ctrlKey) { void openInBrowser(href); return; }
+    void openUrl(href, (el.textContent || "").trim().slice(0, 60));
+    return;
+  }
+  if (act === "ws") { e.preventDefault(); void openWorkspace(el.getAttribute("data-md-src") || "", (el.textContent || "").trim()); return; }
+  if (act === "image") {
+    const src = el.getAttribute("data-md-src") || "";
+    if (/^https?:/i.test(src)) void openUrl(src);
+    else if (src) openLocalMedia(src, el.getAttribute("alt") || "图片", "image");
+    return;
+  }
+  const block = el.closest(".md-code") as HTMLElement | null;
+  const code = block?.querySelector("pre code")?.textContent || "";
+  if (act === "code-copy") {
+    await copyText(code, "code");
+    el.textContent = "已复制"; window.setTimeout(() => { el.textContent = "复制"; }, 1400);
+    return;
+  }
+  if (act === "code-preview") void openCode(code, block?.getAttribute("data-md-lang") || "");
+}
+/** 工具结果里的 http(s) 媒体：经主进程取回（同一套安全检查）后再显示，界面本身不直连外网。 */
+const mediaSrc = ref<Record<string, string>>({});
+const mediaPending = new Set<string>();
+function srcOf(m: MediaRef) {
+  if (!/^https?:/i.test(m.url)) return m.url;
+  const hit = mediaSrc.value[m.url]; if (hit) return hit;
+  if (!mediaPending.has(m.url)) {
+    mediaPending.add(m.url);
+    void (window as any).openarc?.chat?.command({ command: "preview/remote", url: m.url }).then((r: any) => {
+      if (r?.ok && r.previewUrl) mediaSrc.value = { ...mediaSrc.value, [m.url]: r.previewUrl };
+    }).catch(() => null);
+  }
+  return "";
+}
+/** 气泡里图片附件的缩略图：经预览协议取工作文件夹里的图（只取一次）。 */
+const thumbs = ref<Record<string, string>>({});
+const thumbPending = new Set<string>();
+function thumbOf(path: string) {
+  if (thumbs.value[path]) return thumbs.value[path];
+  if (!thumbPending.has(path) && chatBridge) {
+    thumbPending.add(path);
+    void chatBridge.command({ command: "preview/workspace", path }).then((r: any) => { if (r?.ok && r.kind === "image" && r.previewUrl) thumbs.value = { ...thumbs.value, [path]: r.previewUrl }; }).catch(() => null);
+  }
+  return "";
+}
+/** 编辑重发：把这句话放回输入框，改完再发（作为新的一轮）。 */
+function editTurn(turn: { ask: string }) {
+  const p = parseGoal(turn.ask);
+  draft.value = p.text;
+  composer.value?.setFiles(p.files);
+  nextTick(() => { const el = document.querySelector<HTMLTextAreaElement>("[data-chat-input]"); el?.focus(); el?.setSelectionRange(el.value.length, el.value.length); });
 }
 function useSuggestion(s: { prompt: string }) { draft.value = s.prompt; nextTick(() => document.querySelector<HTMLTextAreaElement>("[data-chat-input]")?.focus()); }
-function retryTurn(turn: { ask: string }) { draft.value = String(turn.ask || ""); void send(); }
+function retryTurn(turn: { ask: string }) { void sendGoal(String(turn.ask || ""), null); }
 
 const BUDGET_LABEL: Record<string, string> = { TOOL_CALLS: "工具调用", TOOL_ROUNDS: "工具轮次", MODEL_CALLS: "模型调用" };
 const RESUME_REASON_TEXT: Record<string, string> = {
@@ -463,50 +649,56 @@ const eventRows = computed(() => (detail.value?.events || []).slice(-40));
 const recoveryCalls = computed<any[]>(() => Array.isArray(detail.value?.recovery?.calls) ? detail.value!.recovery.calls : []);
 const needsAck = computed(() => detail.value?.recovery?.applicable === true && recoveryCalls.value.some((c) => !c.acknowledged));
 
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] || c));
-const BACKTICK = String.fromCharCode(96);
-function inlineMarkdown(s: string): string {
-  let out = escapeHtml(s);
-  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  out = out.replace(new RegExp(BACKTICK + "([^" + BACKTICK + "]+)" + BACKTICK, "g"), "<code>$1</code>");
-  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-  return out;
-}
-function markdown(src: string): string {
-  const text = String(src || ""); const fence = BACKTICK + BACKTICK + BACKTICK;
-  const parts = text.split(new RegExp("(?:^|\\n)\\s*" + fence + "([a-zA-Z0-9_-]*)\\n([\\s\\S]*?)\\n\\s*" + fence, "g"));
-  let out = "";
-  for (let i = 0; i < parts.length; i += 1) {
-    if (i % 3 === 1) continue; const chunk = parts[i] || "";
-    if (i % 3 === 2) { out += '<pre class="chat-code"><code>' + escapeHtml(chunk.replace(/\n$/, "")) + "</code></pre>"; continue; }
-    let list: string[] = []; const flush = () => { if (!list.length) return; out += "<ul>" + list.map((x) => "<li>" + inlineMarkdown(x) + "</li>").join("") + "</ul>"; list = []; };
-    for (const line of chunk.split(/\n/)) {
-      const h = /^(#{1,4})\s+(.*)$/.exec(line); if (h) { flush(); out += "<h" + h[1].length + ">" + inlineMarkdown(h[2]) + "</h" + h[1].length + ">"; continue; }
-      const li = /^\s*[-*]\s+(.*)$/.exec(line); if (li) { list.push(li[1]); continue; }
-      flush(); if (line.trim()) out += "<p>" + inlineMarkdown(line) + "</p>";
-    }
-    flush();
-  }
-  return out || "<p>" + inlineMarkdown(text) + "</p>";
-}
+/** Markdown 渲染（GFM 表格 / 任务列表 / 代码高亮 / 公式），见 chat/markdown.ts。 */
+const markdown = (src: string) => renderMarkdown(src);
 const planDone = (plan: PlanItem[]) => plan.filter((x) => x.status === "completed").length;
+function thoughtOf(turn: Turn): { text: string; ms: number; live: boolean } | null {
+  const lv = liveFor(turn);
+  if (lv && lv.thinking) return { text: lv.thinking, ms: lv.thinkMs || 0, live: !lv.thinkMs };
+  const kept = thoughts.value[turn.key];
+  return kept ? { ...kept, live: false } : null;
+}
+/** 思考中默认展开，想完自动收起；用户点过就按用户的来。 */
+const thoughtOpen = (turn: Turn) => { const t = thoughtOf(turn); const flipped = openThoughts.value.has(turn.key); return t?.live ? !flipped : flipped; };
 const liveFor = (turn: Turn) => (turn.pending && live.value && live.value.taskId === currentId.value ? live.value : null);
 function select(id: string | null) { currentId.value = id; detail.value = null; error.value = ""; live.value = null; if (id) void loadDetail(id); }
-function newSession() { select(null); draft.value = ""; error.value = ""; modelError.value = ""; }
-async function send() {
-  const text = draft.value.trim(); if (!text || sending.value || !taskBridge) return;
+function newSession() { select(null); draft.value = ""; error.value = ""; modelError.value = ""; composer.value?.reset(); }
+const composer = ref<InstanceType<typeof Composer> | null>(null);
+function send(p: SendPayload) {
+  const goal = buildGoal(p.text, p.files, p.picks);
+  return sendGoal(goal, p.modelConfigId, true);
+}
+async function sendGoal(goal: string, modelConfigId: string | null, fromComposer = false) {
+  const text = goal.trim(); if (!text || sending.value || !taskBridge) return;
   // 夹具模式（e2e）：只记录这次发送，绝不下发到任何后端
-  if (fixtureMode) { lastSent.value = text; draft.value = ""; flash("已发送（夹具模式：不会发给任何后端）"); return; }
+  if (fixtureMode) { lastSent.value = text; draft.value = ""; composer.value?.reset(); flash("已发送（夹具模式：不会发给任何后端）"); return; }
   sending.value = true; error.value = ""; const id = currentId.value; live.value = null;
-  const r = id ? await taskBridge.command({ command: "task/appendStep", payload: { taskId: id, goal: text } }).catch(() => null) : await taskBridge.command({ command: "task/run", payload: { goal: text } }).catch(() => null);
+  const runPayload: Record<string, unknown> = { goal: text };
+  if (modelConfigId) runPayload.modelConfigId = modelConfigId;
+  const r = id ? await taskBridge.command({ command: "task/appendStep", payload: { taskId: id, goal: text } }).catch(() => null) : await taskBridge.command({ command: "task/run", payload: runPayload }).catch(() => null);
   sending.value = false;
   if (!r?.ok) { error.value = errText(r?.error) + (r?.detail ? "（" + String(r.detail).slice(0, 160) + "）" : ""); return; }
-  draft.value = ""; currentId.value = r.taskId; await Promise.all([loadList(), loadDetail(r.taskId)]);
+  if (fromComposer) { draft.value = ""; composer.value?.reset(); }
+  currentId.value = r.taskId; await Promise.all([loadList(), loadDetail(r.taskId)]);
 }
+function onComposerCommand(name: string) {
+  if (name === "new") newSession();
+  else if (name === "resource") resourcePickerOpen.value = true;
+}
+/** 输入区的上下文用量：运行中用实时值，否则用最近一次记录；窗口大小缺失时用模型的上下文上限。 */
+const ctxUsage = computed(() => {
+  const lv = live.value && live.value.taskId === currentId.value ? live.value.usage : null;
+  const d = detail.value;
+  let u = lv;
+  if (!u && d) { const e = [...d.events].reverse().find((x) => x.safePayload?.usage && Number.isFinite(Number(x.safePayload.usage.used))); if (e) u = { used: Number(e.safePayload.usage.used), size: Number(e.safePayload.usage.size) || null }; }
+  if (!u) return d?.contextWindow ? { used: 0, size: d.contextWindow } : null;
+  return { used: u.used, size: u.size || d?.contextWindow || null };
+});
+const lockedModelId = computed(() => (currentId.value ? detail.value?.task.modelConfigId || defaultModelId.value || null : null));
+const composerPlaceholder = computed(() => (currentId.value ? "继续这段对话…（@ 引用文件，/ 命令与技能）" : "给助理发消息，@ 引用文件，/ 选择技能或命令"));
 async function stop() { if (!taskBridge || !currentId.value) return; const r = await taskBridge.command({ command: "task/cancel", payload: { taskId: currentId.value } }).catch(() => null); if (!r?.ok) error.value = errText(r?.error); await loadDetail(); }
 async function resume() { if (!taskBridge || !currentId.value || !detail.value) return; const r = await taskBridge.command({ command: "task/resume", payload: { taskId: currentId.value, expectedRevision: detail.value.task.revision } }).catch(() => null); if (!r?.ok) error.value = errText(r?.error); await loadDetail(); }
 async function acknowledge(callId: string) { if (!taskBridge || !currentId.value) return; const r = await taskBridge.command({ command: "task/acknowledgeUnknownEffect", payload: { taskId: currentId.value, callId } }).catch(() => null); if (!r?.ok) error.value = errText(r?.error); await loadDetail(); }
-function onKey(e: KeyboardEvent) { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); void send(); } }
 async function attachResource(ref: string) {
   resourcePickerOpen.value = false;
   let name = ref;
@@ -521,10 +713,11 @@ onMounted(async () => {
     if (fixture?.detail) { detail.value = fixture.detail; currentId.value = fixture.detail.task.taskId; }
     return;
   }
-  await Promise.all([loadList(), loadModels(), loadApprovals()]);
+  document.addEventListener("mousedown", onDocDown);
+  await Promise.all([loadList(), loadModels(), loadApprovals(), loadPrefs(), loadVoice()]);
   off = taskBridge?.onEvent((ev: any) => {
     if (!ev) return;
-    if (ev.type === "task/result") { void loadList(); void loadApprovals(); if (ev.taskId === currentId.value) { live.value = null; void loadDetail(); } }
+    if (ev.type === "task/result") { void loadList(); void loadApprovals(); if (ev.taskId === currentId.value) { keepThought(); live.value = null; void loadDetail(); } }
     else if (ev.type === "task/progress") onProgress(ev);
     else if (ev.type === "task/event" && ev.taskId === currentId.value) mergeEvents(ev.events);
   }) ?? null;
@@ -535,7 +728,7 @@ onMounted(async () => {
 const shellStore = useShellStore();
 watch(() => shellStore.taskFocus, (id) => { if (!id) return; if (id !== currentId.value) select(id); shellStore.taskFocus = null; void loadList(); }, { immediate: true });
 watch(currentId, (id) => { shellStore.viewingTaskId = id; }, { immediate: true });
-onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); shellStore.viewingTaskId = null; });
+onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); window.clearTimeout(undoTimer); if (recorder && recorder.state !== "inactive") recorder.stop(); recStream?.getTracks().forEach((t) => t.stop()); off?.(); offApproval?.(); window.clearInterval(poll); shellStore.viewingTaskId = null; });
 </script>
 
 <template>
@@ -549,32 +742,46 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); sh
       <div class="chat-sessions" data-chat-sessions>
         <template v-for="g in sessionGroups" :key="g.label">
           <div class="split-section">{{ g.label }}</div>
-          <button v-for="t in g.items" :key="t.taskId" type="button" class="chat-session" :data-chat-session="t.taskId" :aria-current="currentId === t.taskId ? 'true' : undefined" @click="select(t.taskId)">
-            <span class="chat-session-name">{{ t.goal }}</span>
-            <small><span v-if="running(t.status)" class="chat-live" aria-hidden="true" />{{ STATUS[t.status] ?? t.status }} · {{ when(t.updatedAt) }}</small>
-          </button>
+          <div v-for="t in g.items" :key="t.taskId" class="chat-session-row" :aria-current="currentId === t.taskId ? 'true' : undefined">
+            <form v-if="renaming && renaming.id === t.taskId" class="chat-session chat-session-edit" @submit.prevent="commitRename">
+              <input v-model="renaming.value" data-chat-rename-input maxlength="80" aria-label="对话名称" @keydown.esc.prevent="renaming = null" @blur="commitRename" />
+            </form>
+            <button v-else type="button" class="chat-session" :data-chat-session="t.taskId" :aria-current="currentId === t.taskId ? 'true' : undefined" @click="select(t.taskId)" @dblclick="startRename(t.taskId)" @contextmenu="openSessionMenu($event, t)">
+              <span class="chat-session-name"><Pin v-if="prefs.pinned.includes(t.taskId)" :size="11" class="chat-session-pin" />{{ titleOf(t) }}</span>
+              <small><span v-if="running(t.status)" class="chat-live" aria-hidden="true" />{{ STATUS[t.status] ?? t.status }} · {{ when(t.updatedAt) }}</small>
+            </button>
+            <button v-if="!renaming || renaming.id !== t.taskId" type="button" class="chat-session-more" :data-chat-session-more="t.taskId" title="更多" aria-label="对话操作" @click="openSessionMenu($event, t)"><MoreHorizontal :size="14" /></button>
+          </div>
         </template>
         <p v-if="!tasks.length" class="chat-side-empty">还没有对话。</p>
         <p v-else-if="!sessionGroups.length" class="chat-side-empty">没有匹配的对话。</p>
+      </div>
+      <div v-if="sessionMenu" class="chat-menu-body chat-session-menu" data-chat-session-menu :style="{ left: Math.min(sessionMenu.x, 120) + 'px', top: sessionMenu.y + 'px', right: 'auto' }" role="menu">
+        <button type="button" role="menuitem" data-chat-session-rename @click="startRename(sessionMenu.id)"><Pencil :size="13" />重命名</button>
+        <button type="button" role="menuitem" data-chat-session-pin @click="togglePin(sessionMenu.id)"><PinOff v-if="prefs.pinned.includes(sessionMenu.id)" :size="13" /><Pin v-else :size="13" />{{ prefs.pinned.includes(sessionMenu.id) ? "取消置顶" : "置顶" }}</button>
+        <button type="button" role="menuitem" class="danger" data-chat-session-delete @click="hideSession(sessionMenu.id)"><Trash2 :size="13" />删除</button>
+        <p class="chat-menu-note">删除只是从列表移除，任务记录和审计会保留。</p>
+      </div>
+      <div v-if="undoHide" class="chat-undo" role="status" data-chat-undo>
+        <span>已删除「{{ undoHide.title.slice(0, 16) }}」</span><button type="button" data-chat-undo-btn @click="undoHideSession">撤销</button>
       </div>
     </nav>
 
     <div class="split-main chat-main">
       <div class="pane-toolbar chat-toolbar">
-        <strong class="pane-title chat-title">{{ detail?.task.goal ?? "新对话" }}</strong>
+        <strong class="pane-title chat-title">{{ detail ? titleOf(detail.task) : "新对话" }}</strong>
         <span v-if="detail" class="chat-status" data-chat-status :data-tone="statusTone(detail.task.status)">{{ STATUS[detail.task.status] ?? detail.task.status }}</span>
         <div class="toolbar-spacer" />
-        <details class="chat-menu" data-chat-model-menu>
-          <summary class="chat-model" data-chat-model :title="modelHint">{{ modelLabel }} <ChevronDown :size="12" /></summary>
-          <div class="chat-menu-body">
-            <p class="chat-menu-note">对话模型由主进程按默认模型冻结，这里只读展示（切换 NOT VERIFIED）。</p>
-            <button v-for="m in models" :key="m.configId" type="button" :class="{ on: m.isDefault }" disabled>
-              {{ m.displayName }} <small>{{ m.providerName }}</small>
+        <div v-if="convoFiles.length" class="chat-files-wrap">
+          <button type="button" class="chat-icon-btn chat-files-btn" data-chat-files-toggle :aria-pressed="filesOpen" title="本对话的文件" aria-label="本对话的文件" @click="filesOpen = !filesOpen"><FolderOpen :size="16" /><small>{{ convoFiles.length }}</small></button>
+          <div v-if="filesOpen" class="chat-menu-body chat-files-pop" data-chat-files-pop role="menu">
+            <p class="chat-menu-note">本对话的文件（点开在右侧预览）</p>
+            <button v-for="f in convoFiles" :key="f.path" type="button" role="menuitem" :data-chat-files-item="f.path" :title="f.path" @click="filesOpen = false; openWorkspace(f.path, f.name)">
+              <FileText :size="13" /><span class="chat-files-name">{{ f.name }}</span><small>{{ f.from }}</small>
             </button>
-            <p v-if="!models.length" class="chat-menu-note">还没有可用的对话模型；请到「系统设置 › 模型与服务商」添加。</p>
-            <button type="button" data-chat-model-refresh @click="loadModels">刷新模型列表</button>
           </div>
-        </details>
+        </div>
+        <button v-if="preview.items.length" type="button" class="chat-icon-btn" data-chat-preview-toggle :aria-pressed="preview.open" :title="preview.open ? '收起预览' : '打开预览'" aria-label="预览侧栏" @click="preview.open = !preview.open"><PanelRight :size="16" /></button>
         <span class="chat-device" data-chat-device title="后端任务没有设备字段，这里是只读环境标识（NOT VERIFIED）"><Monitor :size="12" /> 本机 · D1</span>
         <details class="chat-menu chat-menu-right" data-chat-more>
           <summary class="chat-icon-btn" aria-label="更多" title="更多"><MoreHorizontal :size="16" /></summary>
@@ -589,7 +796,7 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); sh
       <div class="chat-body">
         <div class="chat-col">
           <div ref="scroller" class="chat-scroll">
-            <div class="chat-thread">
+            <div class="chat-thread" @click="onThreadClick">
               <div v-if="!taskBridge" class="chat-empty"><p>对话只在 OpenArc 桌面应用里可用。</p></div>
               <div v-else-if="!currentId" class="chat-empty" data-chat-empty>
                 <div class="chat-empty-mark"><Sparkles :size="22" :stroke-width="1.5" /></div>
@@ -607,11 +814,21 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); sh
 
               <template v-for="turn in turns" :key="turn.key">
                 <div class="chat-msg" data-role="user" data-chat-message="user">
-                  <div class="chat-bubble">{{ turn.ask }}</div>
+                  <div v-if="parseGoal(turn.ask).picks.length" class="chat-picks" data-chat-bubble-picks>
+                    <span v-for="p in parseGoal(turn.ask).picks" :key="p.kind + p.id" class="cmp-pick"><Sparkles v-if="p.kind === 'skill'" :size="12" /><Wrench v-else :size="12" />{{ p.kind === "skill" ? "技能" : "MCP" }} · {{ p.name }}</span>
+                  </div>
+                  <div v-if="parseGoal(turn.ask).files.length" class="chat-files" data-chat-bubble-files>
+                    <button v-for="f in parseGoal(turn.ask).files" :key="f.path" type="button" class="chat-file" data-chat-bubble-file :title="f.path" @click="openWorkspace(f.path, f.name)">
+                      <span class="chat-file-ic"><img v-if="f.kind === 'image' && thumbOf(f.path)" :src="thumbOf(f.path)" alt="" /><ImageIcon v-else-if="f.kind === 'image'" :size="15" /><Film v-else-if="f.kind === 'video' || f.kind === 'audio'" :size="15" /><FileText v-else :size="15" /></span>
+                      <span class="chat-file-meta"><span class="chat-file-name">{{ f.name }}</span><span class="chat-file-sub">{{ (f.ref ? "引用 · " : "") + (f.size ? sizeText(f.size) : f.path) }}</span></span>
+                    </button>
+                  </div>
+                  <div v-if="parseGoal(turn.ask).text" class="chat-bubble">{{ parseGoal(turn.ask).text }}</div>
                   <div class="chat-meta">
                     <time class="chat-time" data-chat-time>{{ msgTime(turn.askAt) }}</time>
                     <span class="toolbar-spacer" />
-                    <button type="button" class="chat-act" data-chat-copy :data-copied="copiedKey === 'u:' + turn.key ? '1' : null" title="复制这条消息" aria-label="复制" @click="copyText(turn.ask, 'u:' + turn.key)">
+                    <button type="button" class="chat-act" data-chat-edit title="编辑后重新发送" aria-label="编辑重发" @click="editTurn(turn)"><Pencil :size="13" /></button>
+                    <button type="button" class="chat-act" data-chat-copy :data-copied="copiedKey === 'u:' + turn.key ? '1' : null" title="复制这条消息" aria-label="复制" @click="copyText(parseGoal(turn.ask).text, 'u:' + turn.key)">
                       <Check v-if="copiedKey === 'u:' + turn.key" :size="13" /><Copy v-else :size="13" />
                     </button>
                   </div>
@@ -619,6 +836,14 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); sh
                 <div class="chat-msg chat-msg-ai" data-role="assistant" data-chat-message="assistant" :class="{ pending: turn.pending, failed: turn.failed }">
                   <span class="chat-orb" aria-hidden="true" />
                   <div class="chat-bubble">
+                    <!-- 思考过程：运行中实时显示，结束后折叠成「已思考 Xs」（不落库，本次运行期间可看） -->
+                    <section v-if="thoughtOf(turn)" class="chat-think" :class="{ live: thoughtOf(turn)!.live }" data-chat-think>
+                      <button type="button" class="chat-think-head" :aria-expanded="thoughtOpen(turn)" data-chat-think-toggle @click="toggleThought(turn.key)">
+                        <Brain :size="13" /><span class="chat-think-label">{{ thoughtOf(turn)!.live ? "思考中…" : "已思考" + (thoughtOf(turn)!.ms >= 1000 ? " " + durText(thoughtOf(turn)!.ms) : "") }}</span>
+                        <ChevronRight :size="14" class="chat-chev" :class="{ open: thoughtOpen(turn) }" />
+                      </button>
+                      <div v-if="thoughtOpen(turn)" class="chat-think-body" data-chat-think-body>{{ thoughtOf(turn)!.text }}</div>
+                    </section>
                     <!-- 计划卡片：助手用 todo_write 列出的步骤，运行中实时更新 -->
                     <section v-if="turn.plan.length" class="chat-plan" data-chat-plan>
                       <header class="chat-plan-head"><ListChecks :size="14" /><span>计划</span><small data-chat-plan-progress>{{ planDone(turn.plan) }} / {{ turn.plan.length }}</small></header>
@@ -659,10 +884,15 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); sh
                       <button v-for="n in turn.nodes" :key="n.id" type="button" class="chat-nodechip" :data-chat-node="n.id" :title="'在画布中定位：' + n.title" @click="focusNode(n)"><Layers :size="12" /><span>{{ n.title }}</span></button>
                     </div>
                     <template v-if="!turn.pending && turn.media.length">
-                      <figure v-for="m in turn.media" :key="m.url" class="chat-media" data-chat-media :data-chat-media-src="m.url">
-                        <button type="button" class="chat-media-thumb" :aria-label="'预览 ' + m.name" @click="openMedia(m)"><img :src="m.url" :alt="m.name" loading="lazy" /></button>
+                      <figure v-for="m in turn.media" :key="m.url" class="chat-media" data-chat-media :data-chat-media-kind="m.kind" :data-chat-media-src="m.url">
+                        <video v-if="m.kind === 'video' && srcOf(m)" :src="srcOf(m)" controls playsinline preload="metadata" />
+                        <button v-else type="button" class="chat-media-thumb" :aria-label="'预览 ' + m.name" @click="openMedia(m)">
+                          <img v-if="srcOf(m)" :src="srcOf(m)" :alt="m.name" loading="lazy" />
+                          <span v-else class="chat-media-wait"><Play v-if="m.kind === 'video'" :size="18" /><ImageIcon v-else :size="18" /></span>
+                        </button>
                         <figcaption>
                           <span class="chat-media-name">{{ m.name }}</span>
+                          <button type="button" class="chat-media-open" data-chat-media-preview @click="openMedia(m)">预览</button>
                           <button v-if="m.nodeId" type="button" class="chat-media-open" data-chat-media-canvas @click="focusNode({ id: m.nodeId, title: m.name })">在画布中</button>
                         </figcaption>
                       </figure>
@@ -727,26 +957,16 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); sh
             <p v-if="lastSent" class="chat-hint" data-chat-last-sent>{{ lastSent }}</p>
             <p v-if="error" class="chat-error" role="alert" data-chat-error>{{ error }}</p>
             <p v-else-if="detail && !detail.appendable && terminal(detail.task.status) && detail.appendReason" class="chat-hint" data-chat-append-hint>这段对话已结束，不能继续追加；可以新建一段对话。</p>
-            <form class="chat-composer" @submit.prevent="send">
-              <textarea v-model="draft" rows="1" data-chat-input :placeholder="currentId ? '继续这段对话…' : '给助理发消息，或输入 / 选择 Skill'" aria-label="消息" :disabled="!taskBridge || sending" @keydown="onKey" />
-              <div class="chat-composer-bar">
-                <button type="button" class="chat-chip" disabled title="附件命令未接入（NOT VERIFIED）"><Paperclip :size="12" /> 附件</button>
-                <span class="chat-chip is-static" data-chat-skill title="Skill 选择命令未接入，这里是只读占位（NOT VERIFIED）"><Wrench :size="12" /> 自动选择能力</span>
-                <button type="button" class="chat-chip" data-chat-resource @click="resourcePickerOpen = true">引用资源</button>
-                <span class="toolbar-spacer" />
-                <span class="chat-kbd">回车发送 · ⇧回车换行</span>
-                <button v-if="running(detail?.task.status)" type="button" class="chat-send chat-send-stop" data-chat-stop aria-label="停止" title="停止" @click="stop"><Square :size="12" /></button>
-                <button v-else type="submit" class="chat-send" data-chat-send aria-label="发送" :disabled="!draft.trim() || sending || !taskBridge"><ArrowUp :size="15" /></button>
-              </div>
-            </form>
+            <Composer
+              ref="composer" v-model="draft" v-model:selected-model-id="selectedModelId" :disabled="!taskBridge || sending" :running="running(detail?.task.status)"
+              :placeholder="composerPlaceholder" :models="models" :locked-model-id="lockedModelId" :usage="ctxUsage" :model-calls="detail?.calls.length || 0"
+              :voice="voice" @send="send" @stop="stop" @command="onComposerCommand" @voice="toggleVoice"
+            />
           </div>
         </div>
 
-        <!-- 原型没有右侧第三栏：任务步骤 / 事件收进消息流末尾的「处理过程」折叠块。 -->
-      </div>
-      <div v-if="mediaPreview" class="chat-lightbox" data-chat-lightbox @click.self="mediaPreview = null">
-        <img :src="mediaPreview.url" :alt="mediaPreview.name" />
-        <div class="chat-lightbox-bar"><span>{{ mediaPreview.name }}</span><button type="button" class="chat-lightbox-close" data-chat-lightbox-close @click="mediaPreview = null">关闭</button></div>
+        <!-- 右侧预览侧栏：网页 / 文件 / 代码 / 媒体（点消息里的链接、文件、代码块「预览」打开） -->
+        <PreviewPanel v-if="preview.open && preview.items.length" />
       </div>
       <ResourcePicker v-if="resourcePickerOpen" picker-app-id="chat" :requested-actions="['resource.view']" title="引用资源" @choose="attachResource" @cancel="resourcePickerOpen = false" />
     </div>
@@ -817,14 +1037,7 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); sh
 .chat-empty-warn { color: var(--warning-text, #a05a00) !important; }
 .chat-empty-mark { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--sunken); color: var(--text); }
 
-.chat-md { white-space: normal; }
-.chat-md :deep(p) { margin: 0 0 8px; }
-.chat-md :deep(p:last-child) { margin-bottom: 0; }
-.chat-md :deep(h1), .chat-md :deep(h2), .chat-md :deep(h3), .chat-md :deep(h4) { margin: 10px 0 4px; font-size: var(--fs-headline); font-weight: var(--fw-medium); }
-.chat-md :deep(ul) { margin: 4px 0 8px; padding-left: 20px; }
-.chat-md :deep(code) { padding: 1px 4px; border-radius: 4px; background: rgb(var(--text-rgb) / 0.08); font-family: var(--font-mono); font-size: 0.92em; }
-.chat-md :deep(.chat-code) { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.06); overflow: auto; white-space: pre; scrollbar-width: none; }
-.chat-md :deep(.chat-code code) { background: transparent; padding: 0; }
+/* 消息正文的 Markdown 样式在 chat/chat-rich.css */
 
 /* 任务卡（一等公民）：收起时一行摘要，展开列出每一步 */
 .chat-taskcard { border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
@@ -1014,6 +1227,7 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); sh
 .chat-suggest-arrow { flex: none; margin-top: 2px; color: var(--muted); opacity: 0.5; }
 .chat-suggest-card:hover .chat-suggest-arrow { opacity: 0.9; }
 .chat-toast { margin: 0 0 4px; font-size: var(--fs-caption); color: var(--muted); }
+.chat-media-wait { display: grid; place-items: center; height: 120px; color: var(--muted); }
 .chat-lightbox { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(0, 0, 0, 0.84); }
 .chat-lightbox img { max-width: calc(100vw - 48px); max-height: calc(100vh - 140px); object-fit: contain; border-radius: var(--radius-lg); }
 .chat-lightbox-bar { display: flex; align-items: center; gap: 12px; font-size: var(--fs-caption); color: rgba(255, 255, 255, 0.8); }

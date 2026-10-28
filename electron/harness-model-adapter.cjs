@@ -169,6 +169,8 @@ class HarnessModelAdapter {
       chunk({}, "error");
       res.write("data: [DONE]\n\n"); res.end(); return;
     }
+    // 思考过程先发（pi-ai 识别 reasoning_content → dsh 的 agent_thought_chunk → 界面「思考」块）。
+    if (typeof json.reasoning === "string" && json.reasoning.trim()) chunk({ role: "assistant", reasoning_content: json.reasoning }, null);
     chunk({ role: "assistant", content: json.text || "" }, null);
     const toolCalls = Array.isArray(json.toolCalls) ? json.toolCalls : null;
     if (toolCalls && toolCalls.length) {

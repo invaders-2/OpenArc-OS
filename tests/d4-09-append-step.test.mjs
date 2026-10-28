@@ -257,7 +257,7 @@ test("D4-09 D · 拒绝矩阵：非 SUCCEEDED、0 artifact、已 cancel、不存
     const ctx = s.ctx;
 
     // 非法 goal：一律 INVALID_INPUT，且不得新增 step / 不得离开 SUCCEEDED
-    for (const goal of ["", "   ", "a".repeat(2001), null, 42, { goal: "x" }]) {
+    for (const goal of ["", "   ", "a".repeat(20001), null, 42, { goal: "x" }]) {
       const r = fx.taskService.appendStep({ context: ctx, taskId: s.taskId, goal, expectedRevision: revOf(fx, s.taskId) });
       assert.equal(r.ok, false, "非法 goal 必须拒绝：" + JSON.stringify(goal));
       assert.equal(r.error, "INVALID_INPUT", JSON.stringify(r));

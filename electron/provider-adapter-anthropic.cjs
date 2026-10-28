@@ -186,8 +186,11 @@ function toolCallsFromBlocks(blocks) {
 function parseChatResponse(body) {
   const blocks = body && Array.isArray(body.content) ? body.content : [];
   const text = blocks.filter((block) => block && block.type === "text").map((block) => String(block.text || "")).join("");
+  // 扩展思考（thinking 块）：只给界面看，不并进正文。
+  const reasoning = blocks.filter((block) => block && block.type === "thinking" && typeof block.thinking === "string").map((block) => block.thinking).join("\n\n");
   return {
     text,
+    reasoning,
     toolCalls: toolCallsFromBlocks(blocks),
     usage: mapUsage(body && body.usage),
     stopReason: body && body.stop_reason != null ? String(body.stop_reason) : null,

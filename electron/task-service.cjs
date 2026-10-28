@@ -1189,7 +1189,7 @@ class TaskService {
     const guard = this.#guard(context);
     if (!guard.ok) return guard;
     const g = typeof goal === "string" ? goal.trim() : "";
-    if (!g || g.length > 2000) return { ok: false, error: ERROR.INVALID_INPUT, detail: "goal is required" };
+    if (!g || g.length > 20000) return { ok: false, error: ERROR.INVALID_INPUT, detail: "goal is required" };
     return this.store.transactSync(() => {
       const load = this.#load(guard, taskId);
       if (!load.ok) return load;
