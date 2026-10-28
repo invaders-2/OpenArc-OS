@@ -80,6 +80,20 @@ test("删除堆叠连同成员；复制粘贴堆叠时成员 id 一起换新", (
   assert.equal(store.node("a"), undefined); assert.equal(store.node("b"), undefined); assert.ok(store.node("c"));
 });
 
+test("从普通分组拖进叠：同时移出原分组；删除叠时叠外下游也会刷新输入", () => {
+  const g = { id: "g", kind: "group", x: 0, y: 0, w: 900, h: 300, children: ["a", "c"] };
+  const store = makeStore([img("a", 0), img("b", 300), img("c", 600), img("d", 900), g], [{ id: "e1", from: "b", to: "d" }]);
+  store.setUI({ sel: new Set(["b", "c"]) });
+  // c 在分组 g 里：先把 b、d 叠起来，再把 c 拖进去
+  store.setUI({ sel: new Set(["b", "d"]) }); const s = M.stackSelection(store);
+  assert.equal(M.addToStack(store, s.id, ["c"]), 1);
+  assert.deepEqual(store.node("g").children, ["a"], "c 离开原分组");
+  assert.equal(M.groupLabel(store.node("g")), "分组"); assert.equal(M.groupLabel(store.node(s.id)), "堆叠");
+  // 删除叠：成员 b、c、d 一起删，没有残留连线
+  store.setUI({ sel: new Set([s.id]) }); M.deleteSelection(store);
+  assert.equal(store.state.doc.edges.length, 0); assert.ok(store.node("a"));
+});
+
 test("分组运行计划：按依赖分层、统计调用次数、跳过上游没结果和手写节点", () => {
   const t = M.newNode("text", 0, 0, { id: "t", prompt: "写文案" }, models[1]);
   const manual = M.newNode("text", 0, 300, { id: "m", manual: true, hist: [{ text: "已有" }] }, models[1]);

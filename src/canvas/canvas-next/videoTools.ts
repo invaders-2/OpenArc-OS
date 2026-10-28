@@ -47,24 +47,25 @@ const segLabel = (s: VideoSegment) => `${Math.round(s.inSec * 10) / 10}s–${Mat
 /**
  * 把若干区间做成新视频节点（连到源节点之后）。返回新节点；ok=false 表示走了「区间引用」降级。
  */
-export async function segmentsToNodes(store: CanvasStore, src: CanvasNode, segs: VideoSegment[], label: string, opts: { link?: boolean } = {}): Promise<{ nodes: CanvasNode[]; real: boolean; note?: string }> {
+export async function segmentsToNodes(store: CanvasStore, src: CanvasNode, segs: VideoSegment[], label: string, opts: { link?: boolean; data?: string | null; realOnly?: boolean } = {}): Promise<{ nodes: CanvasNode[]; real: boolean; note?: string }> {
   const o = outOf(src); if (!o?.url || !segs.length) return { nodes: [], real: false };
   const g = genOf(src); const spots = rowSpots(store, src, segs.length);
   let made: CanvasNode[] = []; let real = false; let note: string | undefined;
   if (store.backend.clipVideo) {
-    const data = await videoDataUrl(store, src);
+    const data = opts.data !== undefined ? opts.data : await videoDataUrl(store, src);
     if (data) {
       const r = await store.backend.clipVideo(store.state.canvasId, data, segs, g.title);
       if (r.ok) {
         real = true;
         r.clips.forEach((c, i) => {
           if (!c.ref) return;
-          made.push(store.newNode("video", spots[i].x, spots[i].y, { title: `${g.title} · ${label}${segs.length > 1 ? " " + (i + 1) : ""}`, uploaded: true, hist: [{ url: c.ref, dur: c.duration, frame: o.frame, w: o.w, h: o.h, res: o.res }], w: src.w, h: src.h }));
+          made.push(store.newNode("video", spots[i].x, spots[i].y, { title: `${g.title} · ${label}${segs.length > 1 ? " " + (i + 1) : ""}`, uploaded: true, hist: [{ url: c.ref, dur: c.duration, w: o.w, h: o.h, res: o.res }], w: src.w, h: src.h }));
         });
-        const bad = r.clips.filter((c) => !c.ref).length; if (bad) note = `${bad} 段裁剪失败`;
+        const bad = r.clips.filter((c) => !c.ref).length + (r.dropped || 0); if (bad) note = `${bad} 段没有裁出来`;
       } else note = r.error === "FFMPEG_MISSING" ? "本机没有 ffmpeg" : r.error === "NO_BRIDGE" ? "" : `裁剪失败（${r.error}）`;
     } else note = "读取源视频失败";
   }
+  if (!real && opts.realOnly) return { nodes: [], real, note: note || "需要桌面版和 ffmpeg" };
   if (!real) {
     // 降级：同一个视频 + 使用区间（播放 / 截帧 / 下载都按区间；发给模型的仍是整段）
     made = segs.map((s, i) => store.newNode("video", spots[i].x, spots[i].y, { title: `${g.title} · ${label}${segs.length > 1 ? " " + (i + 1) : ""}`, uploaded: true, hist: [{ ...o, trim: clampTrim(o.dur, { in: s.inSec, out: s.outSec }), draft: undefined }], w: src.w, h: src.h }));
@@ -95,8 +96,9 @@ export async function smartClip(store: CanvasStore, n: CanvasNode) {
   const r = await store.backend.detectScenes(data);
   if (!r.ok) { store.toast(r.error === "FFMPEG_MISSING" ? "本机没有 ffmpeg，无法自动切镜（可设置 OPENARC_FFMPEG 指定路径）" : `切镜失败（${r.error}）`, 5000); return []; }
   if (r.shots.length < 2) { store.toast("只检测到 1 个镜头，不需要拆分"); return []; }
-  const res = await segmentsToNodes(store, n, r.shots, "镜头");
-  store.toast(`已按镜头拆成 ${res.nodes.length} 个视频节点${res.real ? "" : res.note ? `（${res.note}，按区间播放）` : "（按区间播放）"} · ⇧S 可堆叠`, 4600);
+  const res = await segmentsToNodes(store, n, r.shots, "镜头", { data });
+  const extra = [r.capped ? "镜头较多，最后一段包含剩余部分" : "", res.real && res.note ? res.note : ""].filter(Boolean).join("，");
+  store.toast(`已按镜头拆成 ${res.nodes.length} 个视频节点${res.real ? "" : res.note ? `（${res.note}，按区间播放）` : "（按区间播放）"}${extra ? "；" + extra : ""} · ⇧S 可堆叠`, 5200);
   return res.nodes;
 }
 
@@ -126,8 +128,9 @@ export async function aiVideoEdit(store: CanvasStore, n: CanvasNode, op: VideoAi
   if (!o?.url) { store.toast("这个视频节点还没有结果"); return null; }
   if (op === "retake" && o.trim && !trimIsFull(o.dur, o.trim)) {
     const t = clampTrim(o.dur, o.trim);
-    const seg = await segmentsToNodes(store, n, [{ inSec: t.in, outSec: t.out }], "重拍片段");
-    if (!seg.nodes.length) { store.toast("裁剪重拍片段失败" + (seg.note ? "：" + seg.note : "")); return null; }
+    // 只重拍一段必须真裁出文件：发给模型的是整段文件时，按区间引用会重拍并计费整段
+    const seg = await segmentsToNodes(store, n, [{ inSec: t.in, outSec: t.out }], "重拍片段", { realOnly: true });
+    if (!seg.nodes.length) { store.toast(`没能裁出要重拍的片段（${seg.note || "裁剪失败"}）。要重拍整段，先清除使用区间`, 6000); return null; }
     src = seg.nodes[0];
   }
   const sp = genOf(n).params as VideoParams;

@@ -703,13 +703,13 @@ export function createBridgeBackend(): CanvasBackend {
     async detectScenes(dataUrl) {
       const cmd = canvasCmd(); if (!cmd) return { ok: false as const, error: "NO_BRIDGE" };
       const res: Record<string, any> = await cmd({ type: "media/detectScenes", dataUrl }).catch((e: unknown) => ({ ok: false, error: "DETECT_FAILED", detail: String((e as Error)?.message || e) }));
-      if (res && res.ok && Array.isArray(res.shots)) return { ok: true as const, duration: Number(res.duration) || 0, shots: res.shots.map((x: any) => ({ inSec: Number(x.inSec) || 0, outSec: Number(x.outSec) || 0 })) };
+      if (res && res.ok && Array.isArray(res.shots)) return { ok: true as const, duration: Number(res.duration) || 0, shots: res.shots.map((x: any) => ({ inSec: Number(x.inSec) || 0, outSec: Number(x.outSec) || 0 })), ...(res.capped ? { capped: true } : {}) };
       return { ok: false as const, error: String(res?.error || "DETECT_FAILED"), ...(res?.detail ? { detail: String(res.detail) } : {}) };
     },
     async clipVideo(canvasId, dataUrl, segments, name) {
       const cmd = canvasCmd(); if (!cmd) return { ok: false, clips: [], error: "NO_BRIDGE" };
       const res: Record<string, any> = await cmd({ type: "media/clipToCanvas", canvasId, dataUrl, segments, fileName: name }).catch((e: unknown) => ({ ok: false, error: "CLIP_FAILED", detail: String((e as Error)?.message || e) }));
-      return { ok: !!res?.ok, clips: Array.isArray(res?.clips) ? res.clips : [], ...(res?.ok ? {} : { error: String(res?.error || "CLIP_FAILED") }) };
+      return { ok: !!res?.ok, clips: Array.isArray(res?.clips) ? res.clips : [], ...(Number(res?.dropped) > 0 ? { dropped: Number(res.dropped) } : {}), ...(res?.ok ? {} : { error: String(res?.error || "CLIP_FAILED") }) };
     },
   };
 }
