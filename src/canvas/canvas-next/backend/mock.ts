@@ -96,6 +96,13 @@ export function createMockBackend(opts: MockOptions = {}): CanvasBackend {
     },
     async importAsset(_c, dataUrl) { return dataUrl; },
     async resolveAsset() { return null; },
+    /** 模拟切镜：按时长均分成约 3 秒一段（真实切镜在桌面版用 ffmpeg 检测画面变化） */
+    async detectScenes(dataUrl) {
+      const duration = await new Promise<number>((resolve) => { try { const v = document.createElement("video"); v.preload = "metadata"; v.onloadedmetadata = () => resolve(Number(v.duration) || 0); v.onerror = () => resolve(0); v.src = dataUrl; } catch { resolve(0); } });
+      if (!duration) return { ok: false as const, error: "PROBE_FAILED" };
+      const n = Math.max(2, Math.min(6, Math.round(duration / 3))); const step = duration / n;
+      return { ok: true as const, duration, shots: Array.from({ length: n }, (_, i) => ({ inSec: Math.round(i * step * 100) / 100, outSec: Math.round(Math.min(duration, (i + 1) * step) * 100) / 100 })) };
+    },
   };
 }
 

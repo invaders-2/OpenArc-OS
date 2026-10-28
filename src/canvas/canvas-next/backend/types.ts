@@ -41,6 +41,7 @@ export type GenEvent =
   | { type: "text"; text: string };
 
 export type GenResult = { outputs: GenOutput[]; runId?: string };
+export type VideoSegment = { inSec: number; outSec: number };
 
 export class GenError extends Error {
   code: string;
@@ -105,4 +106,8 @@ export interface CanvasBackend {
   importRemote?(canvasId: string, url: string, name: string): Promise<string>;
   /** openarc-asset:… → 可显示的地址 */
   resolveAsset(ref: string): Promise<string | null>;
+  /** 视频智能切镜：返回各镜头区间（秒）；没有 ffmpeg 等失败时 ok:false */
+  detectScenes?(dataUrl: string): Promise<{ ok: true; duration: number; shots: VideoSegment[]; /** 镜头太多，最后一段包含剩余部分 */ capped?: boolean } | { ok: false; error: string; detail?: string }>;
+  /** 按区间真裁剪视频并存进资源库（每段一个引用）；没有 ffmpeg 等失败时 ok:false */
+  clipVideo?(canvasId: string, dataUrl: string, segments: VideoSegment[], name: string): Promise<{ ok: boolean; clips: Array<{ ref?: string; duration?: number; inSec?: number; outSec?: number; error?: string }>; error?: string; /** 超过一次能裁的段数而没裁的段 */ dropped?: number }>;
 }

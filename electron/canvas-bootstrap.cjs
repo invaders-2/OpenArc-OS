@@ -19,6 +19,8 @@ const { extendRendererCommands } = require("./canvas-dxos-commands.cjs");
 const { createExportSaver } = require("./canvas-export-save.cjs");
 // task-72：视频「使用区间」按 ffmpeg 真裁剪（media/clipVideo）；没有 ffmpeg 时由调用方降级
 const { clipVideo } = require("./media-clip.cjs");
+// 10-28：视频工具（智能切镜 / 修剪进画布）：镜头检测 + 按段裁剪后直接存进资源库
+const { detectScenes, clipToCanvas } = require("./media-scenes.cjs");
 const { executeCanvasDesktopInput } = require("./canvas-desktop-input.cjs");
 
 const HOST_APP_ID = "canvas";
@@ -75,6 +77,9 @@ const RENDERER_COMMANDS = extendRendererCommands([
   "canvas/saveExport",
   // task-72：视频按使用区间裁剪 { srcPath|dataUrl, inSec, outSec, format } → 临时文件路径/时长
   "media/clipVideo",
+  // 10-28：智能切镜 { dataUrl, threshold?, minGap? } → 切点；修剪 / 切镜结果 { canvasId, dataUrl, segments } → 资源引用
+  "media/detectScenes",
+  "media/clipToCanvas",
   "canvas/folder/grants",
   "canvas/folder/choose",
   "canvas/folder/remove",
@@ -485,6 +490,15 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
             fileName: payload.fileName ? asStr(payload.fileName, 160) : null,
             ...(clipDir ? { tmpDir: clipDir } : {}),
           });
+        case "media/detectScenes":
+          return await detectScenes({ dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl : "", threshold: payload.threshold, minGap: payload.minGap, maxCuts: payload.maxCuts, ...(clipDir ? { tmpDir: clipDir } : {}) });
+        case "media/clipToCanvas":
+          return await clipToCanvas({
+            canvasId: asStr(payload.canvasId, 120),
+            dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl.slice(0, 280 * 1024 * 1024) : "",
+            segments: Array.isArray(payload.segments) ? payload.segments.map((x) => ({ inSec: Number(x && x.inSec), outSec: Number(x && x.outSec) })) : [],
+            fileName: payload.fileName ? asStr(payload.fileName, 160) : null,
+          }, { canvasService: service, context, clipImpl, ...(clipDir ? { tmpDir: clipDir } : {}) });
         default: {
           // B5d：白名单里的扩展命令先交给同一个扩展分发；未命中/未装配一律回落既有错误码，不放行任意命令。
           if (extension && typeof extension.dispatch === "function") {

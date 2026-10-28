@@ -11,7 +11,7 @@
 import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { GenError, type GenInput, type GenRequest } from "./backend/types";
 import { nodeError } from "./errorText";
-import { autoVideoMode, clamp, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
+import { autoVideoMode, clamp, draftRes, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { batchOf, batchRows, emptyRunHint, parseTableJson, repairPrompt, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableMedia, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type TableData, type TableMedia } from "./table";
 
@@ -59,7 +59,9 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: { text:
   const inputs: GenInput[] = ins.filter((x) => !ignored.has(x.edge.id)).map((x) => ({ nodeId: x.node.id, title: genOf(x.node).title, kind: x.node.kind as GenKind, order: x.order + 1, role: roles.get(x.edge.id) || "context", url: outOf(x.node)?.url || (x.node.kind === "video" ? outOf(x.node)?.frame : undefined), text: x.node.kind === "text" ? textOf(x.node) : undefined }));
   if (row) row.media.forEach((md) => { if (!inputs.some((i) => i.nodeId === md.nodeId)) inputs.push({ nodeId: md.nodeId, title: md.title, kind: md.kind, order: inputs.length + 1, role: md.kind === "image" ? (node.kind === "video" ? "first_frame" : "reference") : md.kind === "video" ? "source_video" : md.kind === "audio" ? "driving_audio" : "context", url: md.url || md.src }); });
   const vm = node.kind === "video" ? (g.params as VideoParams).mode : undefined;
-  return { canvasId: store.state.canvasId, nodeId: node.id, kind: node.kind, model: m, prompt: g.prompt, resolvedPrompt: resolvePrompt(doc, node, row?.text || ""), params: g.params, inputs, ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
+  // 草稿模式：按模型最低清晰度出片（请求预览里看到的就是实际发出的清晰度）
+  const params = node.kind === "video" && (g.params as VideoParams).draft ? { ...(g.params as VideoParams), res: draftRes(g.params as VideoParams, m) } : g.params;
+  return { canvasId: store.state.canvasId, nodeId: node.id, kind: node.kind, model: m, prompt: g.prompt, resolvedPrompt: resolvePrompt(doc, node, row?.text || ""), params, inputs, ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
 }
 
 /* ---------- 放置 ---------- */
@@ -117,7 +119,8 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
     }, abort.signal);
     // 生成期间节点被删除 / 撤销掉：结果无处可写，按「已停止」记录，不当成报错
     if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
-    const outs = await persistOutputs(store, res.outputs, genOf(node).title);
+    const isDraft = req.kind === "video" && !!(req.params as VideoParams).draft;
+    const outs = (await persistOutputs(store, res.outputs, genOf(node).title)).map((o) => (isDraft ? { ...o, draft: true } : o));
     if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
     applyOutputs(store, id, outs);
     store.setRun(id, null);

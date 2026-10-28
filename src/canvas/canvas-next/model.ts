@@ -20,7 +20,7 @@ export const TYPE_ICON = { image: "image", video: "video", text: "text", audio: 
 export type CameraParams = { on: boolean; body: number; lens: number; focal: number; aperture: number };
 export type ImageParams = { model: string; ratio: string; size: string; count: number; search: boolean; style: string; camera: CameraParams };
 export type VideoMode = "文生视频" | "首帧" | "首尾帧" | "参考生视频" | "视频编辑" | "视频延长" | "参考视频生视频" | "数字人";
-export type VideoParams = { model: string; mode: VideoMode; ratio: string; res: string; dur: number; sound: boolean; times: number; /** 多镜头（高级设置） */ multiShot?: boolean; /** 生成模式（4K / 标准 / 专业…，仅规格声明的模型可用） */ genMode?: string; /** 极速模式（仅规格声明的模型可用） */ turbo?: boolean };
+export type VideoParams = { model: string; mode: VideoMode; ratio: string; res: string; dur: number; sound: boolean; times: number; /** 多镜头（高级设置） */ multiShot?: boolean; /** 生成模式（4K / 标准 / 专业…，仅规格声明的模型可用） */ genMode?: string; /** 极速模式（仅规格声明的模型可用） */ turbo?: boolean; /** 草稿模式（TapNow Draft Mode）：先按最低清晰度出草稿，满意后再出成片 */ draft?: boolean };
 export type TextParams = { model: string; search: boolean; /** 输出：文本 / 多维表格 / 分镜表 */ output?: "text" | "table" | "storyboard" };
 export type AudioParams = { model: string; kind: string; dur: string };
 export type ParamsOf<K extends GenKind> = K extends "image" ? ImageParams : K extends "video" ? VideoParams : K extends "text" ? TextParams : AudioParams;
@@ -38,6 +38,8 @@ export type GenOutput = {
   res?: string;
   /** 视频「使用区间」（按版本各存一份）：播放循环 / 截帧 / 下载都按它 */
   trim?: VideoTrim;
+  /** 草稿模式出的低清版本：工具条显示「出成片」 */
+  draft?: boolean;
   /** 音频波形（0~1），后端不给时前端从音频解码或用占位 */
   bars?: number[];
   meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string };
@@ -485,3 +487,13 @@ export function bounds(nodes: CanvasNode[]) {
   return { x, y, w: r - x, h: b - y };
 }
 export const nowStr = () => { const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+
+/* ---------- 视频草稿模式 ---------- */
+/** 模型支持的最低 / 最高清晰度（按档位数值比较） */
+export function resRange(m: ModelSpec | undefined): { low: string; high: string } | null {
+  const list = (m?.res || []).filter(Boolean); if (list.length < 2) return null;
+  const sorted = list.slice().sort((a, b) => (tierNum(a) || 0) - (tierNum(b) || 0));
+  return sorted[0] === sorted[sorted.length - 1] ? null : { low: sorted[0], high: sorted[sorted.length - 1] };
+}
+/** 草稿模式下真正发出去的清晰度 */
+export function draftRes(p: VideoParams, m: ModelSpec | undefined): string { const r = resRange(m); return p.draft && r ? r.low : p.res; }

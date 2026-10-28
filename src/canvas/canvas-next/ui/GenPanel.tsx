@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
 import { buildRequest, rolesFor, ROLE_LABEL, runNode, stopNode } from "../engine";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, STYLES, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, STYLES, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchOf, batchRows, OUTPUT_MODES, rowsToRun, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
 import { Icon, type IconName } from "./Icon";
@@ -17,6 +17,8 @@ import { saveNodeToLibrary } from "./Library";
 import { closePop, openPop } from "./overlay";
 import { useAssetUrl } from "./useAsset";
 import { useEditorState } from "./editors/registry";
+import { draftToFinal, smartClip, trimToNode } from "../videoTools";
+import { videoAiMenu } from "./VideoTools";
 import type { CanvasStore } from "../store";
 
 export function SelectionUI() {
@@ -73,10 +75,12 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     : [B("crop", "crop", "裁剪"), B("angle", "cube", "多角度"), B("mask", "brush", "局部重绘"), B("relight", "sun", "重打光"), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
   else if (node.kind === "text") items = [bgBtn(), tagBtn(), <span key="s" className="vsep" />, B("copy", "copy", "复制全部", "", async () => { try { await navigator.clipboard.writeText(textOf(node)); store.toast("已复制全部内容"); } catch { store.toast("剪贴板不可用"); } }), B("lib", "libadd", "保存到素材库", "", (el) => { const r = el.getBoundingClientRect(); void saveNodeToLibrary(ctl, node, { x: r.left, y: r.bottom + 6 }); }), B("full", "expand", "全屏编辑", "", () => window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: node.id })))];
   else if (node.kind === "video" && out) items = [
-    // TapNow 视频工具栏：裁剪 / 擦除 / 截帧 / 更多 ┃ 标签 ┃ 保存素材库 / 下载 / 全屏
-    // 裁剪、擦除都先截当前帧成图片节点，再打开对应编辑器（视频逐帧裁剪需要转码，暂不做）
-    B("cropframe", "crop", "裁剪（先截当前帧，再裁剪那张图）"),
-    B("eraseframe", "eraser", "擦除（先截当前帧，再擦除那张图）"),
+    // TapNow 视频工具栏：修剪 / 智能切镜 / AI 编辑（替换·移除·续写·重拍）/ 截帧 / 更多 ┃ 标签 ┃ 保存素材库 / 下载 / 全屏
+    // 草稿模式出的低清版本最前面多一个「出成片」
+    ...(out.draft ? [B("final", "sparkle", "按最高清晰度重新生成成片", "出成片", () => void draftToFinal(store, node))] : []),
+    B("trim", "scissors", "修剪：把使用区间裁成新视频节点", "", () => void trimToNode(store, node)),
+    B("smartclip", "split", "智能切镜：按镜头拆成多个节点", "", () => void smartClip(store, node)),
+    <button key="vai" className="ib tipT lab" data-tb="vai" data-tip="AI 编辑：替换 / 移除 / 续写 / 重拍" onClick={(e) => videoAiMenu(store, node, e.currentTarget)}><Icon name="wand" />AI 编辑</button>,
     B("frame", "frame", "截帧（快捷键 1）", "截帧"),
     <button key="vmore" className="ib tipT" data-tb="vmore" data-tip="更多" onClick={(e) => videoMore(store, node, e.currentTarget)}><Icon name="more" /></button>,
     <span key="s1" className="vsep" />, tagBtn(), <span key="s2" className="vsep" />,
@@ -233,7 +237,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
           <i>·</i>
           <button data-p="vratio" data-vval="ratio" disabled={busy || !m || !(m.ratios || []).length} onClick={(e) => paramPop(ctl, node, "vratio", e.currentTarget)}>{videoRatioLabel(vp.ratio)}</button>
           <i>·</i>
-          <button data-p="vres" data-vval="res" disabled={busy || !m || !(m.res || []).length} onClick={(e) => paramPop(ctl, node, "vres", e.currentTarget)}>{videoResLabel(vp.res)}</button>
+          <button data-p="vres" data-vval="res" disabled={busy || !m || !(m.res || []).length} onClick={(e) => paramPop(ctl, node, "vres", e.currentTarget)}>{vp.draft && resRange(m) ? `草稿 ${resRange(m)!.low}` : videoResLabel(vp.res)}</button>
           <i>·</i>
           <button data-p="dur" data-vval="dur" disabled={busy || !m} onClick={(e) => paramPop(ctl, node, "dur", e.currentTarget)}>{videoDurLabel(vp.dur)}</button>
         </span>
@@ -326,6 +330,10 @@ function videoMore(store: CanvasStore, node: CanvasNode, anchor: Element) {
       <button className="mi" data-tbk="setcover" onClick={fire("setcover")}><Icon name="star" size="s" />设为视频封面</button>
       <button className="mi" data-tbk="applycanvas" onClick={fire("applycanvas")}><Icon name="libadd" size="s" />应用到画布</button>
       <div className="msep" />
+      <div className="mh">编辑当前帧</div>
+      <button className="mi" data-tbk="cropframe" onClick={fire("cropframe")}><Icon name="crop" size="s" />裁剪画面<span className="k">先截帧</span></button>
+      <button className="mi" data-tbk="eraseframe" onClick={fire("eraseframe")}><Icon name="eraser" size="s" />擦除画面<span className="k">先截帧</span></button>
+      <div className="msep" />
       <button className="mi" data-tbk="dl" onClick={() => { close(); void download(node, store); }}><Icon name="download" size="s" />下载</button>
       <button className="mi" data-tbk="full" onClick={() => { close(); window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })); }}><Icon name="expand" size="s" />全屏</button>
       <div className="mh">暂未接入</div>
@@ -412,7 +420,9 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);
   if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{(Object.keys(VMODES) as Array<keyof typeof VMODES>).map((x) => { const ok = (mm.modes || []).includes(x); return <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={!ok || dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{ok ? (x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need) : mm.name + " 不支持"}</span></span><span className="k tnum">{VMODES[x].api}</span></button>; })}</>);
   if (k === "vratio") return pop(() => <VRatioPop node={node} m={mm} disabled={dis} />);
-  if (k === "vres") return pop((close) => <><div className="mh">清晰度</div><div className="seg wrap">{(mm.res || []).map((r) => <button key={r} className={(cur().g.params as VideoParams).res === r ? "on" : ""} disabled={dis} onClick={() => { close(); set({ res: r }); }}>{r}</button>)}</div></>);
+  if (k === "vres") { const rr = resRange(mm); const vp0 = cur().g.params as VideoParams; return pop((close) => <><div className="mh">清晰度</div><div className="seg wrap">{(mm.res || []).map((r) => <button key={r} className={vp0.res === r && !vp0.draft ? "on" : ""} disabled={dis} onClick={() => { close(); set({ res: r, draft: false }); }}>{r}</button>)}</div>
+    <div className="msep" />
+    <button className={"mi" + (vp0.draft ? " on" : "")} data-p="vdraft" disabled={dis || !rr} onClick={() => { close(); set({ draft: !vp0.draft }); }}><Icon name="bolt" size="s" /><span style={{ flex: 1 }}>草稿模式<span className="d">{rr ? `先按 ${rr.low} 出草稿，满意后一键按 ${rr.high} 出成片` : "该模型只有一档清晰度"}</span></span>{vp0.draft ? <span className="k"><Icon name="check" size="s" /></span> : null}</button></>); }
   if (k === "dur") return pop(() => <DurPop node={node} m={mm} disabled={dis} />);
   if (k === "vgenmode") return pop((close) => <><div className="mh">生成模式</div><div className="seg wrap">{(mm.genModes || []).map((x) => <button key={x} className={(cur().g.params as VideoParams).genMode === x ? "on" : ""} disabled={dis} onClick={() => { close(); set({ genMode: x }); }}>{x}</button>)}</div></>);
   if (k === "vturbo") return pop((close) => <><div className="mh">加速（极速模式）</div><div className="seg"><button className={(cur().g.params as VideoParams).turbo ? "on" : ""} disabled={dis} onClick={() => { close(); set({ turbo: true }); }}>开</button><button className={!(cur().g.params as VideoParams).turbo ? "on" : ""} disabled={dis} onClick={() => { close(); set({ turbo: false }); }}>关</button></div><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>极速模式会优先出片，画质与稳定性可能下降</span></div></>);
