@@ -147,6 +147,8 @@ function resultUrls(payload, kind) {
   let urls = urlsIn(res[key]);
   if (!urls.length && kind === "video") urls = [res.video_url, node.video_url, res.url].filter((u) => typeof u === "string" && /^https?:/i.test(u));
   if (!urls.length && kind === "image" && Array.isArray(d)) urls = urlsIn(d);
+  // Midjourney 原生查询（GET /v1/midjourney/{id}）把 4 张单图放在顶层 image_urls
+  if (!urls.length && kind === "image" && Array.isArray(node.image_urls)) urls = urlsIn(node.image_urls);
   return urls;
 }
 
@@ -460,8 +462,31 @@ const kindOfValue = (v) => { const s = String(v || ""); if (/^data:video\//i.tes
 
 /* ---------------- 图片 ---------------- */
 const OFFICIAL_HEADERS = () => ({ "X-APIMart-Response-Version": "2026-07-27", "Idempotency-Key": "oa_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10) });
+/**
+ * Midjourney 请求体（docs.apimart.ai/cn/api-reference/images/midjourney/imagine）：
+ * 路由自带 model=midjourney，体里不传 model / n；size = --ar；speed relax | fast | turbo（默认 fast：relax 排队常常十几分钟）；
+ * 版本从模型名取（midjourney-v7 → "7"，niji-6 → niji:true + "6"），名字里没有版本就不传、交给上游默认。
+ */
+const MJ_SPEEDS = new Set(["relax", "fast", "turbo"]);
+const MJ_PASSTHROUGH = ["quality", "style", "seed", "negative_prompt", "stylize", "chaos", "weird", "tile", "iw", "cw", "sw", "cref", "sref", "raw", "draft", "hd", "extra"];
+function midjourneyBody(spec, model, prompt, { size = null, params = {}, refs = 0, keepRatio = true } = {}) {
+  const body = { prompt: String(prompt || "").trim() };
+  if (keepRatio || !refs) { const r = pickRatio(spec.ratios, params.aspect_ratio || params.ratio, size); if (r && !isAuto(r)) body.size = r; }
+  const speed = lc(params.speed);
+  body.speed = MJ_SPEEDS.has(speed) ? speed : "fast";
+  const name = lc(model);
+  const ver = /(\d+(?:\.\d+)?)/.exec(name);
+  if (params.version) body.version = String(params.version);
+  else if (ver) body.version = ver[1];
+  if (/niji/.test(name) || params.niji === true) body.niji = true;
+  for (const k of MJ_PASSTHROUGH) if (params[k] !== undefined && params[k] !== null && params[k] !== "") body[k] = params[k];
+  return body;
+}
+const MJ_PATH = (body) => (Array.isArray(body.image_urls) && body.image_urls.length ? "/v1/midjourney/generations/edits" : "/v1/midjourney/generations");
+
 function imageBody(model, prompt, { size = null, n = 1, params = {}, refs = 0, keepRatio = true } = {}) {
   const spec = catalog.imageModel(model);
+  if (spec && spec.mj) return midjourneyBody(spec, model, prompt, { size, params, refs, keepRatio });
   const body = { model, prompt: String(prompt || "").trim() };
   if (!spec) {
     const ss = sizeSpec(model, size, params);
@@ -487,7 +512,12 @@ async function runImages({ fetchImpl, apiKey, baseUrl, model, n, mkBody, signal,
   const batches = []; let left = n;
   while (left > 0) { const k = Math.min(per, left); batches.push(k); left -= k; }
   const headers = spec && spec.official ? OFFICIAL_HEADERS : null;
-  const runs = await Promise.all(batches.map((k, i) => runTask({ fetchImpl, apiKey, baseUrl, path: "/v1/images/generations", body: mkBody(k), headers: headers ? headers() : null, kind: "image", signal, timeoutMs, onEvent: i === 0 ? onEvent : undefined })));
+  const runs = await Promise.all(batches.map((k, i) => {
+    const body = mkBody(k);
+    const path = spec && spec.mj ? MJ_PATH(body) : "/v1/images/generations";
+    // Midjourney 单任务实测 fast 也要 5 分钟左右；轮询间隔从 4s 起
+    return runTask({ fetchImpl, apiKey, baseUrl, path, body, headers: headers ? headers() : null, kind: "image", signal, timeoutMs, pollMs: spec && spec.mj ? 4000 : 2000, onEvent: i === 0 ? onEvent : undefined });
+  }));
   const urls = runs.filter((r) => r.ok).flatMap((r) => r.urls);
   return urls.length ? { ok: true, artifacts: urls.map((url) => ({ url })), text: "" } : runs[0];
 }

@@ -40,6 +40,9 @@ const K = { "1K": "1K", "2K": "2K", "4K": "4K" };
 
 /** 图片模型（顺序 = 匹配优先级，具体的在前） */
 const IMAGE = [
+  // Midjourney / Niji：不走 /v1/images/generations（那里报 model_price_error），走专用 /v1/midjourney/generations（有参考图时 /edits）。
+  // 一个任务固定出 4 张（image_urls），没有 n；比例 = size（--ar）；版本 / niji 从模型名推断，见 adapter 的 midjourneyBody。
+  { re: /^(midjourney|niji|mj)([-_.\s]|$)/, mj: true, ratioKey: "size", ratios: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "2:1", "1:2"], resKey: null, res: [["1K", null]], nMax: 1, noN: true, refs: 4 },
   { re: /^gpt-image-2\.5-ext/, ratioKey: "size", ratios: IMG_RATIO.ext, resKey: "resolution", res: R(["1K", "2K", "4K"]), nMax: 4, refs: 16 },
   { re: /^gpt-image-2\.5/, ratioKey: "size", ratios: IMG_RATIO.gpt2, resKey: "resolution", res: [["1K", "1k"], ["2K", "2k"], ["4K", "4k"]], nMax: 4, refs: 16, mask: true },
   { re: /^gpt-image-2-official/, ratioKey: "size", ratios: IMG_RATIO.gpt2, resKey: "resolution", res: [["1K", "1k"], ["2K", "2k"], ["4K", "4k"]], nMax: 4, refs: 16, mask: true },
