@@ -112,7 +112,8 @@ export function normalizeTable(raw: unknown, llm: boolean): TableData | null {
   const maxC = llm ? TABLE_LIMITS.llmCols : TABLE_LIMITS.cols, maxR = llm ? TABLE_LIMITS.llmRows : TABLE_LIMITS.rows;
   const columns = r.columns.slice(0, maxC).map((c, i) => String(c ?? "").trim() || `未命名列 ${i + 1}`);
   if (!columns.length) return null;
-  const cell = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : JSON.stringify(v)).slice(0, TABLE_LIMITS.cell);
+  // 图片单元格（内嵌的 data URL）不截断，截了图就坏了
+  const cell = (v: unknown) => { const x = typeof v === "string" ? v : v == null ? "" : JSON.stringify(v); return /^data:image\//.test(x) ? x : x.slice(0, TABLE_LIMITS.cell); };
   const rows = r.rows.slice(0, maxR).map((row) => { const arr = Array.isArray(row) ? row : row && typeof row === "object" ? columns.map((c) => (row as Record<string, unknown>)[c]) : [row]; return columns.map((_, i) => cell(arr[i])); });
   return { kind: "table", version: 1, title: typeof r.title === "string" && r.title ? r.title : "多维表格", columns, rows, ...(typeof r.sourceId === "string" ? { sourceId: r.sourceId } : {}), ...(r.inputMode === "shared" || r.inputMode === "sequence" || r.inputMode === "pair" ? { inputMode: r.inputMode } : {}), ...(Array.isArray(r.roles) && !llm && r.roles.some((x) => isRole(x)) ? { roles: columns.map((_, i) => (isRole(r.roles && (r.roles as unknown[])[i]) ? String((r.roles as unknown[])[i]) : "")) } : {}) };
 }

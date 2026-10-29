@@ -235,6 +235,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       <textarea id="gpPrompt" className="vp-prompt" placeholder={ph} value={draft}
         onChange={(e) => { setDraft(e.target.value); if (e.target.value.endsWith("@")) refMenu(e.target); }} onBlur={() => commitPrompt(draft)}
         onKeyDown={(e) => { e.stopPropagation(); if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } if (e.key === "Escape") { (e.target as HTMLTextAreaElement).blur(); store.setUI({ sel: new Set(), pick: null }); } }} />
+      {tables.length ? <BatchPanel node={node} /> : null}
       {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
       <div className="vp-foot">
         <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>

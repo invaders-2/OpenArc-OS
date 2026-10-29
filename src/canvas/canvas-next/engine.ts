@@ -339,7 +339,7 @@ function fillBack(store: CanvasStore, fill: FillTarget, row: number, resultId: s
 async function chainFrame(store: CanvasStore, jr: BatchJournal, todo: BatchRow[], row: number) {
   const prev = todo.filter((t) => t.row < row).pop(); if (!prev) return null;
   const j = jr.rows.find((r) => r.row === prev.row); const pn = j?.status === "completed" ? store.node(j.nodeId) : undefined;
-  if (!pn || !outOf(pn)?.url) return null;
+  const po = pn ? outOf(pn) : null; if (!pn || !(po?.url || po?.frame)) return null;
   const data = store.grabFrame ? await store.grabFrame(pn.id, "last").catch(() => "") : "";
   if (!data) return null;
   const url = data.startsWith("data:") ? await store.backend.importAsset(store.state.canvasId, data, `${genOf(pn).title} · 尾帧`) : data;
