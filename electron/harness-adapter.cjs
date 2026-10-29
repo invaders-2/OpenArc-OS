@@ -507,7 +507,11 @@ class HarnessAdapter {
       ev.rawInput = u.rawInput && typeof u.rawInput === "object" ? u.rawInput : null;
     }
     else if (raw === "plan") { ev.type = "plan"; ev.plan = safePlan(Array.isArray(u.entries) ? u.entries : []); }
-    else if (raw === "usage_update") { ev.type = "usage"; ev.usage = u.usage || null; }
+    else if (raw === "usage_update") {
+      // ACP usage_update 把上下文用量放在顶层：used（已用 token）/ size（上下文窗口）。
+      ev.type = "usage";
+      ev.usage = u.usage && typeof u.usage === "object" ? u.usage : (Number.isFinite(Number(u.used)) ? { used: Number(u.used), size: Number.isFinite(Number(u.size)) ? Number(u.size) : null } : null);
+    }
     this.events.push(ev);
     // dsh 的 todo_write 不发 ACP plan 更新，这里把它的清单转成一条 plan 事件，界面统一按计划显示。
     if (raw === "tool_call" && ev.title === "todo_write" && ev.rawInput && Array.isArray(ev.rawInput.todos)) {

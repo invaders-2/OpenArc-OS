@@ -84,6 +84,8 @@ const { createFileTransferBundle } = require("./file-transfer-service.cjs");
 const { registerFileTransferIpc } = require("./file-transfer-bootstrap.cjs");
 const { createCodexCanvasDomain, registerCodexCanvasIpc } = require("./codex-canvas-bootstrap.cjs");
 const { createLocalProxyService } = require("./local-proxy-service.cjs");
+const { createChatPreview, createVoiceTranscriber, registerChatIpc } = require("./chat-preview.cjs");
+const { createChatPrefs } = require("./chat-prefs.cjs");
 const { registerLocalProxyIpc } = require("./local-proxy-bootstrap.cjs");
 const { createDesktopCacheService } = require("./desktop-cache-service.cjs");
 const { createDesktopUpdateService } = require("./desktop-update-service.cjs");
@@ -1075,6 +1077,21 @@ function registerRuntimeDomains(context) {
     });
 
     protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
+    // 全局 AI 对话：预览侧栏（网页 / http 文件 / 工作文件夹文件 / 生成的 HTML）与附件上传。
+    const chatPreview = createChatPreview({
+      getWorkspaceDir: () => (identity.agentWorkspace && identity.agentWorkspace.dir) || require("./agent-workspace.cjs").defaultWorkspaceDir(),
+      getWebAccess: () => identity.webAccess || null,
+    });
+    protocol.handle(chatPreview.scheme, (request) => chatPreview.handle(request));
+    registerChatIpc({
+      ipcMain, preview: chatPreview, isTrusted: trusted, shell,
+      prefs: createChatPrefs({ file: path.join(app.getPath("userData"), "chat-prefs.json") }),
+      getUserId: () => { try { const s = identity.service && identity.service.snapshot; return (s && (typeof s === "function" ? s.call(identity.service) : s).userId) || null; } catch { return null; } },
+      voice: createVoiceTranscriber({
+        getStore: () => (identity.modelService && identity.modelService.providerProtocol && identity.modelService.providerProtocol.store) || null,
+        getService: () => (identity.modelService && identity.modelService.providerProtocol && identity.modelService.providerProtocol.service) || null,
+      }),
+    });
     const canvasBundleResolver = createCanvasBundleResolver({
       userDataDir: app.getPath("userData"),
       logger: (record) => console.log("[openarc] canvas-bundle " + JSON.stringify(record)),

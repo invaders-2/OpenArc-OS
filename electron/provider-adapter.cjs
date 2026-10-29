@@ -195,11 +195,29 @@ function guessCapabilities(id) {
 }
 
 /** OpenAI 兼容响应归一（与既有内联解析逐字一致；模型服务按 adapterType 选用不同实现）。 */
+/**
+ * 模型的思考过程：OpenAI 兼容站点放在 reasoning_content / reasoning / reasoning_text 里，
+ * 也有模型把它写成正文开头的 <think>…</think>。只取出来给界面看，不并进正文。
+ */
+function splitReasoning(message) {
+  let text = message && typeof message.content === "string" ? message.content : "";
+  let reasoning = "";
+  for (const key of ["reasoning_content", "reasoning", "reasoning_text"]) {
+    const v = message ? message[key] : null;
+    if (typeof v === "string" && v.trim()) { reasoning = v; break; }
+  }
+  const m = /^\s*<think>([\s\S]*?)<\/think>\s*/i.exec(text);
+  if (m) { if (!reasoning) reasoning = m[1]; text = text.slice(m[0].length); }
+  return { text, reasoning };
+}
+
 function parseChatResponse(body) {
   const choice = body && Array.isArray(body.choices) ? body.choices[0] : null;
   const message = choice && choice.message ? choice.message : null;
+  const { text, reasoning } = splitReasoning(message);
   return {
-    text: message && typeof message.content === "string" ? message.content : "",
+    text,
+    reasoning,
     toolCalls: message && Array.isArray(message.tool_calls) ? message.tool_calls : null,
     usage: mapUsage(body && body.usage),
   };

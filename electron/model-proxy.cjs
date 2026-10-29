@@ -116,7 +116,7 @@ class ModelProxy {
     res.on("close", () => { if (!res.writableEnded) controller.abort(new Error("client-cancelled")); });
     const result = await this.modelService.chat({ context, configId: cap.modelConfigId, capability, messages: Array.isArray(body.messages) ? body.messages : [], tools: body.tools || null, params: body.params || {}, stream: false, requestId: body.requestId || null, signal: controller.signal });
     if (!result.ok) return send(403, { ok: false, error: result.error });
-    return send(200, { ok: true, requestId: result.requestId, text: result.text, toolCalls: result.toolCalls, usage: result.usage, snapshot: result.snapshot });
+    return send(200, { ok: true, requestId: result.requestId, text: result.text, reasoning: result.reasoning || "", toolCalls: result.toolCalls, usage: result.usage, snapshot: result.snapshot });
   }
 }
 

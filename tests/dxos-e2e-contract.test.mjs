@@ -74,7 +74,7 @@ function loadWhitelist(exportName) {
   return Array.isArray(value) ? value.slice() : Object.keys(value);
 }
 
-test("preload 真实暴露的顶层键恰为 42，且与探针契约逐字一致", () => {
+test("preload 真实暴露的顶层键恰为 43，且与探针契约逐字一致", () => {
   const { api, exposedNames } = loadExposedPreload();
   assert.deepEqual(exposedNames, ["openarc"], "preload 只应 exposeInMainWorld openarc");
   assert.ok(api && typeof api === "object", "openarc 必须是对象");

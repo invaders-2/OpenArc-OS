@@ -484,7 +484,7 @@ class ModelService {
         return { ok: false, error: out.error, detail: out.detail };
       }
       await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ALLOW", usage: out.usage });
-      return { ok: true, requestId: rid, text: out.text || "", toolCalls: out.toolCalls || null, usage: out.usage || null, snapshot: this.#safeSnapshot(snapshot) };
+      return { ok: true, requestId: rid, text: out.text || "", reasoning: typeof out.reasoning === "string" ? out.reasoning : "", toolCalls: out.toolCalls || null, usage: out.usage || null, snapshot: this.#safeSnapshot(snapshot) };
     }
     try {
       const { res } = await impl.chat({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, messages, tools, params: cleanParams, stream: false, signal, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl });
@@ -496,7 +496,7 @@ class ModelService {
       const body = await res.json();
       const parsed = impl.parseChatResponse(body);
       await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ALLOW", usage: parsed.usage });
-      return { ok: true, requestId: rid, text: parsed.text || "", toolCalls: parsed.toolCalls || null, usage: parsed.usage, snapshot: this.#safeSnapshot(snapshot) };
+      return { ok: true, requestId: rid, text: parsed.text || "", reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "", toolCalls: parsed.toolCalls || null, usage: parsed.usage, snapshot: this.#safeSnapshot(snapshot) };
     } catch (err) {
       let kind;
       if (signal && signal.aborted) kind = "cancelled";

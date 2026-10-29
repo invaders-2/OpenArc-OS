@@ -15,6 +15,8 @@ function registerResourceProtocolSchemes({ protocol }) {
     { scheme: "openarc-resource", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: false } },
     { scheme: "openarc-canvas", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
     { scheme: "openarc-app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+    // 对话预览侧栏（electron/chat-preview.cjs）：不开 CORS，沙箱 iframe 里的页面读不到它。
+    { scheme: "openarc-preview", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: false } },
   ]);
 }
 
@@ -73,6 +75,8 @@ function installShellSecurityPolicies({ win, uiURL, devOrigin }) {
     const url = isDetails ? first.url : args[1];
     const isMainFrame = isDetails ? !!first.isMainFrame : !!args[3];
     if (NAV_ALLOWED(String(url))) return;
+    // 对话预览侧栏的 iframe（子框架）只许打开带口令的 openarc-preview:// 地址（electron/chat-preview.cjs）。
+    if (!isMainFrame && String(url).startsWith("openarc-preview://")) return;
     try { if (event && typeof event.preventDefault === "function") event.preventDefault(); } catch { /* 拦不住也要留证 */ }
     const row = { url: String(url).slice(0, 300), isMainFrame, at: Date.now() };
     blockedNavigations.push(row);

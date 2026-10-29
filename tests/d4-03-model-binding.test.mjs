@@ -91,7 +91,7 @@ async function runToSucceeded(fx, taskId, orch = fx.orchestrator) {
 }
 
 /* ============================================================ A 产品入口绑定 */
-test("D4-03 A · task/run 由后端解析并冻结 model config；renderer 自报的 id/version 一律忽略", async () => {
+test("D4-03 A · task/run 由后端解析并冻结 model config；renderer 自报的 version 一律忽略", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
   try {
     const cid = fx.modelConfigId;
@@ -103,8 +103,8 @@ test("D4-03 A · task/run 由后端解析并冻结 model config；renderer 自�
     assert.equal(resolved.ok, true, "前置：必须存在可用默认 chat 配置：" + JSON.stringify(resolved));
     assert.equal(resolved.snapshot.modelConfigId, cid);
 
-    // renderer 自报 modelConfigId / modelConfigVersion 一律无效（后端选择）。
-    const res = await ipc.command({}, { type: "task/run", goal: "return exactly: " + EXACT, modelConfigId: otherCid, modelConfigVersion: 999 });
+    // renderer 自报 modelConfigVersion 一律无效；不指定 modelConfigId 时按默认配置（后端选择）。
+    const res = await ipc.command({}, { type: "task/run", goal: "return exactly: " + EXACT, modelConfigVersion: 999 });
     assert.equal(res.ok, true, JSON.stringify(res));
     const taskId = res.taskId;
     assert.ok(taskId, "必须返回 taskId");
@@ -112,7 +112,7 @@ test("D4-03 A · task/run 由后端解析并冻结 model config；renderer 自�
     const row = fx.taskStore.taskById(taskId);
     assert.equal(row.model_config_id, resolved.snapshot.modelConfigId, "任务必须绑定后端解析出的 config");
     assert.equal(row.model_config_version, resolved.snapshot.modelConfigVersion, "任务必须绑定后端解析出的 version");
-    assert.notEqual(row.model_config_id, otherCid, "renderer 自报的 config 绝不能被采纳");
+    assert.notEqual(row.model_config_id, otherCid, "没指定时不得用非默认 config");
     assert.notEqual(row.model_config_version, 999, "renderer 自报的 version 绝不能被采纳");
     const created = eventsOfType(fx, taskId, "task.created");
     assert.equal(created.length, 1);
@@ -133,6 +133,30 @@ test("D4-03 A · task/run 由后端解析并冻结 model config；renderer 自�
     const got = await ipc.command({}, { type: "task/get", taskId });
     assert.equal(got.task.modelConfigId, cid);
     assert.equal(got.task.modelConfigVersion, row.model_config_version);
+  } finally { await fx.close(); }
+});
+
+/* ============================================================ A2 对话输入区选模型 */
+test("D4-03 A2 · task/run 可指定本人有权使用的 config：后端校验 USE 权限并冻结它的 version；无效 id 明确拒绝不回退", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    setChatDefault(fx, fx.modelConfigId);
+    const otherCid = newConfig(fx, "remote-fake-picked");
+    const ipc = installIpc(fx, fx.orchestrator);
+    const res = await ipc.command({}, { type: "task/run", goal: "return exactly: " + EXACT, modelConfigId: otherCid, modelConfigVersion: 999 });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    const row = fx.taskStore.taskById(res.taskId);
+    assert.equal(row.model_config_id, otherCid, "必须绑定用户选的 config");
+    assert.notEqual(row.model_config_version, 999, "version 必须由后端冻结");
+    const before = fx.taskStore.allTasks().length;
+    const bad = await ipc.command({}, { type: "task/run", goal: "x", modelConfigId: "mcf_does_not_exist" });
+    assert.equal(bad.ok, false);
+    assert.equal(bad.error, "MODEL_CONFIG_UNAVAILABLE");
+    const evil = await ipc.command({}, { type: "task/run", goal: "x", modelConfigId: "../etc" });
+    assert.equal(evil.ok, true, "格式不合法的 id 当作没指定，走默认配置");
+    assert.equal(fx.taskStore.taskById(evil.taskId).model_config_id, fx.modelConfigId);
+    assert.equal(fx.taskStore.allTasks().length, before + 1, "无效 id 不得创建任务");
+    await runToTerminal(fx, res.taskId); await runToTerminal(fx, evil.taskId);
   } finally { await fx.close(); }
 });
 

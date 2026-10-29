@@ -93,7 +93,9 @@ function buildAgentNotes({ workspace = false, skillCatalog = "", memory = null, 
   if (workspace) {
     parts.push("You have an AI workspace folder; all workspace paths are relative to it. workspace_list, workspace_read and workspace_search read it freely. "
       + "workspace_write (create/overwrite a file) and workspace_exec (run a shell command with the workspace as working directory) each need the user's approval for that exact call. "
-      + "You have no file or shell access outside the workspace folder. Prefer reading before writing, and keep commands short and safe.");
+      + "You have no file or shell access outside the workspace folder. Prefer reading before writing, and keep commands short and safe. "
+      + "Files the user attaches in chat are saved under uploads/ in the workspace; read them with workspace_read. "
+      + "When you mention a workspace file in your reply, write it as a Markdown link with its relative path, e.g. [report.md](reports/report.md): the chat shows it as a file card the user can open.");
   }
   parts.push("Skills: the user keeps reusable skills in OpenArc's Skill Center. When a request matches a skill, call skill_load with its id first and follow its instructions using your tools"
     + (skillCatalog ? ". Available skills:\n" + skillCatalog : "; call skill_list to see them."));
@@ -159,8 +161,9 @@ function mapAcpEvents(events = [], { maxPersisted = DEFAULT_MAX_PERSISTED_EVENTS
   return { events: out, dropped, textChunks, textChars };
 }
 
+/** 本次运行最后一条用量（上下文用量随轮次增长，取最新的）。 */
 function summarizeUsage(events = []) {
-  for (const e of events) if (e && e.type === "usage" && e.usage) return e.usage;
+  for (let i = events.length - 1; i >= 0; i -= 1) { const e = events[i]; if (e && e.type === "usage" && e.usage) return e.usage; }
   return null;
 }
 
@@ -277,6 +280,8 @@ class TaskHarnessOrchestrator {
         if (!timer) timer = setTimeout(flush, 120);
         return;
       }
+      if (ev.type === "usage" && ev.usage && Number.isFinite(Number(ev.usage.used))) { try { sink(taskId, { kind: "usage", used: Number(ev.usage.used), size: Number(ev.usage.size) || null }); } catch { /* ignore */ } return; }
+      if (ev.type === "reasoning.delta" && typeof ev.text === "string") { flush(); try { sink(taskId, { kind: "thinking", text: ev.text }); } catch { /* ignore */ } return; }
       if (ev.type === "plan" && Array.isArray(ev.plan)) { try { sink(taskId, { kind: "plan", items: ev.plan }); } catch { /* ignore */ } return; }
       if (ev.type === "tool.proposed" && ev.raw === "tool_call" && ev.title && ev.title !== "todo_write") {
         flush();
