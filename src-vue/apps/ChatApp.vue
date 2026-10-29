@@ -932,7 +932,7 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
                       </ol>
                     </section>
                     <!-- 联网过程（参照 Codex / ChatGPT）：搜索词、结果、读过的网页；运行中实时更新 -->
-                    <WebActivity v-if="turn.web.length" :acts="turn.web" :live="!!liveFor(turn)" @open="onWebOpen" />
+                    <WebActivity v-if="turn.web.length" :acts="turn.web" :live="!!liveFor(turn)" @open="onWebOpen" @browse="openInBrowser" />
                     <!-- 中间过程组：一行摘要句 + 耗时 + chevron；展开是左侧竖线 + 缩进明细（13px） -->
                     <div v-if="turn.tools.length && !onlyWeb(turn)" class="chat-working" data-chat-tools :data-open="openTurns.has(turn.key) ? '1' : '0'">
                       <button type="button" class="chat-working-head" :aria-expanded="openTurns.has(turn.key)" @click="toggleTurn(turn.key)">
@@ -957,7 +957,7 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
                       <span v-else class="chat-typing"><i /><i /><i /><span class="chat-caret" /></span>
                     </template>
                     <div v-else class="chat-md" data-chat-markdown v-html="turn.web.length ? citeLinks(markdown(turn.answer)) : markdown(turn.answer)" />
-                    <WebSources v-if="!turn.pending && turn.web.length && sourcesOf(turn.web, turn.answer).length" :sources="sourcesOf(turn.web, turn.answer)" @open="onWebOpen" />
+                    <WebSources v-if="!turn.pending && turn.web.length && sourcesOf(turn.web, turn.answer).length" :sources="sourcesOf(turn.web, turn.answer)" @open="onWebOpen" @browse="openInBrowser" />
                     <div v-if="!turn.pending && turn.nodes.length" class="chat-chips" data-chat-nodes>
                       <button v-for="n in turn.nodes" :key="n.id" type="button" class="chat-nodechip" :data-chat-node="n.id" :title="'在画布中定位：' + n.title" @click="focusNode(n)"><Layers :size="12" /><span>{{ n.title }}</span></button>
                     </div>

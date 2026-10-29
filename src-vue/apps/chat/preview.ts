@@ -139,7 +139,9 @@ export async function openInBrowser(url: string) {
   await nextTick();
   const win = [...shell.windows].reverse().find((w: any) => w.appId === "browser");
   if (!win) return;
-  const meta: any = (win as any).meta || {};
+  // 列表里的窗口是投影（不带 meta），标签以窗口状态模型为准；否则新标签号会和已有的 t1 撞上被丢弃。
+  const raw = ((shell as any).model?.windows || []).find((w: any) => w.id === win.id);
+  const meta: any = raw?.meta || (win as any).meta || {};
   const tabs = Array.isArray(meta.tabs) ? meta.tabs : [];
   // 只有一个空白起始页时直接用它，否则新开一个标签。
   if (tabs.length === 1 && !tabs[0].url) { (window as any).openarc?.navigate?.(win.id, url, tabs[0].tabId); return; }

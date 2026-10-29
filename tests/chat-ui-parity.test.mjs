@@ -138,3 +138,29 @@ test("网站图标：只认位图，按域名缓存；取不到图标时如实�
   assert.equal((await p.favicon({ host: "localhost" })).error, "INVALID_HOST");
   assert.equal((await p.favicon({ host: "a.com/../x" })).error, "INVALID_HOST");
 });
+
+test("网页卡片预览：取 og:image / og:site_name，图转成 data: 地址；非 http(s)、非网页、取图失败都不报错", async () => {
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]);
+  const calls = [];
+  const web = { async fetchRaw({ url }) {
+    calls.push(url);
+    if (url === "https://a.example.com/post") return { ok: true, buffer: Buffer.from('<html><head><meta content="/og.png" property="og:image"><meta property="og:site_name" content="A &amp; B"><meta name="description" content="摘要"><title>标题</title></head></html>'), contentType: "text/html; charset=utf-8", finalUrl: url };
+    if (url === "https://a.example.com/og.png") return { ok: true, buffer: png, contentType: "image/png", finalUrl: url };
+    if (url === "https://b.example.com/") return { ok: true, buffer: Buffer.from('<html><head><meta property="og:image" content="https://b.example.com/x.svg"><title>B</title></head></html>'), contentType: "text/html", finalUrl: url };
+    if (url === "https://b.example.com/x.svg") return { ok: true, buffer: Buffer.from("<svg/>"), contentType: "image/svg+xml", finalUrl: url };
+    if (url === "https://c.example.com/f.zip") return { ok: true, buffer: Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9]), contentType: "application/zip", finalUrl: url };
+    return { ok: false, error: "WEB_HTTP_ERROR" };
+  } };
+  const p = createChatPreview({ getWebAccess: () => web });
+  const a = await p.linkPreview({ url: "https://a.example.com/post" });
+  assert.equal(a.ok, true);
+  assert.equal(a.siteName, "A & B"); assert.equal(a.title, "标题"); assert.equal(a.description, "摘要");
+  assert.match(a.image, /^data:image\/(png|jpeg);base64,/);
+  await p.linkPreview({ url: "https://a.example.com/post" });
+  assert.equal(calls.filter((u) => u === "https://a.example.com/post").length, 1, "同一地址只取一次");
+  const b = await p.linkPreview({ url: "https://b.example.com/" });
+  assert.equal(b.ok, true); assert.equal(b.image, null, "SVG 等非位图不当缩略图");
+  assert.equal((await p.linkPreview({ url: "https://c.example.com/f.zip" })).error, "NOT_HTML");
+  assert.equal((await p.linkPreview({ url: "javascript:alert(1)" })).error, "INVALID_URL");
+  assert.equal((await p.linkPreview({ url: "https://u:p@a.example.com/" })).error, "INVALID_URL");
+});

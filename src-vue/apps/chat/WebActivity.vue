@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { BookOpen, ChevronRight, Globe, Search } from "lucide-vue-next";
+import { BookOpen, ChevronRight, ExternalLink, Globe, Search } from "lucide-vue-next";
 import SiteIcon from "./SiteIcon.vue";
 import { hostOf, webSummary, type WebAct } from "./web";
 
@@ -10,7 +10,7 @@ import { hostOf, webSummary, type WebAct } from "./web";
  *   · 结束后：收成一行「搜索了 2 次，读了 3 个网页 · 9 个网站」+ 图标叠放，点开看每次的搜索词和结果。
  */
 const props = defineProps<{ acts: WebAct[]; live: boolean }>();
-const emit = defineEmits<{ (e: "open", url: string, title: string, ev: MouseEvent): void }>();
+const emit = defineEmits<{ (e: "open", url: string, title: string, ev: MouseEvent): void; (e: "browse", url: string): void }>();
 
 const flipped = ref(false);
 const open = computed(() => (props.live ? !flipped.value : flipped.value));
@@ -51,12 +51,13 @@ const failText = (a: WebAct) => (a.error === "WEB_NO_RESULTS" ? "没有搜到结
             <small v-if="a.phase === 'done'" class="web-step-meta">{{ a.ok ? a.results.length + " 个结果" : failText(a) }}</small>
           </div>
           <ul v-if="a.phase === 'done' && a.results.length" class="web-results" data-chat-web-results>
-            <li v-for="r in (moreOpen.has(a.key) ? a.results : a.results.slice(0, SHOW))" :key="r.url">
+            <li v-for="r in (moreOpen.has(a.key) ? a.results : a.results.slice(0, SHOW))" :key="r.url" class="web-result-row">
               <a :href="r.url" class="web-result" data-chat-web-result :title="r.url" @click.prevent="emit('open', r.url, r.title, $event)">
                 <SiteIcon :host="hostOf(r.url)" :size="14" />
                 <span class="web-result-title">{{ r.title }}</span>
                 <span class="web-result-host">{{ hostOf(r.url) }}</span>
               </a>
+              <button type="button" class="web-go" data-chat-web-browse title="在浏览器打开" aria-label="在浏览器打开" @click="emit('browse', r.url)"><ExternalLink :size="12" /></button>
             </li>
             <li v-if="a.results.length > SHOW"><button type="button" class="web-more" @click="toggleMore(a.key)">{{ moreOpen.has(a.key) ? "收起" : "再显示 " + (a.results.length - SHOW) + " 条" }}</button></li>
           </ul>
@@ -71,6 +72,7 @@ const failText = (a: WebAct) => (a.error === "WEB_NO_RESULTS" ? "没有搜到结
               <span v-if="a.title" class="web-result-host">{{ hostOf(a.url || "") }}</span>
             </a>
           </span>
+          <button v-if="a.phase === 'done' && a.ok && a.url" type="button" class="web-go" data-chat-web-browse title="在浏览器打开" aria-label="在浏览器打开" @click="emit('browse', a.url!)"><ExternalLink :size="12" /></button>
           <small v-if="a.phase === 'done' && !a.ok" class="web-step-meta">{{ failText(a) }}</small>
         </div>
       </li>
@@ -106,6 +108,11 @@ const failText = (a: WebAct) => (a.error === "WEB_NO_RESULTS" ? "没有搜到结
 .web-result:hover, .web-page:hover { background: rgb(var(--text-rgb) / 0.07); }
 .web-result-title, .web-page-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-result-title { flex: 0 1 auto; }
+.web-result-row { display: flex; align-items: center; min-width: 0; }
+.web-result-row .web-result { flex: 0 1 auto; min-width: 0; }
+.web-go { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: 2px; border-radius: 6px; color: rgb(var(--text-rgb) / 0.5); opacity: 0; transition: opacity 120ms ease; }
+.web-result-row:hover .web-go, .web-step-line:hover .web-go, .web-go:focus-visible { opacity: 1; }
+.web-go:hover { color: var(--text); background: rgb(var(--text-rgb) / 0.08); }
 .web-result-host { flex: none; font-size: 12px; color: rgb(var(--text-rgb) / 0.45); }
 .web-more { margin-left: 6px; height: 22px; font-size: 12px; color: rgb(var(--text-rgb) / 0.55); }
 .web-more:hover { color: var(--text); }

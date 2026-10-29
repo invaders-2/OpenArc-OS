@@ -180,6 +180,65 @@ function createChatPreview({ getWorkspaceDir = null, getWebAccess = null, clock 
     return data ? { ok: true, dataUrl: data } : { ok: false, error: "NO_ICON" };
   }
 
+  /**
+   * 网页卡片预览（联网来源的缩略图 / 网站名）：取网页头部，找 og:image / twitter:image 和 og:site_name，
+   * 再取那张图，缩成小图转成 data: 地址。全部经同一套出网检查；按地址缓存（失败也缓存）。
+   */
+  const cards = new Map(); // url → Promise<result>
+  function metaOf(html, name) {
+    const re = new RegExp("<meta\\b[^>]*(?:property|name)=[\"']" + name.replace(/[:.]/g, "\\$&") + "[\"'][^>]*>", "i");
+    const tag = re.exec(html);
+    if (!tag) return "";
+    const c = /content=["']([^"']*)["']/i.exec(tag[0]);
+    return c ? decodeEntitiesLite(c[1]).trim() : "";
+  }
+  function decodeEntitiesLite(v) { return String(v || "").replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">"); }
+  function shrink(buffer) {
+    try {
+      const { nativeImage } = require("electron");
+      if (!nativeImage) return null;
+      const img = nativeImage.createFromBuffer(buffer);
+      if (img.isEmpty()) return null;
+      const { width } = img.getSize();
+      const small = width > 480 ? img.resize({ width: 480, quality: "good" }) : img;
+      return "data:image/jpeg;base64," + small.toJPEG(78).toString("base64");
+    } catch { return null; }
+  }
+  async function linkPreview({ url: target } = {}) {
+    let u;
+    try { u = new URL(String(target || "")); } catch { return { ok: false, error: "INVALID_URL" }; }
+    if (!/^https?:$/.test(u.protocol) || u.username || u.password) return { ok: false, error: "INVALID_URL" };
+    const web = typeof getWebAccess === "function" ? getWebAccess() : null;
+    if (!web || typeof web.fetchRaw !== "function") return { ok: false, error: "PREVIEW_UNAVAILABLE" };
+    const key = u.href;
+    if (!cards.has(key)) {
+      if (cards.size > 300) cards.delete(cards.keys().next().value);
+      cards.set(key, (async () => {
+        const page = await web.fetchRaw({ url: key, maxBytes: 512 * 1024, timeout: 8000 }).catch(() => null);
+        if (!page || !page.ok) return { ok: false, error: (page && page.error) || "FETCH_FAILED" };
+        const html = decodeBody(page.buffer, page.contentType);
+        if (!/<html|<head|<meta/i.test(html.slice(0, 4096))) return { ok: false, error: "NOT_HTML" };
+        const title = (metaOf(html, "og:title") || htmlTitle(html) || "").slice(0, 200);
+        const siteName = metaOf(html, "og:site_name").slice(0, 80);
+        const description = (metaOf(html, "og:description") || metaOf(html, "description")).slice(0, 300);
+        let imageUrl = metaOf(html, "og:image") || metaOf(html, "og:image:url") || metaOf(html, "twitter:image") || metaOf(html, "twitter:image:src");
+        let image = null;
+        if (imageUrl) {
+          try { imageUrl = new URL(imageUrl, page.finalUrl).href; } catch { imageUrl = ""; }
+          if (/^https?:/i.test(imageUrl)) {
+            const got = await web.fetchRaw({ url: imageUrl, maxBytes: 3 * 1024 * 1024, timeout: 8000 }).catch(() => null);
+            if (got && got.ok && !got.truncated) {
+              const mime = iconMime(got.buffer);
+              if (mime) image = shrink(got.buffer) || (got.buffer.length <= 400 * 1024 ? "data:" + mime + ";base64," + got.buffer.toString("base64") : null);
+            }
+          }
+        }
+        return { ok: true, url: key, finalUrl: page.finalUrl, title, siteName, description, image };
+      })());
+    }
+    return await cards.get(key);
+  }
+
   /** 预览工作文件夹里的文件（附件 / AI 写出的文件）。 */
   function openWorkspace({ path: rel } = {}) {
     const dir = wsDir();
@@ -325,7 +384,7 @@ function createChatPreview({ getWorkspaceDir = null, getWebAccess = null, clock 
     return new Response("not found", { status: 404 });
   }
 
-  return { token, scheme: SCHEME, openRemote, favicon, openWorkspace, putHtml, upload, listFiles, absOf, handle };
+  return { token, scheme: SCHEME, openRemote, favicon, linkPreview, openWorkspace, putHtml, upload, listFiles, absOf, handle };
 }
 
 /** 对话预览 / 附件 IPC（只给可信窗口）。 */
@@ -391,6 +450,7 @@ function registerChatIpc({ ipcMain, preview, isTrusted, shell = null, prefs = nu
     try {
       switch (name) {
         case "preview/remote": return await preview.openRemote({ url: String(cmd.url || "") });
+        case "link/preview": return typeof preview.linkPreview === "function" ? await preview.linkPreview({ url: String(cmd.url || "") }) : { ok: false, error: "PREVIEW_UNAVAILABLE" };
         case "favicon/get": return typeof preview.favicon === "function" ? await preview.favicon({ host: String(cmd.host || "") }) : { ok: false, error: "NO_ICON" };
         case "preview/workspace": return preview.openWorkspace({ path: String(cmd.path || "") });
         case "preview/html": return preview.putHtml({ html: String(cmd.html || "") });

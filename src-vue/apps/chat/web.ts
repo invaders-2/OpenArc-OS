@@ -137,6 +137,26 @@ export function citeLinks(html: string): string {
     if (!looksCite) return whole;
     const icon = iconOf(host);
     const ic = icon ? '<img class="md-cite-ic" src="' + icon + '" alt="">' : '<span class="md-cite-ic md-cite-letter" style="--h:' + hueOf(host) + '">' + host[0].toUpperCase() + "</span>";
-    return "<a " + pre + 'href="' + href + '"' + post + ' class="md-cite" title="' + href + '">' + ic + "<span>" + host + "</span></a>";
+    return "<a " + pre + 'href="' + href + '"' + post + ' class="md-cite" title="' + href + '（按住 ⌘ / Ctrl 点击在浏览器打开）">' + ic + "<span>" + host + "</span></a>";
   });
+}
+
+/* ---------- 网页卡片预览（缩略图 / 网站名）：经主进程取 og:image，按地址缓存 ---------- */
+export type LinkCard = { image: string; siteName: string; title: string; description: string };
+const linkCards = reactive<Record<string, LinkCard | null>>({});
+const linkAsked = new Set<string>();
+export function cardOf(url: string): LinkCard | null {
+  const u = String(url || "");
+  if (!/^https?:\/\//i.test(u)) return null;
+  if (u in linkCards) return linkCards[u];
+  if (!linkAsked.has(u)) {
+    linkAsked.add(u);
+    const bridge = (window as any).openarc?.chat;
+    if (bridge?.command) {
+      void bridge.command({ command: "link/preview", url: u }).then((r: any) => {
+        linkCards[u] = r?.ok ? { image: typeof r.image === "string" && r.image.startsWith("data:image/") ? r.image : "", siteName: String(r.siteName || ""), title: String(r.title || ""), description: String(r.description || "") } : null;
+      }).catch(() => { linkCards[u] = null; });
+    } else linkCards[u] = null;
+  }
+  return linkCards[u] ?? null;
 }
