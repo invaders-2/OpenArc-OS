@@ -241,7 +241,7 @@ export function Viewport() {
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const files = [...(e.dataTransfer?.files || [])]; if (files.length) void addFiles(store, files, ctl.toWorld(e.clientX, e.clientY)); }}>
       <div id="world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${k})` }}>
         <Edges />
-        {guides.map((g, i) => <div key={i} className={"snapguide " + g.axis} style={g.axis === "x" ? { left: g.at, top: g.from, height: g.to - g.from, width: 1.5 / k } : { top: g.at, left: g.from, width: g.to - g.from, height: 1.5 / k }} />)}
+        {guides.map((g, i) => <div key={i} className={"snapguide " + g.axis} style={g.axis === "x" ? { left: g.at, top: g.from, height: g.to - g.from, width: 1 / k } : { top: g.at, left: g.from, width: g.to - g.from, height: 1 / k }} />)}
         <div id="nodes">
           {(() => { const hidden = hiddenIds(doc.nodes); return doc.nodes.filter((n) => !hidden.has(n.id)); })().sort((a, b) => (a.kind === "group" && !isStack(a) ? 0 : 1) - (b.kind === "group" && !isStack(b) ? 0 : 1)).map((n) => {
             const run = runtime[n.id];
