@@ -116,5 +116,9 @@
     "typescript": "^5.9.0",
     "vite": "^7.1.0",
     "vue-tsc": "^2.2.12"
+  },
+  "optionalDependencies": {
+    "@ffprobe-installer/ffprobe": "2.1.2",
+    "ffmpeg-static": "5.2.0"
   }
 }

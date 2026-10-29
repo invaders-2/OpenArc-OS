@@ -247,7 +247,7 @@ function previewCacheKeyParts({ resourceId, resourceVersion, checksum, kind, pre
 }
 
 /** 解析 HTTP-like Range 头（bytes=start-end / bytes=start- / bytes=-suffix）。 */
-function parseRange(header, size) {
+function parseRange(header, size, { maxBytes = LIMITS.MAX_RANGE_BYTES } = {}) {
   if (!header) return { ok: true, range: null };
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
   if (!m) return { ok: false, error: REASON.RANGE_INVALID };
@@ -266,7 +266,7 @@ function parseRange(header, size) {
   }
   if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) return { ok: false, error: REASON.RANGE_INVALID };
   end = Math.min(end, total - 1);
-  if (end - start + 1 > LIMITS.MAX_RANGE_BYTES) end = start + LIMITS.MAX_RANGE_BYTES - 1;
+  if (end - start + 1 > maxBytes) end = start + maxBytes - 1;
   return { ok: true, range: { start, end, length: end - start + 1, total } };
 }
 

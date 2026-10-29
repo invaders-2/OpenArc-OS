@@ -10,6 +10,7 @@ import { formatClock, type GenOutput } from "../model";
 import { decodeAudio, fakeSpectrum, peaks, spectrum, type Decoded } from "../audioAnalysis";
 import { Icon } from "./Icon";
 import { useAssetUrl } from "./useAsset";
+import { useMediaUrl } from "./useMedia";
 
 const BAR_PX = 6; // 每根条（含间隔）大约占的宽度
 
@@ -20,7 +21,9 @@ function resample(src: number[], count: number): number[] {
 }
 
 export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
-  const url = useAssetUrl(out.url || "");
+  // 播放走流式地址（PR #24，支持 Range、秒开）；波形 / 频谱要整段字节，读资源库的 data URL 来解码
+  const media = useMediaUrl(out.url || ""); const url = media.url;
+  const dataUrl = useAssetUrl(out.url || "");
   const aref = useRef<HTMLAudioElement>(null);
   const cvs = useRef<HTMLCanvasElement>(null);
   const [dec, setDec] = useState<Decoded | null>(null);
@@ -32,9 +35,9 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
 
   useEffect(() => {
     let alive = true; setDec(null);
-    decodeAudio(url).then((d) => { if (alive && d) setDec(d); });
+    decodeAudio(dataUrl).then((d) => { if (alive && d) setDec(d); });
     return () => { alive = false; };
-  }, [url]);
+  }, [dataUrl]);
 
   // 动画状态放在 ref 里，每帧直接画 canvas，不走 React 渲染
   const anim = useRef({ disp: [] as number[], overview: { count: 0, bars: [] as number[] }, fake0: 0, raf: 0, ink: "255,255,255", hi: "#fff", styleAt: 0 });
@@ -156,7 +159,7 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
   const lab = (hz: number) => Math.max(4, Math.min(96, (Math.log(hz / 40) / Math.log(top / 40)) * 100));
 
   return <div className="abody" data-audio-state={on ? "playing" : t > 0 ? "paused" : "idle"} data-audio-decoded={dec ? "1" : "0"}>
-    {url ? <audio ref={aref} src={url} preload="metadata"
+    {url ? <audio ref={aref} src={url} preload="metadata" onError={() => media.onError()}
       onLoadedMetadata={(e) => { const d = e.currentTarget.duration; if (Number.isFinite(d)) setMediaDur(d); }}
       onPause={() => setOn(false)} onSeeked={(e) => { if (e.currentTarget.paused) setT(e.currentTarget.currentTime); }} onEnded={() => { setOn(false); setT(0); }} /> : null}
     <canvas ref={cvs} className={"aviz" + (vizSeek ? " seek" : "")} data-aviz onPointerDown={vizSeek ? scrub : undefined} />

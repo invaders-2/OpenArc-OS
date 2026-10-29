@@ -323,7 +323,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   } catch { /* ignore */ }
 
   // D5-02 Closure：画布生成运行需要任务层（预算/停止/账本）与模型层 —— 装配完成后晚绑定同一实例。
-  canvasDocService.attachRuntime({ taskService, modelService, webAccess, tempDir: path.join(userDataDir, "tmp", "canvas-imports") });
+  canvasDocService.attachRuntime({ taskService, modelService, webAccess, previewService, tempDir: path.join(userDataDir, "tmp", "canvas-imports") });
   try { require("node:fs").mkdirSync(path.join(userDataDir, "tmp", "canvas-imports"), { recursive: true }); } catch { /* ignore */ }
   try { require("node:fs").mkdirSync(canvasDxosTempDir, { recursive: true }); } catch { /* ignore */ }
 

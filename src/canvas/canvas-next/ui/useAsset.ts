@@ -48,3 +48,13 @@ export function useAssetUrl(src: string): string {
   }, [src, isRef, remote, ctl]);
   return url;
 }
+
+/** 非 hook 版本：openarc-asset:<ref> → data URL（和 useAssetUrl 共用缓存），时间线播放 / 导出用 */
+export async function resolveMediaUrl(be: { resolveAsset(ref: string): Promise<string | null> }, src: string): Promise<string> {
+  if (!src.startsWith("openarc-asset:")) return src;
+  const hit = cacheGet(src); if (hit !== undefined) return hit;
+  let p = pending.get(src);
+  if (!p) { p = be.resolveAsset(src).catch(() => null); pending.set(src, p); }
+  const u = await p; pending.delete(src); if (u && u !== src) cachePut(src, u);
+  return u || "";
+}

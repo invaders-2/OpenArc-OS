@@ -71,6 +71,7 @@ function createRoughCutModelAdapter({ providerStore = null, modelGateway = null,
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { bundledBinary } = require("./bundled-bin.cjs");
 const { randomUUID } = require("node:crypto");
 
 const { resolveDxosPaths, ensureDxosLayout } = require("./dxos-foundation-paths.cjs");
@@ -438,6 +439,8 @@ function resolveBinary(name, override) {
   if (typeof override === "string" && override.length > 0) return override;
   const explicit = process.env[name === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"];
   if (explicit) return explicit;
+  const bundled = bundledBinary(name);
+  if (bundled) return bundled;
   const extensions = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
   const dirs = String(process.env.PATH || "").split(path.delimiter).filter(Boolean)
     .concat(["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/bin"]);
