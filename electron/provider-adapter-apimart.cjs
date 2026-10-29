@@ -347,10 +347,11 @@ async function postImage({ fetchImpl, apiKey, path, image, kind, signal }) {
   return http(fetchImpl, path, { method: "POST", apiKey, form, signal, timeoutMs: 120000 });
 }
 
-/** 官方渠道：模型名以 -official 结尾，或别名 nano-banana-pro（图片与视频同判据）。 */
+/** 官方渠道：模型名以 -official 结尾，或官方别名 nano-banana / nano-banana-2 / nano-banana-pro（图片与视频同判据）。 */
+const OFFICIAL_ALIASES = new Set(["nano-banana", "nano-banana-2", "nano-banana-pro"]);
 function isOfficialChannel(model) {
   const id = String(model == null ? "" : model).trim().toLowerCase();
-  return /-official$/.test(id) || id === "nano-banana-pro";
+  return /-official$/.test(id) || OFFICIAL_ALIASES.has(id);
 }
 
 /** 官方渠道删除 official_fallback；扩展渠道只在调用方显式给 false 时写一次 false（绝不下发 true）。 */
@@ -482,7 +483,7 @@ const imagesOut = (r) => (r.ok ? { ok: true, artifacts: r.urls.map((url) => ({ u
 /** 按模型单次上限拆批：nMax=1 的要几张就并发几次 */
 async function runImages({ fetchImpl, apiKey, baseUrl, model, n, mkBody, signal, timeoutMs, onEvent }) {
   const spec = catalog.imageModel(model);
-  const per = spec ? Math.max(1, spec.nMax || 1) : 4;
+  const per = spec ? Math.max(1, spec.perReq || spec.nMax || 1) : 4;
   const batches = []; let left = n;
   while (left > 0) { const k = Math.min(per, left); batches.push(k); left -= k; }
   const headers = spec && spec.official ? OFFICIAL_HEADERS : null;
@@ -559,20 +560,24 @@ function genericVideoBody(model, prompt, p, imgs, vids, auds) {
 function videoBody(spec, model, prompt, p, imgs, vids, auds) {
   // 动作控制族（kling-v2-6 / kling-v3 motion-control）：契约是 image_url + video_url + character_orientation + keep_original_sound，
   // 不是普通文生 / 图生视频；之前被通用写法塞了 size/image_urls，这里单独组体。
+  // 文档：image_url / video_url / character_orientation / mode 都必填；keep_original_sound 是字符串 yes / no；没有 duration 字段。
   if (spec.motionControl) {
     const ref = vids[0] || null;
     if (!ref) return { error: "这个模型需要一段参考视频（人物动作来源），且只能用公网可访问的 URL" };
+    const first = imgs[0] || null;
+    if (!first) return { error: "这个模型需要一张人物参考图（动作会迁移到这张图上的人物）" };
     const body = { model };
     const text = String(prompt || "").trim();
     if (text) body.prompt = text;
-    const d = catalog.clampDur(spec.dur, p.duration);
-    if (d != null) body.duration = d;
-    const first = imgs[0] || null;
-    if (first) body.image_url = first.url;
+    body.image_url = first.url;
     body.video_url = ref;
-    const orientation = String(p.character_orientation || "").trim();
-    if (orientation) body.character_orientation = orientation;
-    if (typeof p.keep_original_sound === "boolean") body.keep_original_sound = p.keep_original_sound;
+    const orientation = String(p.character_orientation || "").trim().toLowerCase();
+    body.character_orientation = orientation === "video" ? "video" : "image";
+    body.mode = pickRes(spec.res, p.resolution || p.mode) || "std";
+    const keep = typeof p.keep_original_sound === "boolean" ? p.keep_original_sound
+      : /^(yes|no)$/i.test(String(p.keep_original_sound || "")) ? /^yes$/i.test(String(p.keep_original_sound))
+      : typeof p.generateAudio === "boolean" ? p.generateAudio : null;
+    if (keep !== null) body.keep_original_sound = keep ? "yes" : "no";
     return { body };
   }
   const body = { model, prompt: String(prompt || "").trim() };
@@ -596,7 +601,8 @@ function videoBody(spec, model, prompt, p, imgs, vids, auds) {
   if (wantFrames && !spec.frames && imgs.length && !spec.refsBy) return { error: "这个模型不支持首帧 / 首尾帧，请换成文生视频或换个模型" };
 
   if (f || l) {
-    if (spec.frames === "roles") body.image_with_roles = [f && { url: f.url, role: "first_frame" }, l && { url: l.url, role: "last_frame" }].filter(Boolean);
+    if (spec.frames === "typedFirst") { body.image_urls = [(f || l).url]; body.generation_type = "frame"; }
+    else if (spec.frames === "roles") body.image_with_roles = [f && { url: f.url, role: "first_frame" }, l && { url: l.url, role: "last_frame" }].filter(Boolean);
     else if (spec.frames === "urls") body.image_urls = [f, l].filter(Boolean).map((x) => x.url);
     else if (spec.frames === "urlsFirst") body.image_urls = [(f || l).url];
     else if (spec.frames === "first") body.first_frame_image = (f || l).url;
@@ -607,9 +613,18 @@ function videoBody(spec, model, prompt, p, imgs, vids, auds) {
   if (refs.length) {
     if (!spec.refsBy) { if (!(f || l)) { if (spec.frames === "urlsFirst" || spec.frames === "first" || spec.frames === "urls" || spec.frames === "roles" || spec.frames === "fields") return videoBody(spec, model, prompt, { ...p, modelType: "image_to_video" }, imgs, vids, auds); } }
     else if (spec.refsBy === "urls") { if (body.image_with_roles) body.image_with_roles.push(...refs.map((x) => ({ url: x.url, role: "reference_image" }))); else body.image_urls = [...(body.image_urls || []), ...refs.map((x) => x.url)]; }
-    else if (spec.refsBy === "roles") body.image_with_roles = [...(body.image_with_roles || []), ...refs.map((x) => ({ url: x.url, role: "reference" }))];
+    else if (spec.refsBy === "roles") body.image_with_roles = [...(body.image_with_roles || []), ...refs.map((x) => ({ url: x.url, role: spec.refRole || "reference" }))];
     else if (spec.refsBy === "img_references") body.img_references = refs.map((x) => x.url);
     if (spec.veo && (body.image_urls || []).length >= 3) body.generation_type = "reference";
+    if (spec.refCounts && !(f || l) && body.image_urls) {
+      const counts = spec.refCounts;
+      if (!counts.includes(body.image_urls.length)) {
+        const fit = counts.filter((c) => c <= body.image_urls.length).pop();
+        if (!fit) return { error: "这个模型的参考图只能是 " + counts.join(" 或 ") + " 张" };
+        body.image_urls = body.image_urls.slice(0, fit);
+      }
+      body.generation_type = "reference";
+    }
   }
   if ((f || l) && (vids.length || auds.length) && spec.frames === "roles" && /seedance|minimax-h3/.test(lc(model))) return { error: "用首尾帧时不能再带参考视频或参考音频，请只保留一种" };
 
@@ -617,13 +632,16 @@ function videoBody(spec, model, prompt, p, imgs, vids, auds) {
   if (vids.length) {
     if ((mode === "video_extend" || mode === "video_edit") && spec.kling4) { body.video_url = vids[0]; body.omni_reference_task_type = mode === "video_extend" ? "extend" : "edit"; delete body.aspect_ratio; }
     else if (mode === "video_extend" && spec.extendKey) body[spec.extendKey] = spec.extendKey.endsWith("s") ? [vids[0]] : vids[0];
-    else if (spec.videoKey) { body[spec.videoKey] = vids.slice(0, 5); if (spec.kling4) body.omni_reference_task_type = "reference"; }
+    else if (spec.videoKey) { body[spec.videoKey] = vids.slice(0, spec.vMax || 5); if (spec.kling4) body.omni_reference_task_type = "reference"; }
     else return { error: "这个模型不收参考视频" };
   } else if (spec.kling4 && refs.length && !(f || l)) body.omni_reference_task_type = "reference";
   if (auds.length) {
     if (!spec.audioRefKey) return { error: "这个模型不收参考音频" };
     body[spec.audioRefKey] = spec.audioRefKey.endsWith("s") ? auds.slice(0, 3) : auds[0];
   }
+  if (spec.noDurWithVideo && body[spec.videoKey]) delete body.duration;
+  if (spec.ratioT2vOnly && imgs.length && spec.ratioKey) delete body[spec.ratioKey];
+  if (spec.needsMedia && !imgs.length && !vids.length) return { error: "这个模型需要至少一张参考图或一段参考视频" };
   if (!body.prompt && !imgs.length && !vids.length) return { error: "请先写提示词" };
   if (spec.modes && spec.modes.length === 1 && spec.modes[0] === "首帧" && !(body.first_frame_image || body.image_urls)) return { error: "这个模型需要一张首帧图" };
   return { body };
@@ -661,8 +679,8 @@ async function generateVideo({ baseUrl, apiKey, model, prompt = "", inputs = [],
   if (imageRefs.length) {
     const refs = imageRefs.map((item) => item.value);
     let urls = null;
-    if (isOfficialChannel(model)) {
-      // 官方渠道：必须先上传成公网 URL，且 body 不得出现 official_fallback（applyOfficialFallback 已删）。
+    if (isOfficialChannel(model) || (spec && spec.urlOnly)) {
+      // 官方渠道 / 文档写明不收 base64 的模型：必须先上传成公网 URL；官方渠道 body 不得出现 official_fallback（applyOfficialFallback 已删）。
       const inlined = inlineReferences(compressor, refs, 1536);
       if (!inlined.ok) return { ok: false, error: "INVALID_INPUT", detail: inlined.detail };
       const uploaded = [];
