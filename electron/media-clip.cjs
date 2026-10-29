@@ -22,6 +22,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { bundledBinary } = require("./bundled-bin.cjs");
 const { spawn } = require("node:child_process");
 
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -40,6 +41,8 @@ function resolveTool(explicit, envKey, names, candidates) {
   const explicitPath = String(explicit || "").trim();
   if (explicitPath) return isFile(explicitPath) ? explicitPath : null;
   if (fromEnv) return isFile(fromEnv) ? fromEnv : null;
+  const bundled = bundledBinary(names[0]);
+  if (bundled) return bundled;
   for (const candidate of candidates) if (isFile(candidate)) return candidate;
   for (const dir of String(process.env.PATH || "").split(":")) {
     if (!dir) continue;

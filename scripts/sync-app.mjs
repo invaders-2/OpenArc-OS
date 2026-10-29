@@ -22,6 +22,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { copyDshRuntimeClosure } from "./dsh-runtime-closure.mjs";
 
@@ -167,6 +168,26 @@ fs.cpSync(path.join(srcDir, "electron"), path.join(APPX, "electron"), { recursiv
 const srcResources = path.join(srcDir, "resources");
 if (fs.existsSync(srcResources)) fs.cpSync(srcResources, path.join(APPX, "resources"), { recursive: true });
 fs.copyFileSync(path.join(srcDir, "package.json"), path.join(APPX, "package.json"));
+
+// 随包 ffmpeg / ffprobe：剪辑时间线导出 MP4、按区间裁剪、素材探测都靠它；用户不用自己装。
+// 来源是 optionalDependencies 里的 ffmpeg-static 与 @ffprobe-installer/ffprobe（npm install 时按本机平台下载）。
+{
+  const binDir = path.join(APPX, "resources", "bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const req = createRequire(path.join(srcDir, "package.json"));
+  const pick = (label, find) => {
+    let file = null;
+    try { file = find(); } catch { file = null; }
+    if (!file || !fs.existsSync(file)) { console.warn("[sync-app] ⚠️ 没找到随包 " + label + "（先在仓库里 npm install）；应用会退回使用本机安装的 " + label); return; }
+    const dest = path.join(binDir, label);
+    fs.copyFileSync(file, dest);
+    fs.chmodSync(dest, 0o755);
+    try { execFileSync("codesign", ["--force", "--sign", "-", dest], { stdio: "ignore" }); } catch { /* 非 macOS 或已签名 */ }
+    console.log("[sync-app] bundled " + label + ": " + file + " → " + dest);
+  };
+  pick("ffmpeg", () => req("ffmpeg-static"));
+  pick("ffprobe", () => req("@ffprobe-installer/ffprobe").path);
+}
 
 // task-55：打包后的 app 没有仓库 node_modules；DSH harness 必须能在 <app>/node_modules 内
 // 找到 PIN 版本的 @deepseek-ai/dsh、ACP SDK、完整依赖闭包与 .bin/dsh。
