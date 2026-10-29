@@ -511,7 +511,7 @@ test("midjourney：generateImages 委托 media.generateMidjourneyImages（apiRoo
     ]);
     assert.deepEqual(rec.transcript[0].request.body.value, {
       size: "1:1",
-      speed: "relax",
+      speed: "fast", // 2026-10-29：relax 排队实测很慢，默认改 fast（PR #23）
       metadata: { source: "ccs-os" },
       prompt: "赛博朋克城市",
       version: "6",
