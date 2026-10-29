@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Brain, CalendarClock, Check, ChevronRight, Circle, CircleAlert, CircleDot, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Film, PanelRight, Pencil, Pin, PinOff, Play, Trash2, FolderOpen, RotateCcw, ShieldQuestion, Sparkles, SquarePen, Wrench } from "lucide-vue-next";
+import { Brain, CalendarClock, LayoutGrid, Puzzle, Check, ChevronRight, Circle, CircleAlert, CircleDot, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Film, PanelRight, Pencil, Pin, PinOff, Play, Trash2, FolderOpen, RotateCcw, ShieldQuestion, Sparkles, SquarePen, Wrench } from "lucide-vue-next";
 import ResourcePicker from "./ResourcePicker.vue";
 import PreviewPanel from "./chat/PreviewPanel.vue";
 import Composer from "./chat/Composer.vue";
 import AutomationsPanel from "./chat/AutomationsPanel.vue";
+import PluginsPanel from "./chat/PluginsPanel.vue";
+import AppsPanel from "./chat/AppsPanel.vue";
+import type { Pick as ComposerPick } from "./chat/types";
 import { buildGoal, goalTitle, parseGoal } from "./chat/goal";
 import type { ChatFile, SendPayload } from "./chat/types";
 import { sizeText } from "./chat/preview";
@@ -45,8 +48,8 @@ const error = ref("");
 const scroller = ref<HTMLElement | null>(null);
 const panelOpen = ref(true);
 const listQuery = ref("");
-/** 主区显示什么：对话，或「自动化」（侧栏顶部入口）。 */
-const mode = ref<"chat" | "automations">("chat");
+/** 主区显示什么：对话，或侧栏顶部入口「自动化 / 插件 / 应用」。 */
+const mode = ref<"chat" | "automations" | "plugins" | "apps">("chat");
 /** 自动化开出来的对话：taskId → 自动化名（列表里加时钟标记）。 */
 const autoTasks = ref<Record<string, string>>({});
 const autoCount = ref(0);
@@ -63,6 +66,11 @@ async function loadAutoMap() {
 }
 let offAuto: (() => void) | null = null;
 function openAutomations() { mode.value = "automations"; sessionMenu.value = null; }
+function openMode(m: "plugins" | "apps") { mode.value = m; sessionMenu.value = null; }
+/** 插件页「在对话中使用」：新对话 + 输入区预先选好这个技能 / 连接。 */
+function useInChat(pick: ComposerPick) { newSession(); nextTick(() => { composer.value?.addPick(pick); composer.value?.focus(); }); }
+/** 应用页「在对话中试试」：新对话 + 填好示例（不自动发送，让用户先看一眼）。 */
+function tryInChat(prompt: string) { newSession(); draft.value = prompt; nextTick(() => composer.value?.focus()); }
 const resourcePickerOpen = ref(false);
 const openTurns = ref<Set<string>>(new Set());
 function toggleTurn(key: string) { const next = new Set(openTurns.value); if (next.has(key)) next.delete(key); else next.add(key); openTurns.value = next; }
@@ -765,6 +773,12 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
       <button type="button" class="chat-nav" data-chat-nav-automations :aria-current="mode === 'automations' ? 'page' : undefined" @click="openAutomations">
         <CalendarClock :size="15" /><span>自动化</span><small v-if="autoCount" data-chat-nav-count>{{ autoCount }}</small>
       </button>
+      <button type="button" class="chat-nav" data-chat-nav-plugins :aria-current="mode === 'plugins' ? 'page' : undefined" @click="openMode('plugins')">
+        <Puzzle :size="15" /><span>插件</span>
+      </button>
+      <button type="button" class="chat-nav" data-chat-nav-apps :aria-current="mode === 'apps' ? 'page' : undefined" @click="openMode('apps')">
+        <LayoutGrid :size="15" /><span>应用</span>
+      </button>
       <div class="chat-sessions" data-chat-sessions>
         <template v-for="g in sessionGroups" :key="g.label">
           <div class="split-section">{{ g.label }}</div>
@@ -796,6 +810,8 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
     <div v-if="mode === 'automations'" class="split-main chat-main">
       <AutomationsPanel :tasks="tasks" :models="models" :default-model-id="defaultModelId" @open="select" @changed="onAutoChanged" />
     </div>
+    <div v-if="mode === 'plugins'" class="split-main chat-main"><PluginsPanel @use="useInChat" /></div>
+    <div v-if="mode === 'apps'" class="split-main chat-main"><AppsPanel @try="tryInChat" /></div>
     <div class="split-main chat-main" :class="{ 'chat-main-hidden': mode !== 'chat' }">
       <div class="pane-toolbar chat-toolbar">
         <strong class="pane-title chat-title">{{ detail ? titleOf(detail.task) : "新对话" }}</strong>
@@ -1022,7 +1038,7 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 .chat-nav { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; margin-bottom: 1px; border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-secondary); text-align: left; }
 .chat-nav:hover { background: rgb(var(--text-rgb) / 0.05); }
 .chat-nav[aria-current="page"] { background: rgb(var(--sidebar-selected-rgb, 224 224 224)); font-weight: var(--fw-medium); }
-.chat-nav[data-chat-nav-automations] { margin-bottom: 8px; }
+.chat-nav[data-chat-nav-apps] { margin-bottom: 8px; }
 .chat-nav span { flex: 1; }
 .chat-nav small { min-width: 18px; padding: 0 5px; border-radius: 9px; background: rgb(var(--text-rgb) / 0.08); color: var(--muted); font-size: var(--fs-micro, 11px); text-align: center; }
 .chat-search { flex: 1; min-width: 0; }

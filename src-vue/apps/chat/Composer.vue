@@ -248,7 +248,7 @@ function submit() {
 function reset() { for (const f of files.value) if (f.localUrl) { try { URL.revokeObjectURL(f.localUrl); } catch { /* ignore */ } } files.value = []; picks.value = []; menu.value = null; }
 function setFiles(list: ChatFile[]) { files.value = list.map((f) => ({ ...f, state: "ready" as const })); }
 function focus() { ta.value?.focus(); }
-defineExpose({ reset, setFiles, focus, openPicker: () => fileInput.value?.click() });
+defineExpose({ reset, setFiles, focus, addPick, openPicker: () => fileInput.value?.click() });
 
 function onDocClick(e: MouseEvent) {
   const t = e.target as HTMLElement;
