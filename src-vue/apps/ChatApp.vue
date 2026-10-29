@@ -758,8 +758,10 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
     <nav class="split-side chat-side" aria-label="对话">
       <div class="chat-side-top">
         <label class="ds-search chat-search"><input v-model="listQuery" class="ds-search__input" type="search" placeholder="搜索对话" aria-label="搜索对话" /></label>
-        <button type="button" class="chat-icon-btn" data-chat-new title="新对话" aria-label="新对话" @click="newSession"><SquarePen :size="16" /></button>
       </div>
+      <button type="button" class="chat-nav" data-chat-new :aria-current="mode === 'chat' && !currentId ? 'page' : undefined" @click="newSession">
+        <SquarePen :size="15" /><span>新对话</span>
+      </button>
       <button type="button" class="chat-nav" data-chat-nav-automations :aria-current="mode === 'automations' ? 'page' : undefined" @click="openAutomations">
         <CalendarClock :size="15" /><span>自动化</span><small v-if="autoCount" data-chat-nav-count>{{ autoCount }}</small>
       </button>
@@ -1017,9 +1019,10 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 .chat-live-tool { display: flex; align-items: center; gap: 5px; margin: 0 0 4px; font-size: var(--fs-caption); color: var(--muted); }
 .chat-md-live { opacity: 0.92; }
 .chat-side-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-.chat-nav { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; margin-bottom: 6px; border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-secondary); text-align: left; }
+.chat-nav { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; margin-bottom: 1px; border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-secondary); text-align: left; }
 .chat-nav:hover { background: rgb(var(--text-rgb) / 0.05); }
 .chat-nav[aria-current="page"] { background: rgb(var(--sidebar-selected-rgb, 224 224 224)); font-weight: var(--fw-medium); }
+.chat-nav[data-chat-nav-automations] { margin-bottom: 8px; }
 .chat-nav span { flex: 1; }
 .chat-nav small { min-width: 18px; padding: 0 5px; border-radius: 9px; background: rgb(var(--text-rgb) / 0.08); color: var(--muted); font-size: var(--fs-micro, 11px); text-align: center; }
 .chat-search { flex: 1; min-width: 0; }
