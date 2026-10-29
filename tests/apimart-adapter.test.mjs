@@ -526,13 +526,14 @@ test("⑬ 动作控制 / 排除族：kling motion-control 按 image_url+video_ur
     assert.equal(out.ok, true, JSON.stringify(out));
     assert.deepEqual(out.artifacts, [{ url: "https://cdn.example/mc.mp4", mime: "video/mp4" }]);
     const submit = mock.requests.find((item) => item.path === "/v1/videos/generations");
+    // 文档：mode / character_orientation 必填，keep_original_sound 是字符串 yes / no，没有 duration 字段
     assert.deepEqual(submit.json, {
       model: "kling-v3-motion-control",
-      duration: 5,
       image_url: "https://cdn.example/first.png",
       video_url: "https://cdn.example/motion.mp4",
       character_orientation: "video",
-      keep_original_sound: true,
+      mode: "std",
+      keep_original_sound: "yes",
     });
     assert.equal("size" in submit.json, false, "动作控制不塞比例字段");
     assert.equal("image_urls" in submit.json, false, "动作控制不用 image_urls");
