@@ -13,6 +13,7 @@ import { TableNodeBody } from "./TableNode";
 import { StackBody } from "./StackNode";
 import { isStack } from "../stack";
 import { useAssetUrl } from "./useAsset";
+import { AudioBody } from "./AudioBody";
 import { useCtl } from "./ctx";
 import type { GenData } from "../model";
 import { retryBlockedReason } from "../errorText";
@@ -137,7 +138,7 @@ function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean }) {
     if (out && (out.frame || out.url)) return <VideoBody node={node} out={out} res={(genOf(node).params as VideoParams).res || out.res} />;
     return <div className="ph"><Icon name="video" /><span>连入图片作为首帧 / 尾帧 / 参考，或直接写提示词</span></div>;
   }
-  if (out) return <AudioBody out={out} />;
+  if (out) return <AudioBody out={out} sel={p.sel} />;
   return <div className="ph"><Icon name="audio" /><span>音乐、配音或音效</span></div>;
 }
 
@@ -225,18 +226,6 @@ function TrimBar({ trim, dur, playing, onSeek, onTrim }: { trim: VideoTrim; dur?
     <span className="trim-lab left tnum">{Math.round(trim.in * 10) / 10}s</span>
     <span className="trim-lab right tnum" data-trim-total>{Math.round(trim.out * 10) / 10}s · 共 {Math.round((trim.out - trim.in) * 10) / 10}s / {Math.round(total * 10) / 10}s</span>
   </div>;
-}
-
-function AudioBody({ out }: { out: GenOutput }) {
-  const url = useAssetUrl(out.url || ""); const aref = useRef<HTMLAudioElement>(null);
-  const [t, setT] = useState(0); const [on, setOn] = useState(false);
-  const bars = out.bars && out.bars.length ? out.bars : Array.from({ length: 48 }, (_, i) => .2 + Math.abs(Math.sin(i * .5)) * .6);
-  const dur = out.dur || 0; const frac = dur ? t / dur : 0;
-  return <>
-    {url ? <audio ref={aref} src={url} onTimeUpdate={(e) => setT((e.target as HTMLAudioElement).currentTime)} onEnded={() => { setOn(false); setT(0); }} /> : null}
-    <div className="wave">{bars.map((b, i) => <i key={i} className={on && i / bars.length <= frac ? "on" : ""} style={{ height: Math.round(b * 70) + "%" }} />)}</div>
-    <div className="actl"><button className="p" data-act="play" onPointerDown={(e) => { e.stopPropagation(); const a = aref.current; if (!a) { setOn(true); let i = 0; const tm = setInterval(() => { i += .25; setT(i); if (i >= dur) { clearInterval(tm); setOn(false); setT(0); } }, 250); return; } if (a.paused) { void a.play(); setOn(true); } else { a.pause(); setOn(false); } }}><Icon name="play" /></button><span className="tnum" style={{ fontSize: 11, color: "var(--fg2)" }}>0:{String(Math.round(dur)).padStart(2, "0")}</span></div>
-  </>;
 }
 
 function TextEditor({ node, onCommit }: { node: CanvasNode; onCommit: (id: string, text: string) => void }) {
