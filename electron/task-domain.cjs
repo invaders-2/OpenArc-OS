@@ -60,6 +60,8 @@ const TASK_EVENT = Object.freeze({
   HARNESS_RUN_UNKNOWN_EFFECT: "harness.run.unknown_effect",
   HARNESS_TEXT_DELTA: "harness.text.delta",
   HARNESS_PLAN: "harness.plan",
+  // 全局 AI 联网过程：搜索词 + 结果标题 / 地址，或读过的网页地址 / 标题（不含正文）。
+  HARNESS_WEB_ACTIVITY: "harness.web_activity",
   HARNESS_USAGE: "harness.usage",
   HARNESS_TOOL_PROPOSED: "harness.tool_proposed",
   HARNESS_PERMISSION_REQUESTED: "harness.permission_requested",

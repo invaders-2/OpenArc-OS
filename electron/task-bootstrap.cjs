@@ -181,6 +181,7 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
       else if (update.kind === "thinking") send({ type: "task/progress", taskId, kind: "thinking", text: String(update.text || "").slice(0, 8000) });
       else if (update.kind === "plan") send({ type: "task/progress", taskId, kind: "plan", items: Array.isArray(update.items) ? update.items.slice(0, 20) : [] });
       else if (update.kind === "tool") send({ type: "task/progress", taskId, kind: "tool", name: String(update.name || "").slice(0, 80) });
+      else if (update.kind === "web" && update.activity && typeof update.activity === "object") send({ type: "task/progress", taskId, kind: "web", activity: update.activity });
     });
   }
   function emitResultFor(context, taskId, r) {

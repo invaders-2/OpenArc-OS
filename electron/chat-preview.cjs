@@ -133,6 +133,53 @@ function createChatPreview({ getWorkspaceDir = null, getWebAccess = null, clock 
     return out;
   }
 
+  /**
+   * 网站图标（联网结果里的来源列表用）：经同一套出网检查取回，只认常见位图，转成 data: 地址给界面。
+   * 先取 /favicon.ico，不行再看首页里的 <link rel="icon">。按域名缓存（失败也缓存，避免反复请求）。
+   */
+  const icons = new Map(); // host → Promise<string>
+  function iconMime(buf) {
+    if (!buf || buf.length < 8) return "";
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+    if (buf[0] === 0x00 && buf[1] === 0x00 && (buf[2] === 0x01 || buf[2] === 0x02) && buf[3] === 0x00) return "image/x-icon";
+    if (buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+    if (buf.slice(0, 3).toString("latin1") === "GIF") return "image/gif";
+    if (buf.slice(0, 4).toString("latin1") === "RIFF" && buf.slice(8, 12).toString("latin1") === "WEBP") return "image/webp";
+    return "";
+  }
+  async function favicon({ host } = {}) {
+    const h = String(host || "").trim().toLowerCase();
+    if (!/^[a-z0-9.-]{1,253}$/.test(h) || !h.includes(".")) return { ok: false, error: "INVALID_HOST" };
+    const web = typeof getWebAccess === "function" ? getWebAccess() : null;
+    if (!web || typeof web.fetchRaw !== "function") return { ok: false, error: "PREVIEW_UNAVAILABLE" };
+    if (!icons.has(h)) {
+      if (icons.size > 400) icons.delete(icons.keys().next().value);
+      icons.set(h, (async () => {
+        const grab = async (u) => {
+          const got = await web.fetchRaw({ url: u, maxBytes: 128 * 1024, timeout: 6000 });
+          if (!got.ok || got.truncated) return "";
+          const mime = iconMime(got.buffer);
+          return mime ? "data:" + mime + ";base64," + got.buffer.toString("base64") : "";
+        };
+        let data = await grab("https://" + h + "/favicon.ico").catch(() => "");
+        if (data) return data;
+        const page = await web.fetchRaw({ url: "https://" + h + "/", maxBytes: 256 * 1024, timeout: 6000 }).catch(() => null);
+        if (!page || !page.ok) return "";
+        const html = page.buffer.toString("latin1");
+        const m = /<link\b[^>]*rel=["'][^"']*\bicon\b[^"']*["'][^>]*>/i.exec(html);
+        const href = m && /href=["']([^"']+)["']/i.exec(m[0]);
+        if (!href) return "";
+        let abs = "";
+        try { abs = new URL(href[1].replace(/&amp;/g, "&"), page.finalUrl).href; } catch { return ""; }
+        if (!/^https?:/i.test(abs)) return "";
+        data = await grab(abs).catch(() => "");
+        return data;
+      })());
+    }
+    const data = await icons.get(h);
+    return data ? { ok: true, dataUrl: data } : { ok: false, error: "NO_ICON" };
+  }
+
   /** 预览工作文件夹里的文件（附件 / AI 写出的文件）。 */
   function openWorkspace({ path: rel } = {}) {
     const dir = wsDir();
@@ -278,7 +325,7 @@ function createChatPreview({ getWorkspaceDir = null, getWebAccess = null, clock 
     return new Response("not found", { status: 404 });
   }
 
-  return { token, scheme: SCHEME, openRemote, openWorkspace, putHtml, upload, listFiles, absOf, handle };
+  return { token, scheme: SCHEME, openRemote, favicon, openWorkspace, putHtml, upload, listFiles, absOf, handle };
 }
 
 /** 对话预览 / 附件 IPC（只给可信窗口）。 */
@@ -344,6 +391,7 @@ function registerChatIpc({ ipcMain, preview, isTrusted, shell = null, prefs = nu
     try {
       switch (name) {
         case "preview/remote": return await preview.openRemote({ url: String(cmd.url || "") });
+        case "favicon/get": return typeof preview.favicon === "function" ? await preview.favicon({ host: String(cmd.host || "") }) : { ok: false, error: "NO_ICON" };
         case "preview/workspace": return preview.openWorkspace({ path: String(cmd.path || "") });
         case "preview/html": return preview.putHtml({ html: String(cmd.html || "") });
         case "upload/add": return preview.upload({ name: String(cmd.name || ""), data: cmd.data });

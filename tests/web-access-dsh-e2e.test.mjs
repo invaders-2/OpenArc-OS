@@ -66,3 +66,34 @@ test("没有授予联网权限时，工具被拒绝且不发出任何请求", as
     assert.ok(decs.length >= 1 && decs.every((d) => d.decision !== "ALLOWED"), JSON.stringify(decs.map((d) => [d.decision, d.reason_code])));
   } finally { await fx.close(); }
 });
+
+test("联网过程给界面：运行中推「正在搜索 / 已搜索」，结束后落库搜索词、结果和读过的网页（不含正文）", async () => {
+  const web = fakeWeb();
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", webAccess: web.svc });
+  try {
+    fx.grantTool("ai", ["tool.web.search", "tool.web.fetch"]);
+    fx.fp.state.toolLoopPlan = [
+      { id: "call_web_1", name: "web_search", args: { query: QUERY, limit: 3 } },
+      { id: "call_web_2", name: "web_fetch", args: { url: PAGE } },
+    ];
+    const t = fx.createTask();
+    const orch = fx.makeDshOrchestrator({ memoryContext: null });
+    const pushed = [];
+    orch.setProgressSink((taskId, u) => { if (u.kind === "web") pushed.push({ taskId, ...u.activity }); });
+    const r = await orch.runTask({ context: fx.ctx(), taskId: t.task.taskId, expectedRevision: t.task.revision });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.deepEqual(pushed.map((p) => p.kind + ":" + p.phase), ["search:start", "search:done", "fetch:start", "fetch:done"]);
+    assert.ok(pushed.every((p) => p.taskId === t.task.taskId));
+    assert.equal(pushed[0].query, QUERY);
+    const ev = fx.taskService.getEvents({ context: fx.ctx(), taskId: t.task.taskId });
+    assert.equal(ev.ok, true);
+    const webEvents = ev.items.filter((e) => e.eventType === "harness.web_activity").map((e) => e.safePayload);
+    assert.equal(webEvents.length, 2, JSON.stringify(ev.items.map((e) => e.eventType)));
+    const [s, f] = webEvents;
+    assert.equal(s.kind, "search"); assert.equal(s.query, QUERY); assert.equal(s.ok, true);
+    assert.deepEqual(s.results.map((x) => x.url), [PAGE]);
+    assert.equal(s.results[0].title, "Story");
+    assert.equal(f.kind, "fetch"); assert.equal(f.url, PAGE); assert.equal(f.title, "Story");
+    assert.doesNotMatch(JSON.stringify(webEvents), new RegExp(PAGE_TEXT), "网页正文不落库");
+  } finally { await fx.close(); }
+});

@@ -65,7 +65,7 @@ function redactUnsafe(value, depth = 0) {
 }
 
 class ToolFacadeBridge {
-  constructor({ toolProxy, manifest = null, sideEffectRuntime = null, clock = null, logger = null, ttlMs = DEFAULT_TTL_MS, execTimeoutMs = 15000 } = {}) {
+  constructor({ toolProxy, manifest = null, sideEffectRuntime = null, clock = null, logger = null, ttlMs = DEFAULT_TTL_MS, execTimeoutMs = 15000, onActivity = null } = {}) {
     if (!toolProxy) throw new Error("ToolFacadeBridge 需要 ControlledToolProxy");
     this.toolProxy = toolProxy;
     this.manifest = manifest;
@@ -79,7 +79,11 @@ class ToolFacadeBridge {
     this.server = null;
     this.baseUrl = null;
     this.stats = { calls: 0, allowed: 0, denied: 0, conflicts: 0, domainExecutions: 0, sideEffectProposals: 0 };
+    // 只读旁听：工具开始 / 结束时通知宿主（界面展示用，比如联网搜索的搜索词和结果）。回调出错不影响执行。
+    this.onActivity = typeof onActivity === "function" ? onActivity : null;
   }
+
+  #notify(update) { if (!this.onActivity) return; try { this.onActivity(update); } catch { /* 展示用，忽略 */ } }
 
   #now() { return this.clock(); }
 
@@ -216,9 +220,12 @@ class ToolFacadeBridge {
     const onClose = () => { if (!res.writableEnded) controller.abort(); };
     res.on("close", onClose);
     let outcome;
+    const args = body.arguments && typeof body.arguments === "object" && !Array.isArray(body.arguments) ? body.arguments : {};
+    this.#notify({ phase: "start", taskId: cap.taskId, runId: cap.runId, callId, toolId, args });
     try { outcome = await this.#execute(cap, toolId, body.arguments, controller.signal); }
     catch { outcome = { ok: false, error: BRIDGE_ERROR.EXECUTION_FAILED }; }
     finally { res.removeListener("close", onClose); }
+    this.#notify({ phase: "done", taskId: cap.taskId, runId: cap.runId, callId, toolId, args, ok: !!outcome.ok, result: outcome.ok ? outcome.result : null, error: outcome.ok ? null : outcome.error || null });
     if (outcome.ok) this.stats.allowed += 1; else this.stats.denied += 1;
     binding.outcome = outcome;
     if (settle) settle(outcome);

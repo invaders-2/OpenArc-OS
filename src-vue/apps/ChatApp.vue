@@ -7,6 +7,9 @@ import Composer from "./chat/Composer.vue";
 import AutomationsPanel from "./chat/AutomationsPanel.vue";
 import PluginsPanel from "./chat/PluginsPanel.vue";
 import AppsPanel from "./chat/AppsPanel.vue";
+import WebActivity from "./chat/WebActivity.vue";
+import WebSources from "./chat/WebSources.vue";
+import { citeLinks, mergeLiveWeb, sourcesOf, toWebAct, type WebAct } from "./chat/web";
 import type { Pick as ComposerPick } from "./chat/types";
 import { buildGoal, goalTitle, parseGoal } from "./chat/goal";
 import type { ChatFile, SendPayload } from "./chat/types";
@@ -82,7 +85,7 @@ const approvals = ref<Approval[]>([]);
 const approvalError = ref("");
 /** 运行中的实时进度（只给界面看，不落库）：流式文字、当前计划、正在用的工具。 */
 type PlanItem = { content: string; status: "pending" | "in_progress" | "completed" };
-type Live = { taskId: string; text: string; plan: PlanItem[]; tool: string; thinking: string; thinkStart: number; thinkMs: number; usage: { used: number; size: number | null } | null };
+type Live = { taskId: string; text: string; plan: PlanItem[]; tool: string; thinking: string; thinkStart: number; thinkMs: number; usage: { used: number; size: number | null } | null; web: WebAct[] };
 const live = ref<Live | null>(null);
 /** 思考过程不落库（后端规则），只在本次运行期间留在界面上：按轮次记下来，重开应用后不再显示。 */
 const thoughts = ref<Record<string, { text: string; ms: number }>>({});
@@ -90,7 +93,7 @@ const openThoughts = ref<Set<string>>(new Set());
 function toggleThought(key: string) { const next = new Set(openThoughts.value); if (next.has(key)) next.delete(key); else next.add(key); openThoughts.value = next; }
 function onProgress(ev: any) {
   if (!ev || ev.taskId !== currentId.value) return;
-  const cur: Live = live.value && live.value.taskId === ev.taskId ? live.value : { taskId: ev.taskId, text: "", plan: [], tool: "", thinking: "", thinkStart: 0, thinkMs: 0, usage: null };
+  const cur: Live = live.value && live.value.taskId === ev.taskId ? live.value : { taskId: ev.taskId, text: "", plan: [], tool: "", thinking: "", thinkStart: 0, thinkMs: 0, usage: null, web: [] };
   // 思考结束 = 出现了正文或工具调用：记下思考用时
   const endThink = (c: Live) => (c.thinkStart && !c.thinkMs ? { ...c, thinkMs: Date.now() - c.thinkStart } : c);
   if (ev.kind === "text" && typeof ev.text === "string") live.value = { ...endThink(cur), text: (cur.text + ev.text).slice(-20000), tool: "" };
@@ -101,6 +104,8 @@ function onProgress(ev: any) {
   else if (ev.kind === "plan" && Array.isArray(ev.items)) live.value = { ...cur, plan: ev.items };
   else if (ev.kind === "tool" && typeof ev.name === "string") live.value = { ...endThink(cur), tool: ev.name };
   else if (ev.kind === "usage" && Number.isFinite(Number(ev.used))) live.value = { ...cur, usage: { used: Number(ev.used), size: Number(ev.size) || null } };
+  // 联网过程：正在搜索 / 已搜索（带结果）/ 正在读取 / 已读取
+  else if (ev.kind === "web" && ev.activity) live.value = { ...endThink(cur), web: mergeLiveWeb(cur.web, ev.activity) };
 }
 /** 一轮结束：把这轮的思考过程留在界面上（按轮次 key）。 */
 function keepThought() {
@@ -289,7 +294,7 @@ const toolTone = (status: string) => (status === "执行完成" ? "ok" : status 
 type Turn = {
   key: string; ask: string; answer: string; pending: boolean; failed: boolean; tools: any[]; doneAt: number;
   askAt: number; answerAt: number; summary: string; dur: string; rows: WorkRow[]; nodes: NodeRef[]; media: MediaRef[];
-  plan: PlanItem[];
+  plan: PlanItem[]; web: WebAct[];
 };
 /** 每一轮 = 用户提问 + 这一轮的工具步骤 + 助手回答；工具/事件按时间归到它之后第一个产出回答的轮次。 */
 const turns = computed<Turn[]>(() => {
@@ -306,12 +311,12 @@ const turns = computed<Turn[]>(() => {
       // 真实消息时间：用户侧用这一步的 createdAt（没有就退回任务创建时间），助手侧用产物时间
       askAt: Number((s as any).createdAt) || (i === 0 ? Number(d.task.createdAt) || 0 : 0),
       answerAt: last ? Number(last.createdAt) || 0 : 0,
-      summary: "", dur: "", rows: [], nodes: [], media: [], plan: [],
+      summary: "", dur: "", rows: [], nodes: [], media: [], plan: [], web: [],
     };
   });
   if (!rows.length) rows.push({
     key: "goal", ask: d.task.goal, answer: running(d.task.status) ? "" : STATUS[d.task.status] ?? "", pending: running(d.task.status), failed: false, tools: [],
-    doneAt: Infinity, askAt: Number(d.task.createdAt) || 0, answerAt: Number(d.task.updatedAt) || 0, summary: "", dur: "", rows: [], nodes: [], media: [], plan: [],
+    doneAt: Infinity, askAt: Number(d.task.createdAt) || 0, answerAt: Number(d.task.updatedAt) || 0, summary: "", dur: "", rows: [], nodes: [], media: [], plan: [], web: [],
   });
   for (const card of toolCards.value) {
     const target = rows.find((r) => card.at <= r.doneAt) || rows[rows.length - 1];
@@ -321,6 +326,8 @@ const turns = computed<Turn[]>(() => {
   for (const e of d.events) {
     const at = Number(e.createdAt) || 0;
     const target = rows.find((r) => at <= r.doneAt) || rows[rows.length - 1];
+    // 联网记录里的 url 是搜索结果 / 网页地址，不是生成的媒体，单独处理
+    if (e.eventType === "harness.web_activity") { const w = toWebAct(e.safePayload, e.eventId); if (w) target.web.push(w); continue; }
     for (const n of nodeRefsIn((e as any).safePayload)) if (!target.nodes.some((x) => x.id === n.id)) target.nodes.push(n);
     for (const m of mediaRefsIn((e as any).safePayload)) if (!target.media.some((x) => x.url === m.url)) target.media.push(m);
     // 这一轮最后一次计划（todo_write）：后一条覆盖前一条
@@ -330,7 +337,15 @@ const turns = computed<Turn[]>(() => {
   const lv = live.value;
   const tail = rows[rows.length - 1];
   if (lv && lv.taskId === d.task.taskId && tail && tail.pending && lv.plan.length) tail.plan = lv.plan;
+  // 运行中：已落库的联网记录 + 实时推送里还没落库的（按搜索词 / 地址去重）
+  if (lv && lv.taskId === d.task.taskId && tail && tail.pending && lv.web.length) {
+    const sig = (a: WebAct) => a.kind + "|" + (a.query || a.url || "");
+    const stored = new Set(tail.web.map(sig));
+    tail.web = [...tail.web, ...lv.web.filter((a) => !stored.has(sig(a)))];
+  }
   for (const r of rows) {
+    const searches = r.web.filter((a) => a.kind === "search"); const reads = r.web.filter((a) => a.kind === "fetch");
+    let si = 0; let fi = 0;
     r.summary = r.tools.length ? summarize(r.tools) : "";
     const start = r.tools.length ? Math.min(...r.tools.map((t) => Number(t.at) || r.askAt || Infinity)) : 0;
     const end = r.answerAt || (r.pending ? Date.now() : 0);
@@ -343,7 +358,7 @@ const turns = computed<Turn[]>(() => {
         key: t.key || String(i),
         kind: (thinking ? "thinking" : "tool") as "tool" | "thinking",
         icon: thinking ? "thinking" : rowIcon(raw),
-        text: thinking ? raw : toolLabel(raw),
+        text: thinking ? raw : webRowText(raw, searches, reads, () => si++, () => fi++),
         // TapNow 实测：成功行只有动词句（无状态后缀），失败才带「(失败)」
         suffix: failed ? "(失败)" : "",
         failed,
@@ -460,6 +475,13 @@ const TOOL_LABEL: Array<[RegExp, string]> = [
   [/^mcp_/i, "调用 MCP 工具"],
   [/^(thinking|reasoning)$/i, "已思考"],
 ];
+/** 工作明细里的联网行：按顺序对上联网记录，显示搜索词 / 网站（对不上就保持原文案）。 */
+function webRowText(raw: string, searches: WebAct[], reads: WebAct[], nextS: () => number, nextF: () => number) {
+  const head = String(raw || "").trim().split(/\s+/)[0] || "";
+  if (/^web_search$/i.test(head)) { const a = searches[nextS()]; if (a?.query) return "联网搜索 · " + a.query; }
+  else if (/^web_fetch$/i.test(head)) { const a = reads[nextF()]; if (a?.url) { let h = a.url; try { h = new URL(a.url).hostname.replace(/^www\./, ""); } catch { /* 原样 */ } return "读取网页 · " + (a.title || h); } }
+  return toolLabel(raw);
+}
 function toolLabel(title: string) {
   const text = String(title || "").trim(); if (!text) return "工具调用";
   const parts = text.split(/\s+/); const head = parts[0]; const rest = parts.slice(1).join(" ");
@@ -596,6 +618,14 @@ async function onThreadClick(e: MouseEvent) {
     return;
   }
   if (act === "code-preview") void openCode(code, block?.getAttribute("data-md-lang") || "");
+}
+/** 这一轮只用了联网工具：联网过程区已经把每一步列清楚，不再重复显示工具明细。 */
+const onlyWeb = (turn: Turn) => turn.web.length > 0 && turn.tools.every((t: any) => /^web_(search|fetch)$/i.test(String(t.title || "").trim().split(/\s+/)[0] || ""));
+/** 联网结果 / 来源的点击：默认在预览侧栏打开，按住 ⌘ / Ctrl 交给 OpenArc 浏览器。 */
+function onWebOpen(url: string, title: string, ev: MouseEvent) {
+  if (!/^https?:/i.test(url)) return;
+  if (ev && (ev.metaKey || ev.ctrlKey)) { void openInBrowser(url); return; }
+  void openUrl(url, String(title || "").slice(0, 60));
 }
 /** 工具结果里的 http(s) 媒体：经主进程取回（同一套安全检查）后再显示，界面本身不直连外网。 */
 const mediaSrc = ref<Record<string, string>>({});
@@ -901,8 +931,10 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
                         </li>
                       </ol>
                     </section>
+                    <!-- 联网过程（参照 Codex / ChatGPT）：搜索词、结果、读过的网页；运行中实时更新 -->
+                    <WebActivity v-if="turn.web.length" :acts="turn.web" :live="!!liveFor(turn)" @open="onWebOpen" />
                     <!-- 中间过程组：一行摘要句 + 耗时 + chevron；展开是左侧竖线 + 缩进明细（13px） -->
-                    <div v-if="turn.tools.length" class="chat-working" data-chat-tools :data-open="openTurns.has(turn.key) ? '1' : '0'">
+                    <div v-if="turn.tools.length && !onlyWeb(turn)" class="chat-working" data-chat-tools :data-open="openTurns.has(turn.key) ? '1' : '0'">
                       <button type="button" class="chat-working-head" :aria-expanded="openTurns.has(turn.key)" @click="toggleTurn(turn.key)">
                         <ListChecks :size="14" class="chat-work-led" />
                         <span class="chat-work-summary" data-chat-summary>{{ turn.summary }}</span>
@@ -920,11 +952,12 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
                       </Transition>
                     </div>
                     <template v-if="turn.pending">
-                      <p v-if="liveFor(turn)?.tool" class="chat-live-tool" data-chat-live-tool><Wrench :size="12" /> 正在{{ toolLabel(liveFor(turn)!.tool) }}…</p>
+                      <p v-if="liveFor(turn)?.tool && !(turn.web.length && /^web_(search|fetch)$/i.test(liveFor(turn)!.tool))" class="chat-live-tool" data-chat-live-tool><Wrench :size="12" /> 正在{{ toolLabel(liveFor(turn)!.tool) }}…</p>
                       <div v-if="liveFor(turn)?.text" class="chat-md chat-md-live" data-chat-live-text v-html="markdown(liveFor(turn)!.text)" />
                       <span v-else class="chat-typing"><i /><i /><i /><span class="chat-caret" /></span>
                     </template>
-                    <div v-else class="chat-md" data-chat-markdown v-html="markdown(turn.answer)" />
+                    <div v-else class="chat-md" data-chat-markdown v-html="turn.web.length ? citeLinks(markdown(turn.answer)) : markdown(turn.answer)" />
+                    <WebSources v-if="!turn.pending && turn.web.length && sourcesOf(turn.web, turn.answer).length" :sources="sourcesOf(turn.web, turn.answer)" @open="onWebOpen" />
                     <div v-if="!turn.pending && turn.nodes.length" class="chat-chips" data-chat-nodes>
                       <button v-for="n in turn.nodes" :key="n.id" type="button" class="chat-nodechip" :data-chat-node="n.id" :title="'在画布中定位：' + n.title" @click="focusNode(n)"><Layers :size="12" /><span>{{ n.title }}</span></button>
                     </div>

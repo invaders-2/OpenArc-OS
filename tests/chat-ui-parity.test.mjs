@@ -115,3 +115,26 @@ test("思考过程：reasoning_content 与 <think> 前缀都拆出来，不混�
   const b = providerAdapter.parseChatResponse({ choices: [{ message: { content: "<think>推理</think>\n结论" } }] });
   assert.equal(b.text, "结论"); assert.equal(b.reasoning, "推理");
 });
+
+test("网站图标：只认位图，按域名缓存；取不到图标时如实返回 NO_ICON；非法域名直接拒绝", async () => {
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]);
+  const calls = [];
+  const web = { async fetchRaw({ url }) {
+    calls.push(url);
+    if (url === "https://a.example.com/favicon.ico") return { ok: true, buffer: png, contentType: "image/png", finalUrl: url, truncated: false };
+    if (url === "https://b.example.com/favicon.ico") return { ok: true, buffer: Buffer.from("<html>not an icon</html>"), contentType: "text/html", finalUrl: url, truncated: false };
+    if (url === "https://b.example.com/") return { ok: true, buffer: Buffer.from('<link rel="shortcut icon" href="/static/i.png">'), contentType: "text/html", finalUrl: url, truncated: false };
+    if (url === "https://b.example.com/static/i.png") return { ok: true, buffer: png, contentType: "image/png", finalUrl: url, truncated: false };
+    return { ok: false, error: "WEB_HTTP_ERROR" };
+  } };
+  const p = createChatPreview({ getWebAccess: () => web });
+  const a = await p.favicon({ host: "a.example.com" });
+  assert.equal(a.ok, true); assert.match(a.dataUrl, /^data:image\/png;base64,/);
+  await p.favicon({ host: "a.example.com" });
+  assert.equal(calls.filter((u) => u.startsWith("https://a.")).length, 1, "同一域名只取一次");
+  const b = await p.favicon({ host: "b.example.com" });
+  assert.equal(b.ok, true, "favicon.ico 不是图片时，退回首页里的 <link rel=icon>");
+  assert.equal((await p.favicon({ host: "c.example.com" })).error, "NO_ICON");
+  assert.equal((await p.favicon({ host: "localhost" })).error, "INVALID_HOST");
+  assert.equal((await p.favicon({ host: "a.com/../x" })).error, "INVALID_HOST");
+});
