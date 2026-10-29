@@ -18,6 +18,7 @@ const path = require("node:path");
 const domain = require("./task-domain.cjs");
 const { ToolFacadeBridge } = require("./tool-facade-bridge.cjs");
 const { buildBridgeManifest } = require("./tool-registry.cjs");
+const { webActivityOf } = require("./web-activity.cjs");
 
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, ORCHESTRATION_KIND,
@@ -35,6 +36,8 @@ const PROMPT_SCHEMA_VERSION = 1;
 const DEFAULT_TURN_TIMEOUT_MS = 180000;
 const DEFAULT_START_TIMEOUT_MS = 30000;
 const DEFAULT_MAX_PERSISTED_EVENTS = 64;
+// 一次 run 最多落库的联网记录条数（每条只有搜索词 / 结果标题和地址，不含网页正文）。
+const MAX_WEB_EVENTS_PER_RUN = 16;
 // D4-03D：一个 Harness run 内的 bounded 模型调用预算。混合 READ + WRITE turn 需要
 // tool calls + 1 次 final + 1 次 verified-continuation，4 会误伤合法流程；仍然 bounded，
 // 且绝不引入 hidden retry（0 retry 由 AUTO_RETRY/failModelCall 语义保证）。
@@ -193,6 +196,8 @@ class TaskHarnessOrchestrator {
     // 打开 dsh 的 todo_write（多步任务先列计划），计划通过进度推送和 harness.plan 事件给界面。
     this.planTool = planTool === true;
     this.progressSink = null;
+    // 联网过程（搜索词 / 结果 / 读过的网页）：运行中实时推给界面，并随本次 run 的事件一起落库（harness.web_activity）。
+    this.webActivity = new Map(); // runId → [记录]
     // 第 2 期：工作文件夹工具已装配时，在首轮提示里说明它；技能目录晚绑定（技能中心在任务装配之后才起来）。
     this.workspaceTools = workspaceTools === true;
     // 全局 AI 子 agent（第 4 期）：打开 dsh 的 subagent 工具（子 agent 用同一套受控工具和预算）。
@@ -889,7 +894,7 @@ class TaskHarnessOrchestrator {
     }
     const manifest = buildBridgeManifest(proxy.registry, { readToolIds: toolIds, writeToolIds });
     const make = typeof cfg.bridgeFactory === "function" ? cfg.bridgeFactory : (o) => new ToolFacadeBridge(o);
-    const bridge = make({ toolProxy: proxy, manifest, sideEffectRuntime: this.sideEffectRuntime, clock: this.clock, logger: this.logger, ttlMs: cfg.ttlMs, execTimeoutMs: cfg.execTimeoutMs });
+    const bridge = make({ toolProxy: proxy, manifest, sideEffectRuntime: this.sideEffectRuntime, clock: this.clock, logger: this.logger, ttlMs: cfg.ttlMs, execTimeoutMs: cfg.execTimeoutMs, onActivity: (u) => this.#onToolActivity(u) });
     await bridge.start();
     // D4-06 Closure：capability 额度 = 任务剩余（不再用固定的 cfg.maxCalls，避免跨 run 顺带恢复预算）。
     const quota = Number.isFinite(Number(maxCalls)) && Number(maxCalls) > 0 ? Number(maxCalls) : cfg.maxCalls;
@@ -959,8 +964,32 @@ class TaskHarnessOrchestrator {
   }
 
   async #recordEvents({ context, taskId, runId, events, expectedRevision }) {
-    if (!events || !events.length) return { ok: true, added: 0 };
-    return this.#service().recordHarnessEvents({ context, taskId, runId, events, expectedRevision, maxEvents: this.maxPersistedHarnessEvents });
+    // 本次 run 里攒下的联网记录排在最前（总数仍受上限约束，超出时从末尾的普通事件里让出位置）。
+    const web = runId ? this.#drainWeb(runId) : [];
+    let list = Array.isArray(events) ? events : [];
+    if (web.length) list = [...web, ...list.slice(0, Math.max(0, this.maxPersistedHarnessEvents - web.length))];
+    if (!list.length) return { ok: true, added: 0 };
+    return this.#service().recordHarnessEvents({ context, taskId, runId, events: list, expectedRevision, maxEvents: this.maxPersistedHarnessEvents });
+  }
+
+  /** 工具旁听：只处理联网工具。开始时推「正在搜索 / 正在读取」，结束时推结果并记下来等落库。 */
+  #onToolActivity(update) {
+    const rec = webActivityOf(update);
+    if (!rec) return;
+    if (this.progressSink && update.taskId) { try { this.progressSink(update.taskId, { kind: "web", activity: rec }); } catch { /* ignore */ } }
+    if (rec.phase !== "done" || !update.runId) return;
+    const list = this.webActivity.get(update.runId) || [];
+    if (list.length >= MAX_WEB_EVENTS_PER_RUN) return;
+    const { phase: _p, ...stored } = rec;
+    list.push({ eventType: TASK_EVENT.HARNESS_WEB_ACTIVITY, safePayload: stored });
+    this.webActivity.set(update.runId, list);
+  }
+
+  #drainWeb(runId) {
+    const list = this.webActivity.get(runId);
+    if (!list) return [];
+    this.webActivity.delete(runId);
+    return list;
   }
 
   async #blockStep({ context, taskId, stepId, runId, reason, event = null, payload = null, expectedRevision, alreadyRecorded = false }) {

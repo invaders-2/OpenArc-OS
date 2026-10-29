@@ -226,3 +226,10 @@
 .chat-app .chat-files-btn small { font-size: var(--fs-micro, 11px); font-variant-numeric: tabular-nums; }
 .chat-app .chat-files-pop { min-width: 260px; max-height: 360px; overflow: auto; }
 .chat-app .chat-files-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- 回答里的引用小标签（ChatGPT 式：图标 + 域名） ---------- */
+.chat-app .chat-md a.md-cite { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; height: 20px; margin: 0 2px; padding: 0 7px 0 3px; border-radius: 999px; background: rgb(var(--text-rgb) / 0.07); color: rgb(var(--text-rgb) / 0.72); font-size: 11.5px; line-height: 20px; text-decoration: none; vertical-align: 1px; white-space: nowrap; }
+.chat-app .chat-md a.md-cite:hover { background: rgb(var(--text-rgb) / 0.13); color: var(--text); }
+.chat-app .chat-md a.md-cite > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.chat-app .chat-md .md-cite-ic { flex: none; width: 14px; height: 14px; border-radius: 50%; object-fit: contain; background: var(--surface, #fff); }
+.chat-app .chat-md .md-cite-letter { display: inline-flex; align-items: center; justify-content: center; background: hsl(var(--h) 45% 46%); color: #fff; font-size: 8.5px; font-weight: 600; }
