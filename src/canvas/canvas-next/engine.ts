@@ -113,10 +113,21 @@ export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}
   return execute(store, node, req);
 }
 
+/** "16:9" → 宽高比 16/9；自适应 / auto / 不合法 → null */
+export function ratioOf(r: unknown): number | null {
+  const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(r ?? "").trim());
+  if (!m) return null;
+  const a = Number(m[1]); const b = Number(m[2]);
+  return a > 0 && b > 0 ? a / b : null;
+}
+
 /** 执行一次请求并写回（单节点 / 批量行共用） */
 async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, label?: string): Promise<boolean> {
   const id = node.id; const abort = new AbortController(); const t0 = performance.now();
   store.patchGen(id, { err: undefined, errCode: undefined });
+  // 生成中的占位（加载动效）先按面板选的比例摆好，不要等结果回来才变形；自适应 / 没选比例的保持原样
+  const want = ratioOf((req.params as { ratio?: string }).ratio);
+  if (want && (node.kind === "image" || node.kind === "video")) store.updateNode(id, (n) => ({ ...n, h: Math.round(clamp(n.w / want, 100, 520)) }));
   store.setRun(id, { status: "running", progress: .02, abort, startedAt: Date.now() });
   try {
     const res = await store.backend.generate(req, (e) => {

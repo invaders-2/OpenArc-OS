@@ -808,7 +808,7 @@ async function runMidjourney(args, opts) {
   const providerName = target.providerName;
   const taskIdInput = String(args.task_id || "").trim();
   const prompt = String(args.prompt || args.instruction || "").trim();
-  const speed = String(args.speed || "relax").trim().toLowerCase();
+  const speed = String(args.speed || "fast").trim().toLowerCase();
   const shouldWait = args.wait !== false;
   const path = typeof args.path === "string" ? args.path.trim() : "";
 

@@ -1308,13 +1308,16 @@ function midjourneyAspectRatio(size = "") {
 }
 
 // 源：protocols.ts:4734-4741
+// 名字里没有版本号（如 APIMart 的 "midjourney"）就返回 ""、不传 version，交给上游默认（以前写死 6.1）。
 function midjourneyVersion(model) {
   const raw = String(model || "").trim();
-  if (!raw) return "6.1";
   const match = raw.match(/(\d+(?:\.\d+)?)/);
-  if (match) return match[1];
-  if (/^(mj|midjourney)([-_\s]|$)/i.test(raw)) return "6.1";
-  return raw.slice(0, 24);
+  return match ? match[1] : "";
+}
+// relax 排队实测常常十几分钟，默认 fast；调用方明确给了 relax / turbo 就照用
+function midjourneySpeed(value) {
+  const v = String(value || "").trim().toLowerCase();
+  return MIDJOURNEY_SPEEDS.includes(v) ? v : "fast";
 }
 
 // 源：protocols.ts:4743-4756
@@ -1386,13 +1389,13 @@ async function submitMidjourney(provider, model, params, timeoutMs = 300000, opt
   const prompt = String(params.prompt || "").trim();
   const mode = String(params.mode || "imagine").trim().toLowerCase();
   if (mode !== "blend" && !prompt) throw new Error("缺少 Midjourney 提示词");
-  const speed = MIDJOURNEY_SPEEDS.includes(String(params.speed || "relax").trim().toLowerCase())
-    ? String(params.speed || "relax").trim().toLowerCase()
-    : "relax";
+  const speed = midjourneySpeed(params.speed);
   const version = midjourneyVersion(params.version || model);
   const body = { size: midjourneyAspectRatio(params.size), speed, metadata: { source: "ccs-os" } };
   if (prompt) body.prompt = prompt;
-  if (mode !== "blend") body.version = version;
+  if (mode !== "blend" && version) body.version = version;
+  // niji-6 / niji 7：要带 niji:true，否则上游当成 MJ 主线 v6 出图
+  if (mode !== "blend" && /niji/i.test(String(model || "") + " " + String(params.version || ""))) body.niji = true;
   const refs = await midjourneyReferenceUrls(params.reference_images || []);
   if (refs.length) body.image_urls = refs;
   if (mode === "blend" && (refs.length < 2 || refs.length > 4)) throw new Error("Midjourney 多图融合需要 2 到 4 张图片。");
@@ -1428,9 +1431,7 @@ async function submitMidjourneyAction(provider, params, timeoutMs = 300000, opti
   if (!MIDJOURNEY_ACTION_PATHS[action]) throw new Error("不支持的 Midjourney 操作。");
   const taskId = String(params.task_id || "").trim();
   if (!/^[A-Za-z0-9_.:-]{1,240}$/.test(taskId)) throw new Error("Midjourney 任务 ID 不合法。");
-  const speed = MIDJOURNEY_SPEEDS.includes(String(params.speed || "relax").trim().toLowerCase())
-    ? String(params.speed || "relax").trim().toLowerCase()
-    : "relax";
+  const speed = midjourneySpeed(params.speed);
   const body = { task_id: taskId, speed, metadata: { source: "ccs-os" } };
   const customId = String(params.custom_id || "").trim();
   if (customId) body.custom_id = customId;
@@ -1465,9 +1466,7 @@ async function submitMidjourneyAction(provider, params, timeoutMs = 300000, opti
 async function submitMidjourneyModal(provider, params, timeoutMs = 300000, options) {
   const taskId = String(params.task_id || "").trim();
   if (!/^[A-Za-z0-9_.:-]{1,240}$/.test(taskId)) throw new Error("Midjourney 任务 ID 不合法。");
-  const speed = MIDJOURNEY_SPEEDS.includes(String(params.speed || "relax").trim().toLowerCase())
-    ? String(params.speed || "relax").trim().toLowerCase()
-    : "relax";
+  const speed = midjourneySpeed(params.speed);
   const refs = await midjourneyReferenceUrls(params.mask_image ? [params.mask_image] : []);
   const maskUrl = refs[0];
   if (!maskUrl) throw new Error("Midjourney 局部重绘需要一个遮罩图片。");
@@ -1491,7 +1490,7 @@ async function generateMidjourneyImages(provider, model, params, timeoutMs = 600
   const submit = await submitMidjourney(
     provider,
     model,
-    { prompt, size: params.size, version: model, speed: "relax", mode: referenceImages.length ? "edit" : "imagine", reference_images: referenceImages },
+    { prompt, size: params.size, version: model, speed: midjourneySpeed(params.speed), mode: referenceImages.length ? "edit" : "imagine", reference_images: referenceImages },
     Math.min(timeoutMs, 180000),
     options,
   );
