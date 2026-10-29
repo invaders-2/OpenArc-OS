@@ -136,18 +136,21 @@
 .cn-root .aband{position:absolute;left:14px;right:14px;bottom:36px;height:10px;pointer-events:none;opacity:0;transition:opacity var(--d-quick) var(--e-std);}
 .cn-root .aband.on{opacity:1;}
 .cn-root .aband span{position:absolute;top:0;transform:translateX(-50%);font-size:9px;line-height:10px;color:var(--fg3);}
-.cn-root .actl{position:absolute;bottom:8px;left:12px;right:12px;height:26px;display:flex;gap:10px;align-items:center;}
+.cn-root .actl{position:absolute;bottom:8px;left:10px;right:12px;height:26px;display:flex;gap:6px;align-items:center;}
 .cn-root .actl button{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex:none;}
 .cn-root .actl button.p{background:var(--hi);color:var(--on-solid);}
+.cn-root .actl button.sk{width:24px;height:24px;color:var(--fg2);transition:color var(--d-feedback) var(--e-std),background-color var(--d-feedback) var(--e-std);}
+.cn-root .actl button.sk:hover{color:var(--hi);background:var(--hover);}
+.cn-root .actl button.sk svg{width:18px;height:18px;stroke-width:1.6;}
 .cn-root .actl button.p svg{fill:var(--on-solid);stroke:none;width:12px;height:12px;margin-left:1px;}
 .cn-root .actl button.p svg.apause{margin-left:0;}
-.cn-root .atrack{position:relative;flex:1;height:26px;cursor:pointer;touch-action:none;}
+.cn-root .atrack{position:relative;flex:1;min-width:40px;height:26px;margin-left:4px;cursor:pointer;touch-action:none;}
 .cn-root .atrack-rail,.cn-root .atrack-fill{position:absolute;left:0;top:50%;height:3px;margin-top:-1.5px;border-radius:2px;}
 .cn-root .atrack-rail{right:0;background:rgba(var(--ink),.18);}
 .cn-root .atrack-fill{background:var(--hi);}
 .cn-root .atrack-head{position:absolute;top:50%;width:3px;height:14px;margin:-7px 0 0 -1.5px;border-radius:2px;background:var(--hi);box-shadow:0 0 0 2px rgba(0,0,0,.25);transition:transform var(--d-feedback) var(--e-std);}
 .cn-root .atrack:hover .atrack-head{transform:scaleY(1.2);}
-.cn-root .atime{flex:none;font-size:11px;color:var(--fg2);min-width:64px;text-align:right;}
+.cn-root .atime{flex:none;font-size:11px;color:var(--fg2);min-width:60px;text-align:right;}
 .cn-root .cpin{position:absolute;width:26px;height:26px;margin:-26px 0 0 0;border-radius:13px 13px 13px 3px;background:var(--solid);color:var(--on-solid);font:600 11px var(--font);display:grid;place-items:center;cursor:pointer;z-index:3;}
 .cn-root .float{position:absolute;z-index:20;}
 .cn-root .cap{background:var(--raised);border-radius:12px;box-shadow:0 1px 0 rgba(var(--ink),.06) inset,0 8px 24px rgba(0,0,0,.35);}

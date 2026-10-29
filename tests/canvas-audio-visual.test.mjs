@@ -66,7 +66,7 @@ test("节点接线：音频节点用 AudioBody，带频谱画布、播放指针�
   const ab = fs.readFileSync(path.join(ROOT, "src/canvas/canvas-next/ui/AudioBody.tsx"), "utf8");
   assert.match(nv, /import \{ AudioBody \} from "\.\/AudioBody"/);
   assert.match(nv, /<AudioBody out=\{out\} sel=\{p\.sel\} \/>/);
-  for (const k of ["data-aviz", "data-atrack", "data-atrack-head", "data-atime", 'data-act="play"', "spectrum(", "peaks("]) assert.ok(ab.includes(k), k);
+  for (const k of ["data-aviz", "data-atrack", "data-atrack-head", "data-atime", "data-act=\"back10\"", "data-act=\"fwd10\"", 'data-act="play"', "spectrum(", "peaks("]) assert.ok(ab.includes(k), k);
 });
 
 test("decodeAudio：桌面版 CSP 禁止 fetch，data URL 必须本地解 base64 而不是走 fetch", () => {

@@ -2,7 +2,7 @@
  * 音频节点卡片。
  *   · 没在播：显示整段真实波形，已播部分高亮，竖线是播放指针；节点选中或播过之后，点 / 拖波形可跳转。
  *   · 播放中：波形变成实时频谱（左低频 → 右高频），跟着当前播放位置的低音 / 中音 / 高音起伏。
- *   · 底部：播放 / 暂停、可拖动的进度条（带指针）、当前时间 / 总时长。
+ *   · 底部：后退 10 秒 / 播放暂停 / 前进 10 秒（同 TapNow）、可拖动的进度条（带指针）、当前时间 / 总时长。
  * 波形和频谱都从解码后的音频数据算（见 audioAnalysis.ts），不依赖播放地址能不能接 Web Audio。
  */
 import { useEffect, useRef, useState } from "react";
@@ -136,6 +136,9 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
     if (a && url) a.currentTime = tm; else anim.current.fake0 = performance.now() - tm * 1000;
     setT(tm);
   };
+  /** 后退 / 前进 10 秒（对齐 TapNow 音频节点） */
+  const skip = (d: number) => { if (dur) seekTo((now() + d) / dur); };
+  const skipIcon = (fwd: boolean) => <svg viewBox="0 0 24 24" className="i" aria-hidden style={fwd ? { transform: "scaleX(-1)" } : undefined}><path d="M4 12a8 8 0 1 0 2.4-5.7" /><path d="M4 3.5V8h4.5" /><text x="12" y="15.5" textAnchor="middle" fontSize="8" fontWeight="600" stroke="none" fill="currentColor" style={fwd ? { transform: "scaleX(-1)", transformOrigin: "12px 12px" } : undefined}>10</text></svg>;
   /** 按下 → 拖动跳转；el 是用来算位置的那条（波形或进度条） */
   const scrub = (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0 || !dur) return;
@@ -161,9 +164,11 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
       <span style={{ left: lab(100) + "%" }}>低</span><span style={{ left: lab(1000) + "%" }}>中</span><span style={{ left: lab(8000) + "%" }}>高</span>
     </div>
     <div className="actl" onPointerDown={(e) => e.stopPropagation()}>
+      <button className="sk" data-act="back10" title="后退 10 秒" onPointerDown={(e) => { e.stopPropagation(); skip(-10); }}>{skipIcon(false)}</button>
       <button className="p" data-act="play" title={on ? "暂停" : "播放"} onPointerDown={(e) => { e.stopPropagation(); toggle(); }}>
         {on ? <svg viewBox="0 0 24 24" className="i apause" aria-hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg> : <Icon name="play" />}
       </button>
+      <button className="sk" data-act="fwd10" title="前进 10 秒" onPointerDown={(e) => { e.stopPropagation(); skip(10); }}>{skipIcon(true)}</button>
       <div className="atrack" data-atrack role="slider" aria-label="播放进度" aria-valuemin={0} aria-valuemax={Math.round(dur)} aria-valuenow={Math.round(t)} onPointerDown={scrub}>
         <span className="atrack-rail" /><span className="atrack-fill" style={{ width: frac * 100 + "%" }} /><span className="atrack-head" data-atrack-head style={{ left: frac * 100 + "%" }} />
       </div>
