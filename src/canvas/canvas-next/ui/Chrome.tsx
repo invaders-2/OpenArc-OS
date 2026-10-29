@@ -5,7 +5,7 @@
 import { shareMenu, SharePanels } from "./SharePanels";
 import { LibrarySection } from "./Library";
 import { ElementsSection } from "./Elements";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { clearOf, filterHistory, histNode, historyItems, histTime, usable, type HistFilter, type HistItem } from "../history";
 import { createPortal } from "react-dom";
 import type { CanvasComment, CanvasDoc, CanvasNode } from "../../react-canvas/reactCanvasStore";
@@ -131,7 +131,7 @@ function CanvasList({ ctl, close }: { ctl: Ctl; close: () => void }) {
 }
 function canvasSettings(ctl: Ctl) {
   const store = ctl.store;
-  openModal(() => <Settings ctl={ctl} />);
+  openModal(() => <Settings ctl={ctl} />, "cset");
   void store;
 }
 
@@ -189,28 +189,42 @@ function DownloadCanvas({ ctl, close }: { ctl: Ctl; close: () => void }) {
     </div>
   </div></>;
 }
+/**
+ * 画布设置：和系统设置同一套写法——小标题 + 分组卡片；每行左边是名称和一句说明，右边是胶囊分段控件或开关。
+ */
 function Settings({ ctl }: { ctl: Ctl }) {
   const ui = useS((s) => s.ui); const models = useS((s) => s.models); const doc = useS((s) => s.doc); const saving = useS((s) => s.saving); const version = useS((s) => s.version); const store = ctl.store;
-  const seg = <K extends string>(key: string, opts: ReadonlyArray<readonly [K, string]>, cur: K, pick: (k: K) => void) => <div className="seg" data-setting={key}>{opts.map(([k, l]) => <button key={k} data-v={k} className={cur === k ? "on" : ""} onClick={() => pick(k)}>{l}</button>)}</div>;
   const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* 忽略 */ } };
-  return <><ModalHead title="画布设置" icon="settings" /><div className="mbd settings">
-    <div className="sec"><span>外观</span></div>
-    {seg("theme", [["dark", "深色"], ["light", "浅色"], ["system", "跟随系统"]] as const, ui.themePref, (k) => { store.setUI({ themePref: k }); save("openarc-canvas-theme", k); applyTheme(store); })}
-    <div className="sec"><span>左键拖动空白处</span></div>
-    {seg("leftdrag", [["select", "框选（右键 / 中键 / 空格拖动平移）"], ["pan", "平移（Shift 拖动框选）"]] as const, ui.leftDrag, (k) => { store.setUI({ leftDrag: k }); save("openarc-canvas-leftdrag", k); })}
-    <div className="sec"><span>画布显示</span></div>
-    {seg("snap", [["on", "网格吸附"], ["off", "自由拖动"]] as const, ui.snap ? "on" : "off", (k) => store.setUI({ snap: k === "on" }))}
-    {seg("guides", [["on", "对齐参考线（按住 Alt 临时关闭）"], ["off", "不显示参考线"]] as const, ui.guides ? "on" : "off", (k) => store.setUI({ guides: k === "on" }))}
-    {seg("mini", [["auto", "小地图：缩小时出现"], ["on", "一直显示"], ["off", "隐藏"]] as const, ui.mini == null ? "auto" : ui.mini ? "on" : "off", (k) => store.setUI({ mini: k === "auto" ? null : k === "on" }))}
-    {seg("edges", [["show", "显示连线"], ["hide", "隐藏连线"]] as const, ui.hideEdges ? "hide" : "show", (k) => store.setUI({ hideEdges: k === "hide" }))}
-    <div className="sec"><span>批量生成结果（2× / 4×）的保存方式</span></div>
-    {seg("batch", [["stack", "堆叠在一个节点"], ["spread", "铺开成多个节点"]] as const, ui.batchMode, (k) => { store.setUI({ batchMode: k }); store.toast(k === "stack" ? "批量结果会堆叠，用 ‹ › 切换" : "批量结果会铺开成多个节点"); })}
-    <div className="sec"><span>新节点默认模型</span></div>
-    {(["image", "video", "text", "audio"] as GenKind[]).map((t) => <div key={t} className="row"><span>{TYPE_LABEL[t]}</span><span style={{ color: "var(--fg2)" }}>{store.defaultModel(t)?.name || "未配置"}</span></div>)}
-    <div className="sec"><span>这张画布</span></div>
-    <div className="row"><span>节点 / 连线</span><span className="tnum" style={{ color: "var(--fg2)" }}>{doc.nodes.length} / {doc.edges.length}</span></div>
-    <div className="row"><span>保存</span><span style={{ color: "var(--fg2)" }}>{saving === "saving" ? "保存中…" : saving === "error" ? "保存失败" : saving === "conflict" ? "版本冲突" : "自动保存"}{version != null ? ` · 版本 ${version}` : ""}</span></div>
-    <p style={{ color: "var(--fg3)", fontSize: 12, margin: "12px 0 0" }}>模型列表来自 设置 › 模型（共 {models.length} 个可用于画布）；比例、画质、参考图上限由模型能力表决定。外观和操作习惯保存在本机。</p>
+  const seg = <K extends string>(key: string, opts: ReadonlyArray<readonly [K, string]>, cur: K, pick: (k: K) => void) =>
+    <div className="cset-seg" role="radiogroup" data-setting={key}>{opts.map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={cur === k} data-v={k} className={cur === k ? "on" : ""} onClick={() => pick(k)}>{l}</button>)}</div>;
+  const sw = (key: string, on: boolean, label: string, set: (v: boolean) => void) =>
+    <button type="button" className="cset-sw" role="switch" aria-checked={on} aria-label={label} data-setting={key} onClick={() => set(!on)} />;
+  const row = (label: string, cap: ReactNode, control: ReactNode, key?: string) =>
+    <div className="cset-row" key={key}><div className="cset-lab"><span>{label}</span>{cap ? <small>{cap}</small> : null}</div>{control}</div>;
+  const val = (v: ReactNode, cls = "") => <span className={"cset-val" + (cls ? " " + cls : "")}>{v}</span>;
+  return <><ModalHead title="画布设置" icon="settings" /><div className="mbd cset-body">
+    <section className="cset-sec"><h3>外观</h3><div className="cset-group">
+      {row("主题", "深色适合长时间创作；跟随系统会随系统外观切换", seg("theme", [["dark", "深色"], ["light", "浅色"], ["system", "跟随系统"]] as const, ui.themePref, (k) => { store.setUI({ themePref: k }); save("openarc-canvas-theme", k); applyTheme(store); }))}
+    </div></section>
+    <section className="cset-sec"><h3>操作</h3><div className="cset-group">
+      {row("左键拖动空白处", ui.leftDrag === "select" ? "框选节点；右键、中键或按住空格拖动平移画布" : "平移画布；按住 Shift 拖动框选节点", seg("leftdrag", [["select", "框选"], ["pan", "平移"]] as const, ui.leftDrag, (k) => { store.setUI({ leftDrag: k }); save("openarc-canvas-leftdrag", k); }))}
+      {row("对齐参考线", "拖动节点时对齐其它节点的边和中线；按住 Alt 临时关闭", sw("guides", ui.guides, "对齐参考线", (v) => store.setUI({ guides: v })))}
+      {row("网格吸附", "拖动节点时吸附到 20px 网格", sw("snap", ui.snap, "网格吸附", (v) => store.setUI({ snap: v })))}
+    </div></section>
+    <section className="cset-sec"><h3>画布显示</h3><div className="cset-group">
+      {row("小地图", "自动：缩小画布时出现", seg("mini", [["auto", "自动"], ["on", "显示"], ["off", "隐藏"]] as const, ui.mini == null ? "auto" : ui.mini ? "on" : "off", (k) => store.setUI({ mini: k === "auto" ? null : k === "on" })))}
+      {row("显示连线", "关掉后画布更清爽，节点之间的输入关系不变", sw("edges", !ui.hideEdges, "显示连线", (v) => store.setUI({ hideEdges: !v })))}
+    </div></section>
+    <section className="cset-sec"><h3>生成</h3><div className="cset-group">
+      {row("批量结果（2× / 4×）", ui.batchMode === "stack" ? "堆叠在一个节点里，用 ‹ › 切换" : "铺开成多个节点", seg("batch", [["stack", "堆叠"], ["spread", "铺开"]] as const, ui.batchMode, (k) => { store.setUI({ batchMode: k }); store.toast(k === "stack" ? "批量结果会堆叠，用 ‹ › 切换" : "批量结果会铺开成多个节点"); }))}
+    </div></section>
+    <section className="cset-sec"><h3>新节点默认模型</h3><div className="cset-group">
+      {(["image", "video", "text", "audio"] as GenKind[]).map((t) => { const m = store.defaultModel(t); return row(TYPE_LABEL[t], null, val(m?.name || "未配置", m ? "" : "muted"), t); })}
+    </div><p className="cset-cap">模型来自 设置 › 模型与服务商（共 {models.length} 个可用于画布）；比例、画质、参考图上限由模型能力决定。</p></section>
+    <section className="cset-sec"><h3>这张画布</h3><div className="cset-group">
+      {row("节点 / 连线", null, val(<>{doc.nodes.length} / {doc.edges.length}</>, "tnum"))}
+      {row("保存", null, val(<>{saving === "saving" ? "保存中…" : saving === "error" ? "保存失败" : saving === "conflict" ? "版本冲突" : "自动保存"}{version != null ? ` · 版本 ${version}` : ""}</>))}
+    </div><p className="cset-cap">外观和操作习惯保存在这台设备上。</p></section>
   </div></>;
 }
 function connectAgentPop(ctl: Ctl, anchor: Element) {
