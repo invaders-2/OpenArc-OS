@@ -188,6 +188,9 @@ async function submitTask({ fetchImpl, apiKey, root, paths, body, headers, signa
   return last;
 }
 
+/** 任务轮询的最长间隔 */
+const POLL_MAX_MS = 5000;
+
 /** 提交后轮询任务，直到成功 / 失败 / 超时；返回 { ok, urls }。 */
 async function runTask({ fetchImpl, apiKey, baseUrl, path, paths = null, body, headers = null, kind, signal, timeoutMs, pollMs = 2000, onEvent, queryPath = "/v1/tasks/" }) {
   const root = rootOf(baseUrl);
@@ -199,8 +202,9 @@ async function runTask({ fetchImpl, apiKey, baseUrl, path, paths = null, body, h
   const taskId = taskIdOf(sub.data);
   if (!taskId) return { ok: false, error: "PROVIDER_PROTOCOL_ERROR", detail: "APIMart 没有返回任务 ID：" + JSON.stringify(sub.data).slice(0, 300) };
   const deadline = Date.now() + timeoutMs;
-  // 指数退避：首轮 2s 起，×1.6，封顶 12s（NOVAI 同口径）
-  let delay = Math.max(2000, Math.min(Number(pollMs) || 2000, 12000));
+  // 指数退避：首轮 2s 起，×1.6，封顶 5s。原来封顶 12s，任务做完后最多还要白等 12s 才发现；
+  // 5s 一次的查询量对服务商可以忽略，换来出片后几秒内就能拿到结果。
+  let delay = Math.max(2000, Math.min(Number(pollMs) || 2000, POLL_MAX_MS));
   await sleep(delay, signal);
   let misses = 0;
   while (Date.now() < deadline) {
@@ -208,7 +212,7 @@ async function runTask({ fetchImpl, apiKey, baseUrl, path, paths = null, body, h
     const q = await http(fetchImpl, root + queryPath + encodeURIComponent(taskId) + "?language=zh", { apiKey, signal, timeoutMs: 30000 });
     if (!q.ok) {
       if (q.error === "CANCELLED" || ++misses > 5) return { ...q, detail: (q.detail || "") + "（任务 " + taskId + "）" };
-      delay = Math.min(12000, Math.round(delay * 1.6));
+      delay = Math.min(POLL_MAX_MS, Math.round(delay * 1.6));
       await sleep(delay, signal); continue;
     }
     misses = 0;
@@ -225,7 +229,7 @@ async function runTask({ fetchImpl, apiKey, baseUrl, path, paths = null, body, h
     // 非失败且有结果 → 成功（有些上游不按标准状态集合回报）
     if (urls.length && (VIDEO_SUCCESS_STATUSES.includes(status) || !VIDEO_FAILURE_STATUSES.includes(status))) return { ok: true, urls, taskId, cost: node.cost };
     if (VIDEO_SUCCESS_STATUSES.includes(status)) return { ok: false, error: "PROVIDER_PROTOCOL_ERROR", detail: "任务完成但没有返回结果链接（" + taskId + "）" };
-    delay = Math.min(12000, Math.round(delay * 1.6));
+    delay = Math.min(POLL_MAX_MS, Math.round(delay * 1.6));
     await sleep(delay, signal);
   }
   return { ok: false, error: "PROVIDER_TIMEOUT", detail: "本地等待超时，远程任务 " + taskId + " 可能仍在处理，请勿重复提交" };

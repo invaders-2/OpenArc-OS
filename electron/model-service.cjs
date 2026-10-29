@@ -616,7 +616,7 @@ class ModelService {
     if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
     if (cred.providerOrigin !== new URL(snapshot.baseUrl).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
     const start = this.#now(); const rid = requestId || "vreq_" + crypto.randomBytes(8).toString("base64url");
-    // 视频轮询上限对齐 NOVAI：30 分钟（适配器内部按 1.6 倍退避、封顶 12s）
+    // 视频轮询上限对齐 NOVAI：30 分钟（APIMart 适配器按 1.6 倍退避、封顶 5s；Lovart 每 3s 一次）
     const out = await impl.generateVideo({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, prompt, inputs, params, signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 1800000) });
     if (!out || !out.ok) {
       await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "DENY", errorCode: (out && out.error) || domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });

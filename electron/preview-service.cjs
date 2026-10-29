@@ -127,7 +127,7 @@ class PreviewService {
     }
   }
 
-  mintCapability({ context, row, kind, action = authz.ACTION.PREVIEW, storageKey = null, mimeType = null, size = null }) {
+  mintCapability({ context, row, kind, action = authz.ACTION.PREVIEW, storageKey = null, mimeType = null, size = null, ttlMs = null }) {
     const capabilityId = "cap_" + crypto.randomBytes(18).toString("base64url");
     const nonce = crypto.randomBytes(12).toString("base64url");
     const issuedAt = this.#now();
@@ -146,7 +146,8 @@ class PreviewService {
       mimeType,
       size,
       issuedAt,
-      expiresAt: issuedAt + domain.PREVIEW_CAPABILITY_TTL_MS,
+      // 默认 60s（资源库预览）；画布播放器要反复 Range 读取，调用方可给更长的有效期（上限 12 小时）
+      expiresAt: issuedAt + (Number(ttlMs) > 0 ? Math.min(Number(ttlMs), 12 * 60 * 60 * 1000) : domain.PREVIEW_CAPABILITY_TTL_MS),
     };
     this.capabilities.set(capabilityId, capability);
     return { capability, url: SCHEME + "://preview/" + capabilityId };
@@ -278,7 +279,10 @@ class PreviewService {
       }
     }
     const rangeHeader = request.headers && typeof request.headers.get === "function" ? request.headers.get("range") : null;
-    const parsedRange = domain.parseRange(rangeHeader, size);
+    // 音视频是按流读盘（createReadStream），不必把单次响应截成 8MB；而且 Chromium 对自定义协议拿到
+    // 截短的 206 后不会再续请求，会把 8MB 之后当成文件结尾（拖到后半段直接播完）。
+    const media = cap.kind === domain.PREVIEW_KIND.VIDEO || cap.kind === domain.PREVIEW_KIND.AUDIO;
+    const parsedRange = domain.parseRange(rangeHeader, size, media ? { maxBytes: Number.MAX_SAFE_INTEGER } : undefined);
     if (!parsedRange.ok) return new Response("range not satisfiable", { status: 416, headers: { "Content-Range": "bytes */" + size } });
     const headers = { "Content-Type": mime, "Accept-Ranges": "bytes", "Cache-Control": "no-store" };
     let status = 200;

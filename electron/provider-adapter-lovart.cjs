@@ -601,12 +601,14 @@ async function watchThread({ baseUrl, credential, threadId, signal, fetchImpl, t
 }
 
 /** send：POST {prefix}/chat，返回 thread_id。 */
-async function sendTask({ baseUrl, credential, prompt, projectId, model = null, kind = null, mode = null, attachments = null, signal, fetchImpl, timeoutMs }) {
+async function sendTask({ baseUrl, credential, prompt, projectId, model = null, kind = null, mode = null, includeTools = null, attachments = null, signal, fetchImpl, timeoutMs }) {
   const body = { prompt: String(prompt == null ? "" : prompt), project_id: String(projectId) };
   if (attachments) body.attachments = attachments;
   if (mode) body.mode = String(mode);
   const category = categoryForKind(kind);
   if (model && category) body.tool_config = { prefer_tool_categories: { [category]: [String(model)] } };
+  // include_tools：官方 skill 的「强指令」（agent_skill.py send()）——让 Agent 直接调这个工具，少走规划/改写的弯路
+  if (Array.isArray(includeTools) && includeTools.length) body.tool_config = { ...(body.tool_config || {}), include_tools: includeTools.map(String) };
   const response = await request({ baseUrl, credential, method: "POST", path: ENDPOINTS.chat, body, signal, timeoutMs, fetchImpl });
   if (!response.ok) return response;
   const threadId = String((response.data && response.data.thread_id) || "");
@@ -665,7 +667,7 @@ function withVisualRequirements(prompt, params) {
  * 对话式接口没有独立字段，这是唯一能让面板选项真正生效的载体。
  */
 async function generateComplete({
-  baseUrl, apiKey, kind = "image", model = null, prompt = "", projectId = null, mode = null, attachments = null, params = {},
+  baseUrl, apiKey, kind = "image", model = null, prompt = "", projectId = null, mode = null, includeTools = null, attachments = null, params = {},
   signal = null, fetchImpl = fetch, timeoutMs = 300000, pollIntervalMs = 3000, maxPolls = 100, settleMs = 3000, onEvent = null,
 } = {}) {
   const credential = parseCredential(apiKey);
@@ -687,7 +689,7 @@ async function generateComplete({
     if (!pid) return { ok: false, error: modelDomain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: "lovart-project-missing-id" };
   }
 
-  const sent = await sendTask({ baseUrl, credential, prompt: visualPrompt, projectId: pid, model, kind, mode, attachments, signal, fetchImpl, timeoutMs: Math.min(60000, remaining()) });
+  const sent = await sendTask({ baseUrl, credential, prompt: visualPrompt, projectId: pid, model, kind, mode, includeTools, attachments, signal, fetchImpl, timeoutMs: Math.min(60000, remaining()) });
   if (!sent.ok) return { ...sent, projectId: pid };
   const threadId = sent.threadId;
   emit({ type: "progress", phase: "sent", threadId, projectId: pid });
@@ -942,7 +944,7 @@ async function generateImageWithInputs({ baseUrl, apiKey, model = null, prompt =
   return generateComplete({ baseUrl, apiKey, kind: "image", model, prompt: String(prompt || ""), attachments: att.attachments.length ? att.attachments : null, signal, fetchImpl, timeoutMs });
 }
 
-async function generateVideo({ baseUrl, apiKey, model = null, prompt = "", inputs = [], params = {}, signal = null, fetchImpl = fetch, timeoutMs = 600000 } = {}) {
+async function generateVideo({ baseUrl, apiKey, model = null, prompt = "", inputs = [], params = {}, signal = null, fetchImpl = fetch, timeoutMs = 600000, pollIntervalMs = 3000 } = {}) {
   const att = await toAttachments({ baseUrl, apiKey, inputs, signal, fetchImpl });
   if (!att.ok) return att;
   const attachments = att.attachments;
@@ -958,10 +960,14 @@ async function generateVideo({ baseUrl, apiKey, model = null, prompt = "", input
   if (p.generateAudio === true) hints.push("同时生成声音");
   if (p.multiShot) hints.push("多镜头");
   const base = String(prompt || "");
+  // 视频动辄 3～10 分钟：轮询次数按总时长放开（默认 100 次 × 3s ≈ 5 分钟，到点会把已扣费的任务判成超时）；
+  // 推理模式明确用 fast（官方默认，单轮轻量），并把所选模型作为 include_tools 强指令，减少 Agent 的规划开销。
   return generateComplete({
     baseUrl, apiKey, kind: "video", model,
     prompt: hints.length ? base + "\n\n【生成要求】" + hints.join("；") + "。" : base,
+    mode: "fast", includeTools: model ? [String(model)] : null,
     attachments: attachments.length ? attachments : null, signal, fetchImpl, timeoutMs,
+    pollIntervalMs, maxPolls: Math.ceil(Math.max(60000, Number(timeoutMs) || 600000) / pollIntervalMs) + 5,
   });
 }
 

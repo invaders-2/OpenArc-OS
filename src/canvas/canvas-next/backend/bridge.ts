@@ -214,9 +214,23 @@ export function createBridgeBackend(): CanvasBackend {
     const data = await toDataUrl(ref);
     return data.length * .75 <= FALLBACK_MAX ? data : compressImage(data);
   }
+  /** data URL 存进资源库换成 openarc-asset 引用；其余原样（存不进就保留原值，由主进程按值处理） */
+  async function localRef(canvasId: string, src: string): Promise<string> {
+    if (!src.startsWith("data:")) return src;
+    const cmd = canvasCmd(); if (!cmd) return src;
+    const r = await cmd({ type: "canvas/importAsset", canvasId, name: "image-input", dataUrl: src }).catch(() => null);
+    return r && r.ok && r.ref ? String(r.ref) : src;
+  }
   /** 请求里所有素材输入换成链接 */
   async function linkInputs(req: GenRequest): Promise<GenRequest> {
-    const inputs = await Promise.all(req.inputs.map(async (x) => (x.url && x.kind !== "text" ? { ...x, url: await modelUrl(req.canvasId, x.url, x.kind as "image" | "video" | "audio") } : x)));
+    const media = req.kind === "video" || req.kind === "audio";
+    const inputs = await Promise.all(req.inputs.map(async (x) => {
+      if (!x.url || x.kind === "text") return x;
+      // 视频 / 音频生成里的参考图：主进程按资源引用自己读字节、交给服务商自家上传（APIMart / Lovart），
+      // 这里先传临时图床纯属白等（最长 15s，还要上传授权）。只把未入库的 data URL 存成资源引用。
+      if (media && x.kind === "image") return { ...x, url: await localRef(req.canvasId, x.url) };
+      return { ...x, url: await modelUrl(req.canvasId, x.url, x.kind as "image" | "video" | "audio") };
+    }));
     return { ...req, inputs };
   }
 
@@ -693,6 +707,11 @@ export function createBridgeBackend(): CanvasBackend {
       const cmd = canvasCmd(); if (!cmd || !dataUrl.startsWith("data:")) return dataUrl;
       const res = await cmd({ type: "canvas/importAsset", canvasId, name, dataUrl }).catch(() => null);
       return res && res.ok && res.ref ? String(res.ref) : dataUrl;
+    },
+    async mediaUrl(ref) {
+      const cmd = canvasCmd(); if (!cmd || !ref.startsWith("openarc-asset:")) return null;
+      const res = await cmd({ type: "canvas/assetMediaUrl", ref }).catch(() => null);
+      return res && res.ok && typeof res.url === "string" ? { url: String(res.url), expiresAt: Number(res.expiresAt) || Date.now() + 3600_000 } : null;
     },
     async resolveAsset(ref) {
       const cmd = canvasCmd(); if (!cmd) return null;

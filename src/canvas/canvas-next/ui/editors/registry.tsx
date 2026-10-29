@@ -261,9 +261,15 @@ async function split(ctl: Ctl, id: string, k: number) {
 async function grabVideoFrame(store: CanvasStore, n: CanvasNode, at: "current" | "first" | "last"): Promise<string> {
   const o = outOf(n);
   if (!o) return "";
+  // 「当前帧」= 节点里正在播放/暂停的那一帧；流式地址（openarc-resource）画到 canvas 会被标记为跨源、导不出，
+  // 这时改用数据地址的隐藏 video 跳到同一时间点再取
+  let nowAt = -1;
   if (at === "current") {
     const vid = document.querySelector(`.node[data-id="${n.id}"] video`) as HTMLVideoElement | null;
-    if (vid && vid.videoWidth) { const c = cv(vid.videoWidth, vid.videoHeight); c.getContext("2d")!.drawImage(vid, 0, 0); return c.toDataURL("image/jpeg", .92); }
+    if (vid && vid.videoWidth) {
+      try { const c = cv(vid.videoWidth, vid.videoHeight); c.getContext("2d")!.drawImage(vid, 0, 0); return c.toDataURL("image/jpeg", .92); }
+      catch { nowAt = vid.currentTime || 0; }
+    }
   }
   const src = o.url ? await srcData(store, o.url) : "";
   if (!src) return o.frame ? await srcData(store, o.frame) : "";
@@ -278,7 +284,7 @@ async function grabVideoFrame(store: CanvasStore, n: CanvasNode, at: "current" |
   const duration = Number(v.duration) || 0;
   // 设了「使用区间」就按区间取首/尾帧（截帧跟着区间走）
   const trim = o.trim ? clampTrim(o.dur, o.trim) : null;
-  v.currentTime = at === "first"
+  v.currentTime = nowAt >= 0 ? Math.min(nowAt, Math.max(0, duration - 0.05)) : at === "first"
     ? (trim ? trim.in : Math.min(0.05, Math.max(0, duration / 2)))
     : (trim ? Math.min(trim.out, duration || trim.out) : Math.max(0, duration - 0.05));
   await new Promise<void>((resolve) => { v.onseeked = () => resolve(); setTimeout(resolve, 3000); });
@@ -292,7 +298,11 @@ async function frameNode(store: CanvasStore, n: CanvasNode, at: "current" | "fir
   const data = await grabVideoFrame(store, n, at);
   if (!data) { store.toast("还没有可截取的画面：先等视频生成完成"); return null; }
   const url = data.startsWith("data:") ? await store.backend.importAsset(store.state.canvasId, data, genOf(n).title + " · " + label) : data;
-  const made = store.newNode("image", n.x + n.w + 60, n.y, { title: genOf(n).title + " · " + label, hist: [{ url }] });
+  // 图片节点按帧的真实比例摆放（宽度跟视频节点一致），避免 16:9 的帧被裁成方块
+  const im = data.startsWith("data:") ? await loadImg(data).catch(() => null) : null;
+  const fw = im?.naturalWidth || 0, fh = im?.naturalHeight || 0;
+  const size = fw && fh ? { w: n.w, h: Math.round((n.w * fh) / fw), } : {};
+  const made = store.newNode("image", n.x + n.w + 60, n.y, { title: genOf(n).title + " · " + label, hist: [{ url, ...(fw && fh ? { w: fw, h: fh } : {}) }], ...size });
   store.addNodes([made], opts.link === false ? [] : [{ id: uid("e"), from: n.id, to: made.id }], { select: true });
   return made;
 }
@@ -308,7 +318,7 @@ async function frameThen(ctl: Ctl, n: CanvasNode, editor: "crop" | "erase") {
 }
 
 async function captureFrame(store: CanvasStore, n: CanvasNode, at: "current" | "first" | "last" = "current") {
-  const label = at === "first" ? "首帧" : at === "last" ? "尾帧" : "截帧";
+  const label = at === "first" ? "首帧" : at === "last" ? "尾帧" : "当前帧";
   const made = await frameNode(store, n, at, label);
   if (made) store.toast(`已截取${label}，作为新的图片节点`);
 }

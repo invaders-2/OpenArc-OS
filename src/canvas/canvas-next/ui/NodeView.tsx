@@ -13,6 +13,7 @@ import { TableNodeBody } from "./TableNode";
 import { StackBody } from "./StackNode";
 import { isStack } from "../stack";
 import { useAssetUrl } from "./useAsset";
+import { useMediaUrl } from "./useMedia";
 import { useCtl } from "./ctx";
 import type { GenData } from "../model";
 import { retryBlockedReason } from "../errorText";
@@ -158,45 +159,98 @@ function Loading({ src }: { src?: string }) {
   );
 }
 
-/** 视频节点卡片：左下角时长（播放时跟着走当前时间）+ 右下角分辨率角标 + 底部「使用区间」裁剪条 */
+/** 视频节点卡片：左下角时长 + 右下角分辨率角标 + 底部「使用区间」裁剪条；播放时换成自绘控制条（播放 / 时间 / 可拖进度 / 静音） */
 function VideoBody({ node, out, res }: { node: CanvasNode; out: GenOutput; res?: string }) {
   const ctl = useCtl(); const store = ctl.store;
-  const frame = useAssetUrl(out.frame || ""); const url = useAssetUrl(out.url || "");
-  const [playing, setPlaying] = useState(false); const [now, setNow] = useState<number | null>(null);
+  const frame = useAssetUrl(out.frame || ""); const media = useMediaUrl(out.url || ""); const url = media.url;
+  const [playing, setPlaying] = useState(false); const [paused, setPaused] = useState(false); const [muted, setMuted] = useState(false);
+  const [now, setNow] = useState<number | null>(null); const [total, setTotal] = useState(0);
   const vref = useRef<HTMLVideoElement>(null);
   const resText = res ? videoResLabel(res) : "";
   // 没设过区间也要显示（整段），拖过之后按版本存；dur 未知时按 10s 兜底
   const trim = clampTrim(out.dur, out.trim);
   const showTrim = !!(out.trim || out.dur);
+  const length = total > 0 ? total : Number(out.dur) > 0 ? Number(out.dur) : 0;
   /** 循环在「使用区间」里：播到 out 就跳回 in；第一帧从 in 开始 */
-  const seekTo = (el: HTMLVideoElement | null, t: number) => { if (el && Number.isFinite(t)) el.currentTime = t; };
+  const seekTo = (el: HTMLVideoElement | null, t: number) => { if (el && Number.isFinite(t)) el.currentTime = Math.max(0, t); };
   const onTick = (el: HTMLVideoElement) => {
-    setNow(el.currentTime);
     if (!trim) return;
     if (el.currentTime >= trim.out - 0.02 || el.currentTime < trim.in - 0.12) seekTo(el, trim.in);
   };
+  // 进入播放：显式 play()（autoPlay 在节点重挂载时不一定触发）；有声被拦就静音再试
+  useEffect(() => {
+    if (!playing) return; const v = vref.current; if (!v) return;
+    if (trim && v.currentTime < trim.in) seekTo(v, trim.in);
+    setPaused(false);
+    v.play().catch(() => { v.muted = true; setMuted(true); return v.play().catch(() => setPaused(true)); });
+    // 进度用 rAF 刷，比 timeupdate（约 4 次/秒）顺滑
+    let raf = 0; const loop = () => { const el = vref.current; if (el) { setNow(el.currentTime); onTick(el); } raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, url]);
+  // 服务商不一定按所选时长出片：拿到真实时长后写回当前版本（没手动设过区间时），时长角标和使用区间都按真的来
+  const learnDur = (el: HTMLVideoElement) => {
+    const d = el.duration; if (!Number.isFinite(d) || d <= 0) return;
+    setTotal(d);
+    if (out.trim || Math.abs((Number(out.dur) || 0) - d) < 0.5) return;
+    const real = Math.round(d * 100) / 100;
+    store.patchGen(node.id, (g) => ({ hist: g.hist.map((h, i) => (i === g.hi && h.url === out.url ? { ...h, dur: real } : h)) }));
+  };
+  const toggle = () => { const v = vref.current; if (!v) return; if (v.paused) { void v.play().catch(() => undefined); } else v.pause(); };
   const saveTrim = (next: { in: number; out: number }) => {
     const t = clampTrim(out.dur, next);
     store.patchGen(node.id, (g) => ({ hist: g.hist.map((h, i) => (i === g.hi ? { ...h, trim: t } : h)) }));
   };
   const chips = <>
-    <span className="vdur tnum" data-vdur>{formatClock(now != null ? now : out.dur)}</span>
+    <span className="vdur tnum" data-vdur>{formatClock(out.dur)}</span>
     {resText && resText !== "自适应" ? <span className="vres tnum" data-vres>{resText}</span> : null}
   </>;
   if (playing && url) return <>
-    <video ref={vref} src={url} autoPlay controls onEnded={() => { setPlaying(false); setNow(null); }}
-      onPlay={(e) => { if (trim && e.currentTarget.currentTime < trim.in - 0.05) seekTo(e.currentTarget, trim.in); }}
-      onTimeUpdate={(e) => onTick(e.currentTarget)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-    {chips}
+    <video ref={vref} src={url} playsInline muted={muted} preload="auto"
+      onLoadedMetadata={(e) => learnDur(e.currentTarget)}
+      onPlay={() => setPaused(false)} onPause={() => setPaused(true)}
+      onEnded={() => { setPlaying(false); setNow(null); }}
+      onError={() => media.onError()}
+      onClick={(e) => { e.stopPropagation(); toggle(); }}
+      style={{ width: "100%", height: "100%", objectFit: "cover" }} />
     {showTrim ? <TrimBar trim={trim} dur={out.dur} playing onSeek={(t) => seekTo(vref.current, t)} onTrim={saveTrim} /> : null}
+    <VideoControls now={now || 0} length={length} paused={paused} muted={muted}
+      onToggle={toggle} onMute={() => { const v = vref.current; const m = !muted; if (v) v.muted = m; setMuted(m); }}
+      onSeek={(t) => { seekTo(vref.current, t); setNow(t); }} onClose={() => { vref.current?.pause(); setPlaying(false); setNow(null); }}
+      onFrame={() => { vref.current?.pause(); window.dispatchEvent(new CustomEvent("cn:editor", { detail: { kind: "frame", id: node.id } })); }} />
   </>;
   return <>
-    {frame ? <img src={frame} alt="" draggable={false} /> : url ? <video src={url} muted preload="metadata" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+    {frame ? <img src={frame} alt="" draggable={false} /> : url ? <video src={url} muted preload="metadata" onLoadedMetadata={(e) => learnDur(e.currentTarget)} onError={() => media.onError()} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
     <button className="play" data-act="play" onPointerDown={(e) => { e.stopPropagation(); if (url) setPlaying(true); }}><Icon name="play" /></button>
     {chips}
     {showTrim ? <TrimBar trim={trim} dur={out.dur} onSeek={() => undefined} onTrim={saveTrim} /> : null}
-    <i className="vprog" />
   </>;
+}
+
+/** 播放控制条：播放/暂停 · 当前/总时长 · 可点可拖的进度条 · 静音 · 收起 */
+function VideoControls({ now, length, paused, muted, onToggle, onMute, onSeek, onClose, onFrame }: { now: number; length: number; paused: boolean; muted: boolean; onToggle: () => void; onMute: () => void; onSeek: (t: number) => void; onClose: () => void; onFrame: () => void }) {
+  const track = useRef<HTMLDivElement>(null);
+  const frac = length > 0 ? Math.max(0, Math.min(1, now / length)) : 0;
+  const scrub = (e: React.PointerEvent) => {
+    e.stopPropagation(); e.preventDefault(); const box = track.current; if (!box || !(length > 0)) return;
+    const at = (x: number) => { const r = box.getBoundingClientRect(); return Math.max(0, Math.min(1, (x - r.left) / Math.max(1, r.width))) * length; };
+    onSeek(at(e.clientX));
+    const move = (ev: PointerEvent) => onSeek(at(ev.clientX));
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  };
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  return <div className="vctl" data-vctl onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
+    <button className="vctl-b" data-act={paused ? "resume" : "pause"} title={paused ? "播放" : "暂停"} onClick={onToggle}><Icon name={paused ? "play" : "pause"} size="s" /></button>
+    <span className="vctl-t tnum" data-vtime>{formatClock(now)} / {formatClock(length)}</span>
+    <div className="vctl-track" data-vtrack data-frac={frac.toFixed(3)} ref={track} onPointerDown={scrub}>
+      <span className="vctl-rail" /><span className="vctl-fill" style={{ width: frac * 100 + "%" }} /><span className="vctl-knob" style={{ left: frac * 100 + "%" }} />
+    </div>
+    <button className="vctl-b" data-act="vframe" title="导出当前帧（生成图片节点）" onClick={onFrame}><Icon name="camera" size="s" /></button>
+    <button className="vctl-b" data-act="mute" title={muted ? "取消静音" : "静音"} onClick={onMute}><Icon name={muted ? "mute" : "volume"} size="s" /></button>
+    <button className="vctl-b" data-act="stop" title="停止播放" onClick={onClose}><Icon name="x" size="s" /></button>
+  </div>;
 }
 
 /** 节点底部的「使用区间」条：两个手柄 + 区间/总时长文本；拖动时实时写回当前版本 */
@@ -228,12 +282,12 @@ function TrimBar({ trim, dur, playing, onSeek, onTrim }: { trim: VideoTrim; dur?
 }
 
 function AudioBody({ out }: { out: GenOutput }) {
-  const url = useAssetUrl(out.url || ""); const aref = useRef<HTMLAudioElement>(null);
+  const media = useMediaUrl(out.url || ""); const url = media.url; const aref = useRef<HTMLAudioElement>(null);
   const [t, setT] = useState(0); const [on, setOn] = useState(false);
   const bars = out.bars && out.bars.length ? out.bars : Array.from({ length: 48 }, (_, i) => .2 + Math.abs(Math.sin(i * .5)) * .6);
   const dur = out.dur || 0; const frac = dur ? t / dur : 0;
   return <>
-    {url ? <audio ref={aref} src={url} onTimeUpdate={(e) => setT((e.target as HTMLAudioElement).currentTime)} onEnded={() => { setOn(false); setT(0); }} /> : null}
+    {url ? <audio ref={aref} src={url} onError={() => media.onError()} onTimeUpdate={(e) => setT((e.target as HTMLAudioElement).currentTime)} onEnded={() => { setOn(false); setT(0); }} /> : null}
     <div className="wave">{bars.map((b, i) => <i key={i} className={on && i / bars.length <= frac ? "on" : ""} style={{ height: Math.round(b * 70) + "%" }} />)}</div>
     <div className="actl"><button className="p" data-act="play" onPointerDown={(e) => { e.stopPropagation(); const a = aref.current; if (!a) { setOn(true); let i = 0; const tm = setInterval(() => { i += .25; setT(i); if (i >= dur) { clearInterval(tm); setOn(false); setT(0); } }, 250); return; } if (a.paused) { void a.play(); setOn(true); } else { a.pause(); setOn(false); } }}><Icon name="play" /></button><span className="tnum" style={{ fontSize: 11, color: "var(--fg2)" }}>0:{String(Math.round(dur)).padStart(2, "0")}</span></div>
   </>;

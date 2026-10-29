@@ -65,6 +65,8 @@ const RENDERER_COMMANDS = extendRendererCommands([
   "canvas/model3d",
   "canvas/importAsset",
   "canvas/readAsset",
+  // 10-29：视频 / 音频播放走流式地址（openarc-resource，支持 Range），不再整段转 base64
+  "canvas/assetMediaUrl",
   // 10-23：新画布发给模型的素材一律换成 https 临时链接（Litterbox 24h），不再塞 base64
   "canvas/assetPublicUrl",
   // 10-23：模型返回的远程结果（https）由主进程下载进资源库（画布页 CSP 不显示外链，且结果链接会过期）
@@ -467,6 +469,8 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           return service.importAsset({ context, canvasId: asStr(payload.canvasId, 120), name: asStr(payload.name, 120), dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl.slice(0, 280 * 1024 * 1024) : "" });
         case "canvas/readAsset":
           return service.readAsset({ context, ref: asStr(payload.ref, 200) });
+        case "canvas/assetMediaUrl":
+          return typeof service.assetMediaUrl === "function" ? service.assetMediaUrl({ context, ref: asStr(payload.ref, 200) }) : { ok: false, error: "USE_READ_ASSET" };
         case "canvas/assetPublicUrl":
           if (typeof assetPublicUrl !== "function") return { ok: false, error: "DEPENDENCY_UNAVAILABLE", detail: "asset-public-url-not-ready" };
           return await assetPublicUrl({ context, canvasId: asStr(payload.canvasId, 120), ref: asStr(payload.ref, 200), dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl : null });
