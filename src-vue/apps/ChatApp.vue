@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Film, PanelRight, Pencil, Pin, PinOff, Play, Trash2, FolderOpen, RotateCcw, ShieldQuestion, Sparkles, SquarePen, Wrench } from "lucide-vue-next";
+import { Brain, CalendarClock, Check, ChevronRight, Circle, CircleAlert, CircleDot, Copy, FileText, Globe, Image as ImageIcon, Layers, ListChecks, Monitor, MoreHorizontal, Film, PanelRight, Pencil, Pin, PinOff, Play, Trash2, FolderOpen, RotateCcw, ShieldQuestion, Sparkles, SquarePen, Wrench } from "lucide-vue-next";
 import ResourcePicker from "./ResourcePicker.vue";
 import PreviewPanel from "./chat/PreviewPanel.vue";
 import Composer from "./chat/Composer.vue";
+import AutomationsPanel from "./chat/AutomationsPanel.vue";
 import { buildGoal, goalTitle, parseGoal } from "./chat/goal";
 import type { ChatFile, SendPayload } from "./chat/types";
 import { sizeText } from "./chat/preview";
@@ -44,6 +45,24 @@ const error = ref("");
 const scroller = ref<HTMLElement | null>(null);
 const panelOpen = ref(true);
 const listQuery = ref("");
+/** 主区显示什么：对话，或「自动化」（侧栏顶部入口）。 */
+const mode = ref<"chat" | "automations">("chat");
+/** 自动化开出来的对话：taskId → 自动化名（列表里加时钟标记）。 */
+const autoTasks = ref<Record<string, string>>({});
+const autoCount = ref(0);
+function onAutoChanged(map: Record<string, string>, count: number) { autoTasks.value = map; autoCount.value = count; }
+const automationBridge = (window as any).openarc?.automation;
+/** 开着对话时也要知道哪些对话来自自动化（不打开自动化页也能显示标记）。 */
+async function loadAutoMap() {
+  const r = await automationBridge?.command?.({ command: "automation/list", payload: {} }).catch(() => null);
+  if (!r?.ok) return;
+  const list = ((r.value || r).automations || []).filter((a: any) => a?.action?.type === "chat_task");
+  const map: Record<string, string> = {};
+  for (const a of list) for (const run of a.runs || []) { try { const id = JSON.parse(run.result || "null")?.output?.taskId; if (typeof id === "string") map[id] = a.title; } catch { /* 跳过坏记录 */ } }
+  onAutoChanged(map, list.filter((a: any) => a.enabled).length);
+}
+let offAuto: (() => void) | null = null;
+function openAutomations() { mode.value = "automations"; sessionMenu.value = null; }
 const resourcePickerOpen = ref(false);
 const openTurns = ref<Set<string>>(new Set());
 function toggleTurn(key: string) { const next = new Set(openTurns.value); if (next.has(key)) next.delete(key); else next.add(key); openTurns.value = next; }
@@ -661,7 +680,7 @@ function thoughtOf(turn: Turn): { text: string; ms: number; live: boolean } | nu
 /** 思考中默认展开，想完自动收起；用户点过就按用户的来。 */
 const thoughtOpen = (turn: Turn) => { const t = thoughtOf(turn); const flipped = openThoughts.value.has(turn.key); return t?.live ? !flipped : flipped; };
 const liveFor = (turn: Turn) => (turn.pending && live.value && live.value.taskId === currentId.value ? live.value : null);
-function select(id: string | null) { currentId.value = id; detail.value = null; error.value = ""; live.value = null; if (id) void loadDetail(id); }
+function select(id: string | null) { mode.value = "chat"; currentId.value = id; detail.value = null; error.value = ""; live.value = null; if (id) void loadDetail(id); }
 function newSession() { select(null); draft.value = ""; error.value = ""; modelError.value = ""; composer.value?.reset(); }
 const composer = ref<InstanceType<typeof Composer> | null>(null);
 function send(p: SendPayload) {
@@ -714,11 +733,13 @@ onMounted(async () => {
     return;
   }
   document.addEventListener("mousedown", onDocDown);
-  await Promise.all([loadList(), loadModels(), loadApprovals(), loadPrefs(), loadVoice()]);
+  await Promise.all([loadList(), loadModels(), loadApprovals(), loadPrefs(), loadVoice(), loadAutoMap()]);
+  offAuto = automationBridge?.onEvent?.((ev: any) => { const p = ev?.payload || ev; if (p && p.runId && !p.command && (p.phase === "completed" || p.phase === "failed")) { void loadAutoMap(); void loadList(); } }) ?? null;
   off = taskBridge?.onEvent((ev: any) => {
     if (!ev) return;
-    if (ev.type === "task/result") { void loadList(); void loadApprovals(); if (ev.taskId === currentId.value) { keepThought(); live.value = null; void loadDetail(); } }
+    if (ev.type === "task/result") { void loadList(); void loadApprovals(); if (autoTasks.value[ev.taskId] !== undefined || !prefs.value.titles[ev.taskId]) void loadPrefs(); if (ev.taskId === currentId.value) { keepThought(); live.value = null; void loadDetail(); } }
     else if (ev.type === "task/progress") onProgress(ev);
+    else if (ev.type === "task/created") { void loadList(); void loadPrefs(); void loadAutoMap(); }
     else if (ev.type === "task/event" && ev.taskId === currentId.value) mergeEvents(ev.events);
   }) ?? null;
   offApproval = sideEffectBridge?.onEvent?.((ev: any) => { if (ev?.type === "sideEffect/approvalRequested") { if (ev.request) approvals.value = [ev.request, ...approvals.value.filter((a) => a.approvalRequestId !== ev.request.approvalRequestId)]; else void loadApprovals(); } }) ?? null;
@@ -728,7 +749,7 @@ onMounted(async () => {
 const shellStore = useShellStore();
 watch(() => shellStore.taskFocus, (id) => { if (!id) return; if (id !== currentId.value) select(id); shellStore.taskFocus = null; void loadList(); }, { immediate: true });
 watch(currentId, (id) => { shellStore.viewingTaskId = id; }, { immediate: true });
-onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); window.clearTimeout(undoTimer); if (recorder && recorder.state !== "inactive") recorder.stop(); recStream?.getTracks().forEach((t) => t.stop()); off?.(); offApproval?.(); window.clearInterval(poll); shellStore.viewingTaskId = null; });
+onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); window.clearTimeout(undoTimer); if (recorder && recorder.state !== "inactive") recorder.stop(); recStream?.getTracks().forEach((t) => t.stop()); off?.(); offApproval?.(); offAuto?.(); window.clearInterval(poll); shellStore.viewingTaskId = null; });
 </script>
 
 <template>
@@ -739,15 +760,18 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
         <label class="ds-search chat-search"><input v-model="listQuery" class="ds-search__input" type="search" placeholder="搜索对话" aria-label="搜索对话" /></label>
         <button type="button" class="chat-icon-btn" data-chat-new title="新对话" aria-label="新对话" @click="newSession"><SquarePen :size="16" /></button>
       </div>
+      <button type="button" class="chat-nav" data-chat-nav-automations :aria-current="mode === 'automations' ? 'page' : undefined" @click="openAutomations">
+        <CalendarClock :size="15" /><span>自动化</span><small v-if="autoCount" data-chat-nav-count>{{ autoCount }}</small>
+      </button>
       <div class="chat-sessions" data-chat-sessions>
         <template v-for="g in sessionGroups" :key="g.label">
           <div class="split-section">{{ g.label }}</div>
-          <div v-for="t in g.items" :key="t.taskId" class="chat-session-row" :aria-current="currentId === t.taskId ? 'true' : undefined">
+          <div v-for="t in g.items" :key="t.taskId" class="chat-session-row" :aria-current="mode === 'chat' && currentId === t.taskId ? 'true' : undefined">
             <form v-if="renaming && renaming.id === t.taskId" class="chat-session chat-session-edit" @submit.prevent="commitRename">
               <input v-model="renaming.value" data-chat-rename-input maxlength="80" aria-label="对话名称" @keydown.esc.prevent="renaming = null" @blur="commitRename" />
             </form>
-            <button v-else type="button" class="chat-session" :data-chat-session="t.taskId" :aria-current="currentId === t.taskId ? 'true' : undefined" @click="select(t.taskId)" @dblclick="startRename(t.taskId)" @contextmenu="openSessionMenu($event, t)">
-              <span class="chat-session-name"><Pin v-if="prefs.pinned.includes(t.taskId)" :size="11" class="chat-session-pin" />{{ titleOf(t) }}</span>
+            <button v-else type="button" class="chat-session" :data-chat-session="t.taskId" :aria-current="mode === 'chat' && currentId === t.taskId ? 'true' : undefined" @click="select(t.taskId)" @dblclick="startRename(t.taskId)" @contextmenu="openSessionMenu($event, t)">
+              <span class="chat-session-name"><Pin v-if="prefs.pinned.includes(t.taskId)" :size="11" class="chat-session-pin" /><CalendarClock v-if="autoTasks[t.taskId]" :size="11" class="chat-session-pin" :data-chat-session-auto="t.taskId" :aria-label="'来自自动化：' + autoTasks[t.taskId]" />{{ titleOf(t) }}</span>
               <small><span v-if="running(t.status)" class="chat-live" aria-hidden="true" />{{ STATUS[t.status] ?? t.status }} · {{ when(t.updatedAt) }}</small>
             </button>
             <button v-if="!renaming || renaming.id !== t.taskId" type="button" class="chat-session-more" :data-chat-session-more="t.taskId" title="更多" aria-label="对话操作" @click="openSessionMenu($event, t)"><MoreHorizontal :size="14" /></button>
@@ -767,7 +791,10 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
       </div>
     </nav>
 
-    <div class="split-main chat-main">
+    <div v-if="mode === 'automations'" class="split-main chat-main">
+      <AutomationsPanel :tasks="tasks" :models="models" :default-model-id="defaultModelId" @open="select" @changed="onAutoChanged" />
+    </div>
+    <div class="split-main chat-main" :class="{ 'chat-main-hidden': mode !== 'chat' }">
       <div class="pane-toolbar chat-toolbar">
         <strong class="pane-title chat-title">{{ detail ? titleOf(detail.task) : "新对话" }}</strong>
         <span v-if="detail" class="chat-status" data-chat-status :data-tone="statusTone(detail.task.status)">{{ STATUS[detail.task.status] ?? detail.task.status }}</span>
@@ -990,6 +1017,11 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 .chat-live-tool { display: flex; align-items: center; gap: 5px; margin: 0 0 4px; font-size: var(--fs-caption); color: var(--muted); }
 .chat-md-live { opacity: 0.92; }
 .chat-side-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.chat-nav { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; margin-bottom: 6px; border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-secondary); text-align: left; }
+.chat-nav:hover { background: rgb(var(--text-rgb) / 0.05); }
+.chat-nav[aria-current="page"] { background: rgb(var(--sidebar-selected-rgb, 224 224 224)); font-weight: var(--fw-medium); }
+.chat-nav span { flex: 1; }
+.chat-nav small { min-width: 18px; padding: 0 5px; border-radius: 9px; background: rgb(var(--text-rgb) / 0.08); color: var(--muted); font-size: var(--fs-micro, 11px); text-align: center; }
 .chat-search { flex: 1; min-width: 0; }
 .chat-icon-btn { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-md); color: var(--muted); }
 .chat-icon-btn:hover, .chat-icon-btn[aria-pressed="true"] { background: rgb(var(--text-rgb) / 0.07); color: var(--text); }
@@ -1088,6 +1120,8 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 
 /* ── 原型对照（task-7）：两栏 / 右对齐实心气泡 / 助理圆球 / 输入区 chips ─── */
 .chat-app .chat-main { margin: 0; }
+/* 切到「自动化」时对话区只是藏起来（输入中的草稿、滚动位置都保留） */
+.chat-app .chat-main.chat-main-hidden { display: none !important; }
 .chat-app .split-main { padding: 0; padding-top: 0 !important; }
 .chat-app .chat-side { flex: 0 0 240px; width: 240px; margin-right: 0; padding-top: 44px; }
 .chat-app .pane-toolbar { height: 52px; margin: 0; padding: 0 20px; flex: none; }

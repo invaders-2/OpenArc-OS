@@ -71,7 +71,14 @@ const AUTOMATION_ERROR_CODES = Object.freeze([
 /** 源 automations.ts:16-18 的动作集合。workflow_sequence 是唯一的组合动作。 */
 const SERVER_ACTIONS = Object.freeze(["ziniao_download", "lingxing_cache_sync", "ziniao_data_sync", "dingtalk_group_notify", "dingtalk_person_notify", "workflow_sequence", "app_action"]);
 const SERVER_ATOMIC_ACTIONS = Object.freeze(["ziniao_download", "lingxing_cache_sync", "ziniao_data_sync", "dingtalk_group_notify", "dingtalk_person_notify", "app_action"]);
-const ALL_ACTIONS = Object.freeze(["music_play", "music_control", "open_app", "agent_instruction", ...SERVER_ACTIONS]);
+/**
+ * chat_task：让全局 AI（对话里的那个 agent）新开一段对话执行一条提示词。
+ * 不算"服务端集成动作"：它走对话任务自己的权限 / 审批（写文件、执行命令照样要用户确认），不需要定义授权闸门。
+ */
+const CHAT_TASK_ACTION = "chat_task";
+/** 对话自动化最短间隔：避免每分钟开一段新对话把列表和额度刷爆。 */
+const CHAT_TASK_MIN_INTERVAL_MS = 5 * 60000;
+const ALL_ACTIONS = Object.freeze(["music_play", "music_control", "open_app", "agent_instruction", CHAT_TASK_ACTION, ...SERVER_ACTIONS]);
 
 const ALL_ACTION_SET = new Set(ALL_ACTIONS);
 const SERVER_ACTION_SET = new Set(SERVER_ACTIONS);
@@ -518,6 +525,15 @@ function normalizeDefinition(input, options = {}) {
     args.content = String(args.content || "").trim().slice(0, 4000);
     args.includeResult = args.includeResult !== false && args.includeResult !== "false";
   }
+  if (rawAction.type === CHAT_TASK_ACTION) {
+    const prompt = String(args.prompt == null ? instruction : args.prompt).trim().slice(0, 20000);
+    if (!prompt) throw createAutomationError(AUTOMATION_ERR_INVALID_INPUT, "请写下要让 AI 做的事");
+    const modelConfigId = typeof args.modelConfigId === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(args.modelConfigId) ? args.modelConfigId : null;
+    if (schedule.type === "interval" && schedule.everyMs < CHAT_TASK_MIN_INTERVAL_MS) throw createAutomationError(AUTOMATION_ERR_INVALID_INPUT, "对话自动化最短每 5 分钟运行一次");
+    for (const key of Object.keys(args)) delete args[key];
+    args.prompt = prompt;
+    if (modelConfigId) args.modelConfigId = modelConfigId;
+  }
   if (rawAction.type === "workflow_sequence") {
     const actions = Array.isArray(args.actions) ? args.actions : [];
     if (!actions.length) throw createAutomationError(AUTOMATION_ERR_INVALID_INPUT, "联动流程至少需要一个执行动作");
@@ -630,6 +646,8 @@ module.exports = {
   RISK_LEVELS,
   DEFAULT_TIMEZONE,
   ALL_ACTIONS,
+  CHAT_TASK_ACTION,
+  CHAT_TASK_MIN_INTERVAL_MS,
   SERVER_ACTIONS,
   SERVER_ATOMIC_ACTIONS,
   isAutomationAction,

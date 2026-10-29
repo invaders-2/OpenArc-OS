@@ -92,6 +92,7 @@ function createAutomationBundle(options = {}) {
     integrations: options.integrations || null,
     desktop: options.desktop || null,
     agent: options.agent || null,
+    chatTask: options.chatTask || null,
     localAccounts: options.localAccounts || null,
     toolCatalog: options.toolCatalog || null,
   });
@@ -143,6 +144,7 @@ function createAutomationBundle(options = {}) {
       integrations: "第三方集成插件（默认关闭）",
       desktop: "桌面执行端",
       agent: "Agent 运行时，属 B3",
+      chatTask: "全局 AI 对话任务",
       localAccounts: "本地账号服务，属 B4",
       toolCatalog: "既有工具目录",
     }[name] || name;
@@ -298,6 +300,17 @@ function createAutomationBundle(options = {}) {
     if (action.type === "open_app") {
       return String(await runAdapter("desktop", "openApp", action.args));
     }
+    if (action.type === domain.CHAT_TASK_ACTION) {
+      // 全局 AI 新开一段对话执行；返回 { taskId, status, text }，运行记录据此链接到那段对话。
+      const started = await runAdapter("chatTask", "run", String(action.args.prompt || ""), {
+        userId: context.userId,
+        modelConfigId: action.args.modelConfigId || null,
+        automationId: context.automationId || null,
+        title: context.automationTitle || "",
+      });
+      if (!started || typeof started.taskId !== "string") throw domain.createAutomationError(domain.AUTOMATION_ERR_INTERNAL, "对话任务没有启动");
+      return { taskId: started.taskId, status: started.status || null, text: typeof started.text === "string" ? started.text.slice(0, 2000) : "" };
+    }
     if (action.type === "agent_instruction") {
       const result = await runAdapter("agent", "runInstruction", String(action.args.instruction || ""), { userId: context.userId });
       return result && typeof result.text === "string" ? result.text : JSON.stringify(result);
@@ -391,7 +404,7 @@ function createAutomationBundle(options = {}) {
         if (isCancelled()) break;
         attempts = attempt;
         try {
-          const output = await executeAction(action, { userId, previousResult: "", automationAuthorization });
+          const output = await executeAction(action, { userId, previousResult: "", automationAuthorization, automationId: automation.id, automationTitle: automation.title });
           if (isCancelled()) break;
           const resultText = JSON.stringify({ attempts, output });
           store.completeAutomationRun(userId, run.id, { status: "success", result: resultText });
@@ -605,6 +618,7 @@ function createAutomationBundle(options = {}) {
     integrations: !!adapters.integrations,
     desktop: !!adapters.desktop,
     agent: !!adapters.agent,
+    chatTask: !!adapters.chatTask,
     localAccounts: !!adapters.localAccounts,
     toolCatalog: !!adapters.toolCatalog,
     scheduler: typeof setInterval === "function",
