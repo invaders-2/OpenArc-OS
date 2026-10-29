@@ -1058,7 +1058,6 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 /* 用户消息：右对齐、sunken 底、12 圆角；助手回复：左对齐、无底色 */
 .chat-msg[data-role="user"] .chat-bubble { max-width: 80%; padding: 8px 14px; border-radius: 12px; background: var(--sunken); color: var(--text); white-space: pre-wrap; }
 .chat-msg[data-role="assistant"] .chat-bubble { width: 100%; max-width: 100%; padding: 0; border-radius: 0; background: none; white-space: normal; }
-.chat-dock .chat-composer { margin: 0 auto; border-radius: 14px; }
 .chat-msg.failed .chat-bubble { color: var(--failed); }
 .chat-typing { display: inline-flex; gap: 4px; padding: 6px 0; }
 .chat-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: chat-dot 1.2s infinite ease-in-out; }
@@ -1150,8 +1149,6 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 .chat-msg-ai { gap: 9px; width: 100%; }
 .chat-orb { flex: none; width: 24px; height: 24px; margin-top: 3px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, rgb(var(--content-rgb) / 0.95), rgb(var(--text-rgb) / 0.28) 70%); box-shadow: inset 0 0 0 0.5px rgb(var(--text-rgb) / 0.12); }
 .chat-msg.chat-msg-ai .chat-bubble { flex: 1; min-width: 0; padding: 10px 14px; border-radius: 14px; background: rgb(var(--text-rgb) / 0.06); white-space: normal; }
-.chat-dock .chat-composer textarea { min-height: 36px; max-height: 140px; }
-.chat-dock .chat-composer { padding: 6px 10px; }
 .chat-msg-ai .chat-bubble .chat-taskcard { background: rgb(var(--text-rgb) / 0.05); }
 .chat-caret { display: inline-block; width: 7px; height: 15px; margin-left: 3px; border-radius: 1px; background: var(--text); animation: chat-caret 1s steps(2, start) infinite; vertical-align: -2px; }
 @keyframes chat-caret { 50% { opacity: 0; } }
@@ -1170,15 +1167,11 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 .chat-chip:disabled { opacity: 0.6; }
 .chat-chip.is-static { cursor: default; }
 .chat-kbd { color: var(--muted); font-size: var(--fs-micro); }
-.chat-dock .chat-composer { border-radius: 16px; background: rgb(var(--text-rgb) / 0.045); padding: 10px 12px; }
-.chat-dock .chat-composer textarea { background: none; padding: 2px 0 4px; height: 34px; field-sizing: fixed; }
 
 /* task-8 final overrides */
 .chat-app .chat-side { margin: 8px 0 8px 8px !important; }
 .chat-app .chat-scroll { padding: 16px 20px 8px; }
 .chat-app .chat-thread { max-width: none; }
-.chat-dock .chat-composer { padding: 6px 10px; }
-.chat-dock .chat-composer textarea { height: 34px; }
 
 .chat-app .pane-toolbar { padding-right: 12px; }
 .chat-dock { padding-bottom: 15px; }
@@ -1187,7 +1180,6 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 .chat-msg[data-role="user"] { width: 100%; }
 .chat-app .pane-toolbar { padding-right: 7px; }
 .chat-dock { padding-bottom: 10px; }
-.chat-dock .chat-composer textarea { height: 31px; }
 
 .chat-app .chat-scroll { padding-top: 8px; }
 .chat-msg[data-role="user"] { width: 100%; }
@@ -1202,16 +1194,14 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocDown); wi
 
 .chat-app .chat-model { padding: 0 6px; margin-right: 4px; }
 .chat-dock { padding-bottom: 0; }
-.chat-dock .chat-composer textarea { height: 29px; }
 
 .chat-app .chat-msg[data-role="user"] .chat-bubble { width: 414px; flex: 0 0 414px; max-width: 414px; }
-.chat-dock .chat-composer textarea { height: 24px; }
 
 .chat-msg[data-role="user"] .chat-bubble { margin-right: 4px !important; }
-.chat-app .chat-composer { padding: 3px 10px; }
 
 .chat-dock { padding-bottom: 2px; }
-.chat-app .chat-composer { padding: 4px 10px; }
+/* 输入框外观统一在 chat/chat-rich.css（.cmp）；这里只留底部呼吸空间 */
+.chat-app .chat-dock { padding-bottom: 16px; }
 
 /* ---------- task-17 对话卡片 ---------- */
 .chat-meta { display: flex; align-items: center; gap: 4px; margin-top: 6px; min-height: 24px; }

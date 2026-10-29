@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowUp, AtSign, Check, ChevronDown, FileText, Film, Image as ImageIcon, LayoutGrid, Mic, Paperclip, Plug, Slash, Sparkles, Square, Terminal, X } from "lucide-vue-next";
+import { ArrowUp, AtSign, Check, Plus, ChevronDown, FileText, Film, Image as ImageIcon, LayoutGrid, Mic, Paperclip, Plug, Slash, Sparkles, Square, Terminal, X } from "lucide-vue-next";
 import { APPS } from "../../apps";
 import { useShellStore } from "../../stores/shell";
 import { openWorkspace, sizeText } from "./preview";
@@ -195,6 +195,8 @@ function addRef(f: { path: string; name: string; size: number; kind: string }) {
 }
 function addPick(p: Pick) { clearTrigger(); if (!picks.value.some((x) => x.kind === p.kind && x.id === p.id)) picks.value = [...picks.value, p]; }
 const modelOpen = ref(false);
+/** 「+」菜单：附件 / 引用文件 / 命令与技能（对标 ChatGPT、Claude 的输入框，左下只留一个入口）。 */
+const plusOpen = ref(false);
 function runCommand(id: string) {
   clearTrigger();
   if (id === "attach") fileInput.value?.click();
@@ -251,6 +253,7 @@ defineExpose({ reset, setFiles, focus, openPicker: () => fileInput.value?.click(
 function onDocClick(e: MouseEvent) {
   const t = e.target as HTMLElement;
   if (!t.closest?.(".cmp-model")) modelOpen.value = false;
+  if (!t.closest?.(".cmp-plus")) plusOpen.value = false;
   if (!t.closest?.(".cmp-ctx")) ctxOpen.value = false;
   if (!t.closest?.(".cmp-menu") && !t.closest?.(".cmp-input")) menu.value = null;
 }
@@ -291,9 +294,28 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocClick); w
 
     <div class="cmp-bar">
       <input ref="fileInput" type="file" multiple hidden data-chat-file-input @change="onPick" />
-      <button type="button" class="cmp-btn" title="添加附件（也可以拖进来或粘贴）" aria-label="添加附件" data-chat-attach @click="fileInput?.click()"><Paperclip :size="15" /></button>
-      <button type="button" class="cmp-btn" title="引用工作文件夹里的文件（输入 @）" aria-label="引用文件" data-chat-at @click="text = text + (text && !/\s$/.test(text) ? ' @' : '@'); nextTick(() => { ta?.focus(); detectMenu(); })"><AtSign :size="15" /></button>
-      <button type="button" class="cmp-btn" title="命令、技能、MCP、应用（输入 /）" aria-label="命令" data-chat-slash @click="text = '/' + text.replace(/^\//, ''); nextTick(() => { ta?.focus(); ta?.setSelectionRange(1, 1); detectMenu(); })"><Slash :size="15" /></button>
+      <div class="cmp-plus">
+        <button type="button" class="cmp-btn cmp-plus-btn" data-chat-plus title="添加附件、引用文件、命令与技能" aria-label="更多输入方式" :aria-expanded="plusOpen" @click="plusOpen = !plusOpen"><Plus :size="17" /></button>
+        <div v-if="plusOpen" class="cmp-pop cmp-plus-pop" data-chat-plus-menu role="menu">
+          <button type="button" role="menuitem" data-chat-attach @click="plusOpen = false; fileInput?.click()"><Paperclip :size="15" /><span class="cmp-pop-main">添加附件<small>也可以拖进来或直接粘贴</small></span></button>
+          <button type="button" role="menuitem" data-chat-at @click="plusOpen = false; text = text + (text && !/\s$/.test(text) ? ' @' : '@'); nextTick(() => { ta?.focus(); detectMenu(); })"><AtSign :size="15" /><span class="cmp-pop-main">引用工作文件夹的文件<small>输入 @</small></span></button>
+          <button type="button" role="menuitem" data-chat-slash @click="plusOpen = false; text = '/' + text.replace(/^\//, ''); nextTick(() => { ta?.focus(); ta?.setSelectionRange(1, 1); detectMenu(); })"><Slash :size="15" /><span class="cmp-pop-main">命令、技能与应用<small>输入 /</small></span></button>
+        </div>
+      </div>
+      <span class="toolbar-spacer" />
+      <p v-if="notice" class="cmp-notice" role="status">{{ notice }}</p>
+      <div v-if="ctx" class="cmp-ctx">
+        <button type="button" class="cmp-ctx-btn" data-chat-context :title="'上下文 ' + fmtK(ctx.used) + ' / ' + fmtK(ctx.size)" :aria-expanded="ctxOpen" @click="ctxOpen = !ctxOpen">
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7" class="ring-bg" /><circle cx="9" cy="9" r="7" class="ring-fg" :stroke-dasharray="RING" :stroke-dashoffset="RING * (1 - ctx.pct)" /></svg>
+          <span>{{ ctx.text }}</span>
+        </button>
+        <div v-if="ctxOpen" class="cmp-pop cmp-ctx-pop" data-chat-context-pop>
+          <strong>上下文用量</strong>
+          <div class="cmp-ctx-bar"><i :style="{ width: Math.max(2, ctx.pct * 100) + '%' }" /></div>
+          <dl><dt>已用</dt><dd>{{ ctx.used.toLocaleString() }} tokens</dd><dt>窗口</dt><dd>{{ ctx.size.toLocaleString() }} tokens</dd><dt>本对话模型调用</dt><dd>{{ modelCalls ?? 0 }} 次</dd></dl>
+          <p class="cmp-pop-note">按对话模型估算。快满时 AI 会自动压缩较早的内容；需要彻底重来可以新开对话。</p>
+        </div>
+      </div>
 
       <div class="cmp-model">
         <button type="button" class="cmp-model-btn" data-chat-model :aria-expanded="modelOpen" :title="locked ? '这段对话固定使用开始时的模型；要换模型请新开对话' : '选择模型'" @click="modelOpen = !modelOpen">
@@ -309,26 +331,9 @@ onBeforeUnmount(() => { document.removeEventListener("mousedown", onDocClick); w
         </div>
       </div>
 
-      <span class="toolbar-spacer" />
-      <p v-if="notice" class="cmp-notice" role="status">{{ notice }}</p>
-      <span v-else class="cmp-kbd">回车发送 · ⇧回车换行</span>
-
-      <div v-if="ctx" class="cmp-ctx">
-        <button type="button" class="cmp-ctx-btn" data-chat-context :title="'上下文 ' + fmtK(ctx.used) + ' / ' + fmtK(ctx.size)" :aria-expanded="ctxOpen" @click="ctxOpen = !ctxOpen">
-          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7" class="ring-bg" /><circle cx="9" cy="9" r="7" class="ring-fg" :stroke-dasharray="RING" :stroke-dashoffset="RING * (1 - ctx.pct)" /></svg>
-          <span>{{ ctx.text }}</span>
-        </button>
-        <div v-if="ctxOpen" class="cmp-pop cmp-ctx-pop" data-chat-context-pop>
-          <strong>上下文用量</strong>
-          <div class="cmp-ctx-bar"><i :style="{ width: Math.max(2, ctx.pct * 100) + '%' }" /></div>
-          <dl><dt>已用</dt><dd>{{ ctx.used.toLocaleString() }} tokens</dd><dt>窗口</dt><dd>{{ ctx.size.toLocaleString() }} tokens</dd><dt>本对话模型调用</dt><dd>{{ modelCalls ?? 0 }} 次</dd></dl>
-          <p class="cmp-pop-note">按对话模型估算。快满时 AI 会自动压缩较早的内容；需要彻底重来可以新开对话。</p>
-        </div>
-      </div>
-
       <button v-if="voice" type="button" class="cmp-btn" :class="{ rec: voice.recording }" :disabled="voice.busy" :data-available="voice.available ? 1 : 0" :title="voice.hint" :aria-pressed="voice.recording" aria-label="语音输入" data-chat-voice @click="emit('voice')"><Mic :size="15" /></button>
       <button v-if="running" type="button" class="chat-send chat-send-stop" data-chat-stop aria-label="停止" title="停止" @click="emit('stop')"><Square :size="12" /></button>
-      <button v-else type="button" class="chat-send" data-chat-send aria-label="发送" :disabled="!canSend" @click="submit"><ArrowUp :size="15" /></button>
+      <button v-else type="button" class="chat-send" data-chat-send aria-label="发送" title="发送（回车）· ⇧回车换行" :disabled="!canSend" @click="submit"><ArrowUp :size="15" /></button>
     </div>
     <div v-if="dragging" class="cmp-drop">松开即可添加附件</div>
   </div>

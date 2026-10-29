@@ -132,21 +132,28 @@
 @media (prefers-reduced-motion: reduce) { .chat-app .spin { animation: none; } }
 
 /* ---------- 输入区（Composer） ---------- */
-.chat-app .cmp { position: relative; display: flex; flex-direction: column; gap: 6px; border-radius: 16px; background: rgb(var(--text-rgb) / 0.045); padding: 10px 12px 8px; }
-.chat-app .cmp.dragging { background: rgb(var(--text-rgb) / 0.08); }
-.chat-app .cmp-input { width: 100%; min-height: 24px; max-height: 240px; resize: none; border: 0; outline: 0; background: none; padding: 2px 0; color: var(--text); font: inherit; font-size: var(--fs-body, 14px); line-height: 1.55; field-sizing: content; }
+/* 输入框（对标 ChatGPT / Claude）：白底大圆角卡片 + 细边 + 轻阴影；左下一个「+」，右下 上下文 · 模型 · 语音 · 发送 */
+.chat-app .cmp { position: relative; display: flex; flex-direction: column; gap: 6px; border-radius: 22px; background: rgb(var(--content-rgb)); border: 0.5px solid rgb(var(--text-rgb) / 0.14); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 6px 20px rgb(0 0 0 / 0.05); padding: 12px 10px 8px 16px; transition: border-color 0.15s, box-shadow 0.15s; }
+.chat-app .cmp:focus-within { border-color: rgb(var(--text-rgb) / 0.24); box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 8px 26px rgb(0 0 0 / 0.08); }
+.chat-app .cmp.dragging { background: rgb(var(--text-rgb) / 0.04); border-style: dashed; }
+.chat-app .cmp-input { width: 100%; min-height: 46px; max-height: 240px; resize: none; border: 0; outline: 0; background: none; padding: 2px 6px 2px 0; color: var(--text); font: inherit; font-size: 15px; line-height: 1.55; field-sizing: content; }
 .chat-app .cmp-input::placeholder { color: var(--muted); }
-.chat-app .cmp-bar { display: flex; align-items: center; gap: 4px; min-width: 0; width: 100%; }
+.chat-app .cmp-bar { display: flex; align-items: center; gap: 2px; min-width: 0; width: 100%; margin-left: -6px; }
 .chat-app .cmp-bar .toolbar-spacer { flex: 1; }
 .chat-app .cmp > * { align-self: stretch; }
-.chat-app .cmp-btn { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-md); color: var(--muted); }
+.chat-app .cmp-btn { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; color: var(--muted); }
+.chat-app .cmp-plus { position: relative; flex: none; }
+.chat-app .cmp-plus-btn { box-shadow: inset 0 0 0 0.5px rgb(var(--text-rgb) / 0.18); color: var(--text); }
+.chat-app .cmp-plus-btn[aria-expanded="true"] { background: rgb(var(--text-rgb) / 0.07); }
+.chat-app .cmp-plus-pop { left: 0; min-width: 250px; }
+.chat-app .cmp-plus-pop > button svg { flex: none; color: var(--muted); }
 .chat-app .cmp-btn:hover:not(:disabled) { background: rgb(var(--text-rgb) / 0.07); color: var(--text); }
 .chat-app .cmp-btn[data-available="0"] { opacity: 0.55; }
 .chat-app .cmp-btn.rec { background: var(--text); color: rgb(var(--content-rgb)); animation: cmp-pulse 1.4s ease-in-out infinite; }
 @keyframes cmp-pulse { 50% { opacity: 0.6; } }
 .chat-app .cmp-kbd, .chat-app .cmp-notice { margin: 0 6px 0 0; color: var(--muted); font-size: var(--fs-micro, 11px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .chat-app .cmp-notice { color: var(--text); }
-.chat-app .cmp .chat-send { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--text); color: rgb(var(--content-rgb)); }
+.chat-app .cmp .chat-send { flex: none; width: 32px; height: 32px; margin-left: 2px; display: grid; place-items: center; border-radius: 50%; background: var(--text); color: rgb(var(--content-rgb)); }
 .chat-app .cmp .chat-send:disabled { background: rgb(var(--text-rgb) / 0.15); color: rgb(var(--content-rgb)); }
 .chat-app .cmp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chat-app .cmp-chips .chat-file { cursor: pointer; }
@@ -158,10 +165,10 @@
 
 /* 模型选择 */
 .chat-app .cmp-model { position: relative; min-width: 0; }
-.chat-app .cmp-model-btn { display: inline-flex; align-items: center; gap: 4px; max-width: 200px; height: 28px; padding: 0 8px; border-radius: var(--radius-md); color: var(--muted); font-size: var(--fs-caption); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-app .cmp-model-btn { display: inline-flex; align-items: center; gap: 4px; max-width: 200px; height: 32px; padding: 0 10px; border-radius: var(--radius-pill); color: var(--muted); font-size: var(--fs-caption); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-app .cmp-model-btn:hover, .chat-app .cmp-model-btn[aria-expanded="true"] { background: rgb(var(--text-rgb) / 0.07); color: var(--text); }
 .chat-app .cmp-pop { position: absolute; bottom: calc(100% + 8px); z-index: 30; min-width: 240px; max-width: 320px; padding: 6px; display: flex; flex-direction: column; gap: 2px; border-radius: var(--radius-lg); background: rgb(var(--content-rgb) / 0.98); box-shadow: var(--elevation-2); }
-.chat-app .cmp-model-pop { left: 0; }
+.chat-app .cmp-model-pop { right: 0; }
 .chat-app .cmp-pop > button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 7px 10px; border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-caption); }
 .chat-app .cmp-pop > button:hover { background: var(--row-hover, rgb(var(--text-rgb) / 0.06)); }
 .chat-app .cmp-pop-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -170,7 +177,7 @@
 
 /* 上下文用量 */
 .chat-app .cmp-ctx { position: relative; flex: none; }
-.chat-app .cmp-ctx-btn { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; border-radius: var(--radius-md); color: var(--muted); font-size: var(--fs-micro, 11px); font-variant-numeric: tabular-nums; }
+.chat-app .cmp-ctx-btn { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px; border-radius: var(--radius-pill); color: var(--muted); font-size: var(--fs-micro, 11px); font-variant-numeric: tabular-nums; }
 .chat-app .cmp-ctx-btn:hover, .chat-app .cmp-ctx-btn[aria-expanded="true"] { background: rgb(var(--text-rgb) / 0.07); color: var(--text); }
 .chat-app .cmp-ctx-btn svg { transform: rotate(-90deg); }
 .chat-app .cmp-ctx-btn .ring-bg { fill: none; stroke: rgb(var(--text-rgb) / 0.12); stroke-width: 2.5; }
