@@ -30,6 +30,8 @@ const CMD_ID = () => "cc_" + Date.now().toString(36) + "_" + Math.random().toStr
 const normalizeInviteCode = (value) => String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 const inviteCodeHash = (value) => crypto.createHash("sha256").update(normalizeInviteCode(value)).digest("hex");
 const INVITE_PERMISSIONS = Object.freeze(["read", "edit"]);
+/** 画布播放地址的有效期：一次编辑会话里反复拖动 / 重播都不过期；页面到期前会重新取 */
+const MEDIA_URL_TTL_MS = 6 * 60 * 60 * 1000;
 
 
 /** 对话里最后一条用户消息的文字（多模态消息只取 text 部分）。 */
@@ -95,7 +97,8 @@ class CanvasService {
   }
 
   /** D5-02 Closure：任务层与模型层装配完成后晚绑定（同一实例，不建第二套）。*/
-  attachRuntime({ taskService = null, modelService = null, webAccess = null, tempDir = null } = {}) {
+  attachRuntime({ taskService = null, modelService = null, webAccess = null, tempDir = null, previewService = null } = {}) {
+    this.previewService = previewService || this.previewService || null;
     this.taskService = taskService || this.taskService;
     this.modelService = modelService || this.modelService;
     this.webAccess = webAccess || this.webAccess || null;
@@ -1393,6 +1396,34 @@ class CanvasService {
     const data = readFn.call(this.resourceService, referencedByCanvas ? { resourceRef: id, maxBytes } : { context, resourceRef: id, maxBytes });
     if (!data || !data.ok) return fail("ASSET_UNAVAILABLE");
     return ok({ ref: "openarc-asset:" + id, dataUrl: data.dataUrl, name: row.name, version: Number(row.version || 1) });
+  }
+
+  /**
+   * 画布里播放视频 / 音频用的流式地址（openarc-resource://preview/<cap>，支持 Range）。
+   *
+   * readAsset 会把整段文件转成 base64 走 IPC：几十 MB 的视频要等好几秒、占双倍内存，而且每个视频节点
+   * 一渲染就读一遍。播放只需要能按需拖动的流，所以这里只铸一个限时能力地址，字节由协议处理器按段读盘。
+   * 只给本人 / 有资源权限的条目铸（协议处理器每次请求会按同一身份重新鉴权）；画布共享来的条目
+   * 返回 USE_READ_ASSET，页面退回 readAsset。
+   */
+  assetMediaUrl({ context, ref } = {}) {
+    const r = this.#actor(context);
+    if (!r.ok) return r;
+    if (!this.previewService || typeof this.previewService.mintCapability !== "function") return fail("USE_READ_ASSET");
+    const id = authz.parseResourceRef(String(ref || "").replace(/^openarc-asset:/, ""));
+    if (!id) return fail(REASON.INVALID_INPUT);
+    const row = this.resourceStore ? this.resourceStore.resourceRowById(id) : null;
+    if (!row || row.trash_state === "TRASHED" || row.registry_status !== "active") return fail("ASSET_UNAVAILABLE");
+    const mime = String(row.mime_type || "").toLowerCase();
+    if (!/^(video|audio)\//.test(mime)) return fail("USE_READ_ASSET");
+    const ownerOk = row.owner_user_id != null && String(row.owner_user_id) === String(r.user.id);
+    if (this.authService) {
+      const caps = typeof this.authService.getCapabilities === "function" ? this.authService.getCapabilities({ context, resource: id }) : null;
+      const canRead = !!(caps && caps.ok && caps.capabilities && (caps.capabilities.canRead || caps.capabilities.canPreview));
+      if (!canRead) return fail("USE_READ_ASSET");
+    } else if (!ownerOk) return fail("USE_READ_ASSET");
+    const minted = this.previewService.mintCapability({ context: { ...context, userId: r.user.id }, row, kind: mime.startsWith("video/") ? "video" : "audio", mimeType: row.mime_type, size: row.size == null ? null : Number(row.size), ttlMs: MEDIA_URL_TTL_MS });
+    return ok({ ref: "openarc-asset:" + id, url: minted.url, mime: row.mime_type, expiresAt: minted.capability.expiresAt });
   }
 
   /**

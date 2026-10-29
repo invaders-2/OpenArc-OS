@@ -27,6 +27,7 @@ import { ModalHead, openModal, openPop } from "./overlay";
 import { computeExportBounds, exportCanvas, exportFileName, exportPixels, pickExportNodes, saveCanvasBlob, type ExportFormat, type ExportRange } from "../exportCanvas";
 import { applyTheme } from "./theme";
 import { useAssetUrl } from "./useAsset";
+import { useMediaUrl } from "./useMedia";
 import { deletePersonalTemplate, loadPersonalTemplates, savePersonalTemplate } from "../personalTemplates";
 
 export function Chrome() {
@@ -1136,4 +1137,4 @@ export function Lightbox() {
   </div>;
 }
 function BigImg({ src }: { src: string }) { const url = useAssetUrl(src); return url ? <img className="big" src={url} alt="" /> : null; }
-function BigVideo({ src }: { src: string }) { const url = useAssetUrl(src); return url ? <video className="big" src={url} controls autoPlay /> : null; }
+function BigVideo({ src }: { src: string }) { const m = useMediaUrl(src); return m.url ? <video className="big" src={m.url} controls autoPlay onError={m.onError} /> : null; }

@@ -241,15 +241,15 @@ function GenPanel({ node }: { node: CanvasNode }) {
         <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="vp-audio opt" />
         <button className="vp-model" data-p="model" onClick={(e) => paramPop(ctl, node, "model", e.currentTarget)} title={m?.name || "未配置模型"}>{m?.name || "未配置模型"}</button>
         <span className="vp-between" />
-        <span className="vp-vals">
-          <button data-p="mode" data-vval="mode" disabled={busy || !m || (m.modes || []).length < 2} onClick={(e) => paramPop(ctl, node, "mode", e.currentTarget)}>{vp.mode}</button>
+        <button className="vp-vals" data-p="vset" disabled={busy} title={m ? `${m.name} 的参数：点开调整` : "还没有可用的视频模型"} onClick={(e) => paramPop(ctl, node, "vset", e.currentTarget)}>
+          <span data-vval="mode">{vp.mode}</span>
           <i>·</i>
-          <button data-p="vratio" data-vval="ratio" disabled={busy || !m || !(m.ratios || []).length} onClick={(e) => paramPop(ctl, node, "vratio", e.currentTarget)}>{videoRatioLabel(vp.ratio)}</button>
+          <span data-vval="ratio">{videoRatioLabel(vp.ratio)}</span>
           <i>·</i>
-          <button data-p="vres" data-vval="res" disabled={busy || !m || !(m.res || []).length} onClick={(e) => paramPop(ctl, node, "vres", e.currentTarget)}>{vp.draft && resRange(m) ? `草稿 ${resRange(m)!.low}` : videoResLabel(vp.res)}</button>
+          <span data-vval="res">{vp.draft && resRange(m) ? `草稿 ${resRange(m)!.low}` : videoResLabel(vp.res)}</span>
           <i>·</i>
-          <button data-p="dur" data-vval="dur" disabled={busy || !m} onClick={(e) => paramPop(ctl, node, "dur", e.currentTarget)}>{videoDurLabel(vp.dur)}</button>
-        </span>
+          <span data-vval="dur">{videoDurLabel(vp.dur)}</span>
+        </button>
         <span className="grow" />
         <button className="vp-times tnum" data-p="vtimes" disabled={busy || !m || (m.times || [1]).length < 2} onClick={(e) => paramPop(ctl, node, "vtimes", e.currentTarget)}>{videoTimesLabel(vp.times)}</button>
         {run
@@ -430,6 +430,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);
   if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{(Object.keys(VMODES) as Array<keyof typeof VMODES>).map((x) => { const ok = (mm.modes || []).includes(x); return <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={!ok || dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{ok ? (x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need) : mm.name + " 不支持"}</span></span><span className="k tnum">{VMODES[x].api}</span></button>; })}</>);
   if (k === "vratio") return pop(() => <VRatioPop node={node} m={mm} disabled={dis} />);
+  if (k === "vset") return pop(() => <VideoSetPop node={node} m={mm} disabled={dis} />);
   if (k === "vres") { const rr = resRange(mm); const vp0 = cur().g.params as VideoParams; return pop((close) => <><div className="mh">清晰度</div><div className="seg wrap">{(mm.res || []).map((r) => <button key={r} className={vp0.res === r && !vp0.draft ? "on" : ""} disabled={dis} onClick={() => { close(); set({ res: r, draft: false }); }}>{r}</button>)}</div>
     <div className="msep" />
     <button className={"mi" + (vp0.draft ? " on" : "")} data-p="vdraft" disabled={dis || !rr} onClick={() => { close(); set({ draft: !vp0.draft }); }}><Icon name="bolt" size="s" /><span style={{ flex: 1 }}>草稿模式<span className="d">{rr ? `先按 ${rr.low} 出草稿，满意后一键按 ${rr.high} 出成片` : "该模型只有一档清晰度"}</span></span>{vp0.draft ? <span className="k"><Icon name="check" size="s" /></span> : null}</button></>); }
@@ -457,18 +458,24 @@ function SegPop({ node, groups }: { node: CanvasNode; groups: Array<[string, "ra
   const store = useCtl().store; const p = useNodeParams<VideoParams>(node);
   return <>{groups.map(([label, key, list]) => <div key={key}><div className="mh">{label}</div><div className="seg">{list.map((v) => <button key={v} className={p[key] === v ? "on" : ""} onClick={() => store.patchGen(node.id, (g) => ({ params: { ...(g.params as VideoParams), [key]: v } }))}>{v}</button>)}</div></div>)}</>;
 }
-/** 视频参数合并浮层（TapNow 同款分组：生成方式 / 比例 / 清晰度 / 生成时长 / 生成音频） */
-function VideoSetPop({ node, m }: { node: CanvasNode; m: ModelSpec }) {
+/**
+ * 视频参数合并浮层（TapNow 同款分组）：只列当前模型真正支持的取值 —— 换模型后这里的选项跟着变，
+ * 不支持的项不出现（比如只有 8 秒的模型就只剩 8s，不能出声的模型没有「生成音频」）。
+ */
+function VideoSetPop({ node, m, disabled = false }: { node: CanvasNode; m: ModelSpec; disabled?: boolean }) {
   const store = useCtl().store; const p = useNodeParams<VideoParams>(node);
   const set = (patch: Partial<VideoParams>) => store.patchGen(node.id, (g) => ({ params: { ...(g.params as VideoParams), ...patch } }));
   const shape = (r: string) => { const [w, h] = ratioWH(r, 16); return <i style={{ width: w, height: h }} />; };
-  const modes = (m.modes || []) as VideoMode[];
-  return <div className="vset">
-    {modes.length > 1 ? <><div className="mh">生成方式</div><div className="seg wrap">{modes.map((x) => <button key={x} className={p.mode === x ? "on" : ""} title={VMODES[x].need} onClick={() => set({ mode: x })}>{x}</button>)}</div></> : null}
-    {(m.ratios || []).length ? <><div className="mh">比例</div><div className="ratio-grid">{(m.ratios || []).map((r) => <button key={r} className={p.ratio === r ? "on" : ""} onClick={() => set({ ratio: r })}>{shape(r)}{r}</button>)}</div></> : null}
-    {(m.res || []).length ? <><div className="mh">清晰度</div><div className="seg">{(m.res || []).map((r) => <button key={r} className={p.res === r ? "on" : ""} onClick={() => set({ res: r })}>{r}</button>)}</div></> : null}
-    {(m.durs || []).length ? <><div className="mh">生成时长</div><div className="seg wrap">{(m.durs || []).map((d) => <button key={d} className={p.dur === d ? "on" : ""} onClick={() => set({ dur: d })}>{d}s</button>)}</div></> : <><div className="mh">生成时长</div><div className="lg-dim" style={{ padding: "2px 0 6px" }}>由模型自动决定</div></>}
-    {m.audio ? <><div className="mh">生成音频</div><div className="seg"><button className={p.sound ? "on" : ""} onClick={() => set({ sound: true })}>开启</button><button className={!p.sound ? "on" : ""} onClick={() => set({ sound: false })}>关闭</button></div></> : null}
+  const modes = ((m.modes || []) as VideoMode[]).filter((x) => x in VMODES);
+  const durs = m.durs || []; const rr = resRange(m);
+  return <div className="vset" data-vset={m.id}>
+    <div className="vset-model"><span className="n">{m.name}</span>{m.specSource === "guess" ? <span className="d">参数按名字推断</span> : <span className="d">这个模型支持的参数</span>}</div>
+    {modes.length ? <><div className="mh">生成方式</div><div className="seg wrap">{modes.map((x) => <button key={x} data-vopt={"mode:" + x} className={p.mode === x ? "on" : ""} disabled={disabled} title={VMODES[x].need} onClick={() => set({ mode: x })}>{x}</button>)}</div></> : null}
+    {(m.ratios || []).length ? <><div className="mh">比例</div><div className="ratio-grid">{(m.ratios || []).map((r) => <button key={r} data-vopt={"ratio:" + r} className={p.ratio === r ? "on" : ""} disabled={disabled} onClick={() => set({ ratio: r })}>{shape(r)}{r}</button>)}</div></> : null}
+    {(m.res || []).length ? <><div className="mh">清晰度</div><div className="seg wrap">{(m.res || []).map((r) => <button key={r} data-vopt={"res:" + r} className={p.res === r && !p.draft ? "on" : ""} disabled={disabled} onClick={() => set({ res: r, draft: false })}>{r}</button>)}{rr ? <button data-vopt="draft" className={p.draft ? "on" : ""} disabled={disabled} title={`先按 ${rr.low} 出草稿，满意后一键按 ${rr.high} 出成片`} onClick={() => set({ draft: !p.draft })}>草稿</button> : null}</div></> : null}
+    <div className="mh">生成时长</div>
+    {durs.length ? <div className="seg wrap">{durs.filter((d) => d > 0).map((d) => <button key={d} data-vopt={"dur:" + d} className={p.dur === d ? "on" : ""} disabled={disabled} onClick={() => set({ dur: d })}>{d}s</button>)}{durs.includes(-1) ? <button data-vopt="dur:auto" className={!p.dur || p.dur <= 0 ? "on" : ""} disabled={disabled} onClick={() => set({ dur: -1 })}>自动</button> : null}</div> : <div className="lg-dim" style={{ padding: "2px 0 6px" }}>由模型自动决定</div>}
+    {m.audio ? <><div className="mh">生成音频</div><div className="seg"><button data-vopt="sound:on" className={p.sound ? "on" : ""} disabled={disabled} onClick={() => set({ sound: true })}>开启</button><button data-vopt="sound:off" className={!p.sound ? "on" : ""} disabled={disabled} onClick={() => set({ sound: false })}>关闭</button></div></> : null}
   </div>;
 }
 function DurPop({ node, m, disabled = false }: { node: CanvasNode; m: ModelSpec; disabled?: boolean }) {

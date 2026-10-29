@@ -108,6 +108,8 @@ export interface CanvasBackend {
   importRemote?(canvasId: string, url: string, name: string): Promise<string>;
   /** openarc-asset:… → 可显示的地址 */
   resolveAsset(ref: string): Promise<string | null>;
+  /** openarc-asset:…（视频 / 音频）→ 可边播边拖的流式地址；拿不到时 null，调用方退回 resolveAsset */
+  mediaUrl?(ref: string): Promise<{ url: string; expiresAt: number } | null>;
   /** 视频智能切镜：返回各镜头区间（秒）；没有 ffmpeg 等失败时 ok:false */
   /** 文档（docx / xlsx / txt / md…）抽成文本；没有时只读纯文本类文件 */
   extractDocument?(dataUrl: string, name: string): Promise<{ ok: true; text: string; truncated: boolean } | { ok: false; error: string; detail?: string }>;

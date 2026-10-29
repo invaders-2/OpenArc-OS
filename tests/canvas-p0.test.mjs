@@ -112,7 +112,9 @@ test("C2 使用区间：条上有 in/out 手柄，播放循环在区间内，截
   assert.match(nv, /data-trim-handle="out"/);
   assert.match(nv, /data-trim-total/);
   assert.match(nv, /el\.currentTime >= trim\.out - 0\.02 \|\| el\.currentTime < trim\.in - 0\.12/);
-  assert.match(nv, /onPlay=\{\(e\) => \{ if \(trim && e\.currentTarget\.currentTime < trim\.in - 0\.05\)/);
+  // 10-29：进入播放时显式 play()，先跳到入点；控制条自绘（可拖进度）
+  assert.match(nv, /if \(trim && v\.currentTime < trim\.in\) seekTo\(v, trim\.in\);/);
+  assert.match(nv, /data-vtrack/);
   const reg = read("src/canvas/canvas-next/ui/editors/registry.tsx");
   assert.match(reg, /const trim = o\.trim \? clampTrim\(o\.dur, o\.trim\) : null;/);
   assert.match(reg, /trim \? trim\.in : Math\.min\(0\.05/);
