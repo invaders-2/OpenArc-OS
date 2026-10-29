@@ -6,17 +6,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Model3DViewer } from "../../react-canvas/Model3DViewer";
 import { Scene3D } from "../../react-canvas/Scene3D";
-import type { CanvasNode, Scene3DData, TimelineClip } from "../../react-canvas/reactCanvasStore";
-import { exportTimelineWebM, downloadTimelineBlob } from "../../react-canvas/timelineExport";
-import { backendExportAvailable, exportTimelineMp4 } from "../../react-canvas/timelineExportBackend";
-import { outOf, uid } from "../model";
-import { useCtl, useS } from "./ctx";
+import type { CanvasNode, Scene3DData } from "../../react-canvas/reactCanvasStore";
+import { uid } from "../model";
+import { useCtl } from "./ctx";
 import { Icon } from "./Icon";
 import { useAssetUrl } from "./useAsset";
 import { confirmRunGroup, groupLabel, runnableIds } from "./StackNode";
 
 const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-const clipLen = (c: TimelineClip) => Math.max(0, c.outPoint - c.inPoint);
 
 /* ---------------- 便签 ---------------- */
 export function NoteBody({ node }: { node: CanvasNode }) {
@@ -52,73 +49,8 @@ export function ungroup(store: ReturnType<typeof useCtl>["store"], gid?: string)
   store.snapshot(); store.mutate((d) => ({ ...d, nodes: d.nodes.filter((n) => !ids.includes(n.id)) }), { history: false }); store.setUI({ sel: new Set() }); store.toast("已取消分组");
 }
 
-/* ---------------- 剪辑时间线 ---------------- */
-export function TimelineBody({ node }: { node: CanvasNode }) {
-  const store = useCtl().store; const doc = useS((s) => s.doc);
-  const [adding, setAdding] = useState(false); const [busy, setBusy] = useState<string | null>(null); const [prev, setPrev] = useState(false);
-  const clips = node.clips || []; const media = clips.filter((c) => c.type !== "subtitle"); const subs = clips.filter((c) => c.type === "subtitle");
-  // 视频轨、音频轨并排：总长取较长的一轨（和导出一致）
-  const trackLen = (k: "video" | "audio") => media.filter((c) => c.mediaKind === k).reduce((s, c) => s + clipLen(c), 0);
-  const total = Math.max(trackLen("video"), trackLen("audio"), ...subs.map((c) => Number(c.end) || 0), 0);
-  const set = (next: TimelineClip[], history = true) => { if (history) store.snapshot(); store.updateNode(node.id, (n) => ({ ...n, clips: next.map((c, i) => ({ ...c, order: i })) })); };
-  const patch = (id: string, p: Partial<TimelineClip>) => set(clips.map((c) => (c.id === id ? { ...c, ...p } : c)), false);
-  const sources = doc.nodes.filter((n) => (n.kind === "video" || n.kind === "audio") && (outOf(n)?.url || n.url));
-  const move = (id: string, d: -1 | 1) => { const list = [...media]; const i = list.findIndex((c) => c.id === id); const j = i + d; if (j < 0 || j >= list.length) return; [list[i], list[j]] = [list[j], list[i]]; set([...list, ...subs]); };
-  const exportIt = async (fmt: "mp4" | "webm") => {
-    if (!media.length) return; setBusy(fmt === "mp4" ? "导出 MP4…" : "导出 WebM…");
-    try {
-      if (fmt === "mp4") { const r = await exportTimelineMp4({ clips: media.map((c) => ({ url: c.url, mediaKind: c.mediaKind, inPoint: c.inPoint, outPoint: c.outPoint })), canvasId: store.state.canvasId, onProgress: (v) => setBusy(`导出 MP4… ${Math.round(v > 1 ? v : v * 100)}%`) /* 导出模块报 0–100 */ }); store.toast("已导出 MP4：" + r.relativePath.split("/").pop() + "（导出文件夹已在访达中打开）", 5000); }
-      else {
-        const resolved = await Promise.all(clips.map(async (c) => (c.url && c.url.startsWith("openarc-asset:") ? { ...c, url: (await store.backend.resolveAsset(c.url)) || c.url } : c)));
-        const blob = await exportTimelineWebM({ clips: resolved.map((c) => ({ url: c.url, mediaKind: c.mediaKind, inPoint: c.inPoint, outPoint: c.outPoint, type: c.type, text: c.text, start: c.start, end: c.end, fadeIn: c.fadeIn, fadeOut: c.fadeOut })), fileName: "timeline.webm", onProgress: (cur: number, tot: number) => setBusy(`导出 WebM… ${Math.round((cur / Math.max(1, tot)) * 100)}%`) } as never);
-        downloadTimelineBlob(blob, "剪辑时间线.webm");
-      }
-    } catch (err) { store.toast("导出失败：" + (err instanceof Error ? err.message : "未知错误"), 4000); }
-    finally { setBusy(null); }
-  };
-  return <div className="lg-tl" data-act="timeline" onPointerDown={stop} onWheel={stop}>
-    <div className="lg-row">
-      <button className="pill" onClick={() => setAdding(!adding)}><Icon name="plus" size="xs" />添加片段</button>
-      <button className="pill" onClick={() => set([...clips, { id: uid("sub"), sourceNodeId: "", url: "", mediaKind: "video", inPoint: 0, outPoint: 2, order: clips.length, type: "subtitle", text: "新字幕", start: 0, end: 2 }])}><Icon name="text" size="xs" />添加字幕</button>
-      <span className="grow" /><span className="tnum lg-dim">总长 {total.toFixed(1)}s</span>
-    </div>
-    {adding ? <div className="lg-src">{sources.length ? sources.map((s) => <button key={s.id} className="mi" onClick={() => { const url = outOf(s)?.url || s.url || ""; set([...media, { id: uid("clip"), sourceNodeId: s.id, url, mediaKind: s.kind === "audio" ? "audio" : "video", inPoint: 0, outPoint: Math.max(1, Number(outOf(s)?.dur) || 5), order: media.length }, ...subs]); setAdding(false); }}><Icon name={s.kind === "audio" ? "audio" : "video"} size="xs" />{(s.data as { gen?: { title?: string } } | undefined)?.gen?.title || s.text || (s.kind === "audio" ? "音频" : "视频")}<span className="d">{[outOf(s)?.dur ? Number(outOf(s)!.dur).toFixed(1).replace(/\.0$/, "") + "s" : "", outOf(s)?.res || "", (outOf(s)?.meta as { model?: string } | undefined)?.model || ""].filter(Boolean).join(" · ")}</span></button>) : <span className="lg-dim">画布上还没有生成好的视频 / 音频</span>}</div> : null}
-    <div className="lg-clips">
-      {!clips.length ? <div className="lg-dim lg-empty">还没有片段：点「添加片段」把画布上的视频 / 音频排进来</div> : null}
-      {media.map((c, i) => <div key={c.id} className="lg-clip">
-        <span className="tnum lg-idx">{i + 1}</span><Icon name={c.mediaKind === "audio" ? "audio" : "video"} size="xs" />
-        <label>入<input type="number" step="0.1" min={0} value={c.inPoint} onKeyDown={stop} onChange={(e) => patch(c.id, { inPoint: Math.max(0, Math.min(Number(e.target.value) || 0, c.outPoint - .1)) })} /></label>
-        <label>出<input type="number" step="0.1" min={0} value={c.outPoint} onKeyDown={stop} onChange={(e) => patch(c.id, { outPoint: Math.max(c.inPoint + .1, Math.min(Number(e.target.value) || 0, 3600)) })} /></label>
-        {c.mediaKind === "video" ? <label>淡入<input type="number" step="50" min={0} max={1000} value={c.fadeIn || 0} onKeyDown={stop} onChange={(e) => patch(c.id, { fadeIn: Math.max(0, Math.min(1000, Number(e.target.value) || 0)) })} /></label> : null}
-        <span className="tnum lg-dim">{clipLen(c).toFixed(1)}s</span><span className="grow" />
-        <button className="ib" disabled={i === 0} onClick={() => move(c.id, -1)} aria-label="上移"><Icon name="up" size="xs" /></button>
-        <button className="ib" disabled={i === media.length - 1} onClick={() => move(c.id, 1)} aria-label="下移"><Icon name="down" size="xs" /></button>
-        <button className="ib" onClick={() => set(clips.filter((x) => x.id !== c.id))} aria-label="移除"><Icon name="x" size="xs" /></button>
-      </div>)}
-      {subs.map((c) => <div key={c.id} className="lg-clip sub">
-        <Icon name="text" size="xs" /><input className="lg-subtext" value={c.text || ""} onKeyDown={stop} onChange={(e) => patch(c.id, { text: e.target.value })} />
-        <label>起<input type="number" step="0.1" min={0} value={c.start || 0} onKeyDown={stop} onChange={(e) => patch(c.id, { start: Number(e.target.value) || 0 })} /></label>
-        <label>止<input type="number" step="0.1" min={0} value={c.end || 0} onKeyDown={stop} onChange={(e) => patch(c.id, { end: Number(e.target.value) || 0 })} /></label>
-        <button className="ib" onClick={() => set(clips.filter((x) => x.id !== c.id))} aria-label="移除"><Icon name="x" size="xs" /></button>
-      </div>)}
-    </div>
-    {prev && media.length ? <TimelinePreview clips={media} onClose={() => setPrev(false)} /> : null}
-    <div className="lg-row">
-      <button className="pill" disabled={!media.length} onClick={() => setPrev(!prev)}><Icon name="play" size="xs" />{prev ? "关闭预览" : "预览"}</button>
-      <span className="grow" />{busy ? <span className="lg-dim">{busy}</span> : null}
-      {backendExportAvailable() ? <button className="pill" disabled={!media.length || !!busy} onClick={() => void exportIt("mp4")}><Icon name="download" size="xs" />导出 MP4</button> : null}
-      <button className="pill" disabled={!media.length || !!busy} onClick={() => void exportIt("webm")}><Icon name="download" size="xs" />导出 WebM</button>
-    </div>
-  </div>;
-}
-function TimelinePreview({ clips, onClose }: { clips: TimelineClip[]; onClose: () => void }) {
-  const [i, setI] = useState(0); const c = clips[Math.min(i, clips.length - 1)]; const url = useAssetUrl(c.url); const ref = useRef<HTMLVideoElement>(null);
-  useEffect(() => { const v = ref.current; if (!v || !url) return; v.currentTime = c.inPoint; void v.play().catch(() => undefined); }, [url, c.inPoint]);
-  return <div className="lg-prev">
-    {c.mediaKind === "audio" ? <audio ref={ref as never} src={url} onTimeUpdate={(e) => { if (e.currentTarget.currentTime >= c.outPoint) (i + 1 < clips.length ? setI(i + 1) : onClose()); }} controls /> : <video ref={ref} src={url} muted={false} onTimeUpdate={(e) => { if (e.currentTarget.currentTime >= c.outPoint) (i + 1 < clips.length ? setI(i + 1) : onClose()); }} />}
-    <span className="tnum lg-dim">片段 {i + 1}/{clips.length}</span>
-  </div>;
-}
+/* ---------------- 剪辑时间线：见 TimelineEditor.tsx ---------------- */
+export { TimelineEditor as TimelineBody } from "./TimelineEditor";
 
 /* ---------------- 3D 模型（文生 / 图生 3D） ---------------- */
 export function Model3DBody({ node }: { node: CanvasNode }) {
@@ -192,5 +124,5 @@ export function Scene3DBody({ node }: { node: CanvasNode }) {
 }
 
 export const LEGACY_DEFAULT: Record<string, { w: number; h: number; text: string }> = {
-  timeline: { w: 560, h: 300, text: "剪辑时间线" }, model3d: { w: 420, h: 400, text: "" }, scene3d: { w: 640, h: 520, text: "3D 片场" }, note: { w: 240, h: 180, text: "" },
+  timeline: { w: 760, h: 540, text: "剪辑时间线" }, model3d: { w: 420, h: 400, text: "" }, scene3d: { w: 640, h: 520, text: "3D 片场" }, note: { w: 240, h: 180, text: "" },
 };

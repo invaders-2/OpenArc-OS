@@ -11,6 +11,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFile, spawn } = require("node:child_process");
+const { bundledBinary } = require("./bundled-bin.cjs");
 
 const CANDIDATE_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 const RESOLUTIONS = { "1080p": [1920, 1080], "720p": [1280, 720], "480p": [854, 480] };
@@ -20,6 +21,7 @@ const MAX_TOTAL_SEC = 2 * 3600;
 function findBinary(name, env = process.env) {
   const dirs = [];
   if (env.OPENARC_FFMPEG_DIR) dirs.push(env.OPENARC_FFMPEG_DIR);
+  else { const bundled = bundledBinary(name); if (bundled) return bundled; }
   dirs.push(...CANDIDATE_DIRS, ...String(env.PATH || "").split(path.delimiter).filter(Boolean));
   for (const d of dirs) {
     const p = path.join(d, name);
