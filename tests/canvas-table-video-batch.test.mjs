@@ -9,6 +9,7 @@
  *   ⑥ 分镜出片：首帧图批量结果填回表格首帧列，分镜视频按行读到首帧
  *   ⑦ 镜头串联：上一行视频的最后一帧作为下一行首帧，逐行顺序生成
  *   ⑧ 分镜表出表自动追加首帧 / 尾帧列；重新出表保留已放的图；画布图片拖进单元格
+ *   ⑨ 文本节点连「首帧」组、「尾帧」组：出表后逐行放好首尾帧，模型看图写提示词，下游视频按首尾帧出片
  */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +25,7 @@ const CACHE = path.join(ROOT, "node_modules/.cache"); fs.mkdirSync(CACHE, { recu
 const ENTRY = path.join(CACHE, "oa-table-batch-entry-" + process.pid + ".ts");
 const OUT = path.join(CACHE, "oa-table-batch-" + process.pid + ".mjs");
 const src = (p) => JSON.stringify(path.join(ROOT, "src/canvas/canvas-next", p));
-fs.writeFileSync(ENTRY, `export * from ${src("table.ts")};\nexport { CanvasStore } from ${src("store.ts")};\nexport { runNode, buildRequest } from ${src("engine.ts")};\nexport { storyboardPipeline } from ${src("tableFlow.ts")};\nexport { newNode, withGen, genOf, outOf } from ${src("model.ts")};\n`);
+fs.writeFileSync(ENTRY, `export * from ${src("table.ts")};\nexport { CanvasStore } from ${src("store.ts")};\nexport { runNode, buildRequest } from ${src("engine.ts")};\nexport { storyboardPipeline } from ${src("tableFlow.ts")};\nexport { newNode, withGen, genOf, outOf, connectBlock } from ${src("model.ts")};\n`);
 const mem = new Map();
 globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
 await esbuild.build({ entryPoints: [ENTRY], bundle: true, format: "esm", platform: "neutral", outfile: OUT, logLevel: "silent" });
@@ -188,4 +189,37 @@ test("⑧ 分镜表出表追加首帧 / 尾帧列；重新出表保留已放的�
   assert.equal(T.tableOf(store.node(tn.id)).rows[1][5], "openarc-asset:cat");
   await T.runNode(store, "tx");
   assert.equal(T.tableOf(store.node(tn.id)).rows[1][5], "openarc-asset:cat", "重新出表后图还在");
+});
+
+test("⑨ 文本节点连「首帧」组、「尾帧」组：逐行放首尾帧，模型看图写提示词", async () => {
+  const reply = JSON.stringify({ kind: "table", version: 1, columns: ["镜头", "提示词"], rows: [["1", "女孩从站立转身看向大海"], ["2", "海浪涌上沙滩后退去"]] });
+  const VISION = { ...TEXT, id: "t-v", vision: true };
+  const { store, reqs } = makeStore([VIDEO, IMAGE, VISION], reply);
+  const img = (id, x, y) => T.withGen(T.newNode("image", x, y, { id, title: id }), { hist: [{ url: "openarc-asset:" + id }] });
+  // 分组里的图按画布位置从上到下排
+  const ims = [img("f2", 0, 400), img("f1", 0, 0), img("l1", 400, 0), img("l2", 400, 400)];
+  const gF = { id: "gF", kind: "group", x: -20, y: -40, w: 300, h: 700, text: "首帧", children: ["f2", "f1"] };
+  const gL = { id: "gL", kind: "group", x: 380, y: -40, w: 300, h: 700, text: "尾帧组", children: ["l1", "l2"] };
+  const tx = T.withGen(T.newNode("text", 900, 0, { id: "tx", prompt: "两个镜头的海边短片" }, VISION), { params: { model: "t-v", search: false, output: "table" } });
+  store.mutate((d) => ({ ...d, nodes: [...ims, gF, gL, tx], edges: [edge("gF", "tx"), edge("gL", "tx")] }));
+  assert.match(T.connectBlock(store.state.doc, "gF", "f1") || "", /分组只能连到文本节点/);
+  assert.deepEqual(T.groupInputs(store.state.doc, "tx").map((g) => [g.name, g.role, g.images.map((i) => i.nodeId).join(",")]), [["首帧", "first", "f1,f2"], ["尾帧组", "last", "l1,l2"]]);
+  assert.equal(await T.runNode(store, "tx"), true);
+  const ask = reqs.find((q) => q.kind === "text");
+  assert.match(ask.resolvedPrompt, /正好 2 行/);
+  assert.deepEqual(ask.inputs.filter((i) => i.kind === "image").map((i) => i.title), ["首帧 第 1 张", "首帧 第 2 张", "尾帧组 第 1 张", "尾帧组 第 2 张"]);
+  const tn = store.state.doc.nodes.find((n) => n.kind === "table"); const t = T.tableOf(tn);
+  assert.deepEqual(t.columns, ["镜头", "提示词", "首帧", "尾帧"]);
+  assert.deepEqual(t.rows.map((r) => [r[2], r[3]]), [["openarc-asset:f1", "openarc-asset:l1"], ["openarc-asset:f2", "openarc-asset:l2"]]);
+  // 接视频节点：每行首尾帧 + 提示词
+  store.mutate((d) => ({ ...d, nodes: [...d.nodes, gen(store, "video", "gv")], edges: [...d.edges, edge(tn.id, "gv")] }));
+  reqs.length = 0;
+  assert.equal(await T.runNode(store, "gv"), true);
+  const vids = reqs.filter((q) => q.kind === "video").sort((a, b) => store.node(a.nodeId).data.tableRow - store.node(b.nodeId).data.tableRow);
+  assert.deepEqual(vids.map((q) => q.videoMode.name), ["首尾帧", "首尾帧"]);
+  assert.deepEqual(vids.map((q) => q.inputs.map((i) => i.role + ":" + i.url)), [["first_frame:openarc-asset:f1", "last_frame:openarc-asset:l1"], ["first_frame:openarc-asset:f2", "last_frame:openarc-asset:l2"]]);
+  assert.equal(vids[0].resolvedPrompt, "提示词：女孩从站立转身看向大海");
+  // 没起名的组按连线顺序补位
+  store.updateNode("gF", (n) => ({ ...n, text: "分组" })); store.updateNode("gL", (n) => ({ ...n, text: "分组" }));
+  assert.deepEqual(T.groupInputs(store.state.doc, "tx").map((g) => g.role), ["first", "last"]);
 });

@@ -12,6 +12,7 @@
  * 不做合并单元格。上限沿用：手工 200 列 / 5000 行，模型生成 40 列 / 200 行，单元格 20000 字。
  */
 import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
+import { isStack, stackItems } from "./stack";
 import { genOf, inputsOf, isGenKind, outOf, srcOf, textOf, uid, type AnyParams, type GenKind, type ModelSpec, type VideoMode, type VideoParams } from "./model";
 
 export const TABLE_LIMITS = { cols: 200, rows: 5000, llmCols: 40, llmRows: 200, cell: 20000 };
@@ -380,6 +381,53 @@ export function dropImageOnCell(store: { node: (id: string) => CanvasNode | unde
   store.updateNode(tid, (n) => { const t = tableOf(n); if (!t.rows[r] || c >= t.columns.length) return n; const cur = mediaRefsIn(t.rows[r][c]); const v = (multi ? [...cur.filter((x) => x !== url), url].slice(-8) : [url]).join("\n"); return withTable(n, { ...t, rows: t.rows.map((row, i) => (i === r ? row.map((x, j) => (j === c ? v : x)) : row)) }); }, { history: true });
   store.toast(`已把「${genOf(img!).title}」放进第 ${r + 1} 行的「${tableOf(tn).columns[c]}」`);
   return true;
+}
+
+/* ---------- 分组输入：文本节点连「首帧」组 / 「尾帧」组，出表时逐行放图 ---------- */
+export type GroupInput = { groupId: string; name: string; role: "first" | "last" | "ref"; images: Array<{ nodeId: string; title: string; url: string }> };
+/** 组里的图片（有结果的才算）：堆叠按叠内顺序，分组按画布位置从上到下、从左到右 */
+export function groupImages(doc: CanvasDoc, g: CanvasNode): Array<{ nodeId: string; title: string; url: string }> {
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  const members = isStack(g) ? stackItems(doc, g) : (g.children || []).map((id) => byId.get(id)).filter((n): n is CanvasNode => !!n).sort((a, b) => a.y - b.y || a.x - b.x);
+  return members.filter((n) => n.kind === "image" && outOf(n)?.url).map((n) => ({ nodeId: n.id, title: genOf(n).title, url: outOf(n)!.url! }));
+}
+/**
+ * 连进文本节点的分组：按组名认用途（「首帧」「开头画面」→ 首帧，「尾帧」→ 尾帧，「参考图」→ 参考图）；
+ * 没起名的组按连线顺序补位：先补首帧，再补尾帧，其余算参考图。
+ */
+export function groupInputs(doc: CanvasDoc, id: string): GroupInput[] {
+  const gs = inputsOf(doc, id).filter((x) => x.node.kind === "group").map((x) => x.node);
+  const named = gs.map((g) => { const name = g.text && g.text !== "分组" && g.text !== "堆叠" ? g.text : ""; const r = name ? guessRole(name) : null; return { g, name, role: r === "first" || r === "last" || r === "ref" ? r : null }; });
+  const taken = new Set(named.map((x) => x.role).filter(Boolean));
+  return named.map(({ g, name, role }) => {
+    let r = role;
+    if (!r) { r = !taken.has("first") ? "first" : !taken.has("last") ? "last" : "ref"; taken.add(r); }
+    return { groupId: g.id, name: name || (isStack(g) ? "堆叠" : "分组"), role: r, images: groupImages(doc, g) };
+  });
+}
+/** 出表提示里关于分组的说明 */
+export function groupNote(groups: GroupInput[], withImages: boolean): string {
+  if (!groups.length) return "";
+  const n = Math.max(0, ...groups.map((g) => g.images.length));
+  return [
+    `素材分组：${groups.map((g) => `「${g.name}」${g.images.length} 张，作为每一行的${ROLE_META[g.role].label}`).join("；")}。`,
+    `表格必须正好 ${n} 行：第 i 行对应每组的第 i 张图，图片由系统放进对应的列，你只写文字列。`,
+    withImages ? "这些图已按顺序附上（图的标题写明了是哪一组第几张）。请看图，为每一行写出从首帧画面自然过渡到尾帧画面的主体动作、镜头运动和氛围，可直接用作视频提示词。" : "请按行写出每个镜头的画面、动作和运镜，可直接用作视频提示词。",
+  ].join("");
+}
+/** 把分组里的图逐行放进首帧 / 尾帧 / 参考图列（没有这列就加一列），行数不够就补空行 */
+export function fillGroupColumns(t: TableData, groups: GroupInput[]): TableData {
+  if (!groups.some((g) => g.images.length)) return t;
+  const columns = [...t.columns]; const rows = t.rows.map((r) => [...r]); const roles = t.roles ? [...t.roles] : undefined;
+  const n = Math.max(rows.length, ...groups.map((g) => g.images.length));
+  while (rows.length < n) rows.push(columns.map(() => ""));
+  for (const g of groups) {
+    if (!g.images.length) continue;
+    let ci = rolesOf({ ...t, columns, rows, roles }).findIndex((r) => r.role === g.role);
+    if (ci < 0) { columns.push(ROLE_META[g.role].label); rows.forEach((r) => r.push("")); if (roles) roles.push(""); ci = columns.length - 1; }
+    g.images.forEach((im, i) => { rows[i][ci] = g.role === "ref" ? [...mediaRefsIn(rows[i][ci]), im.url].slice(0, 8).join("\n") : im.url; });
+  }
+  return { ...t, columns, rows, ...(roles ? { roles } : {}) };
 }
 
 /* ---------- 尺寸（DX OS Yw / mR，按我们的节点比例收一点） ---------- */

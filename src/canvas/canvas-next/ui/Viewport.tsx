@@ -55,7 +55,7 @@ export function Viewport() {
     addEventListener("keydown", dn); addEventListener("keyup", up); return () => { removeEventListener("keydown", dn); removeEventListener("keyup", up); };
   }, []);
 
-  const portPos = (n: CanvasNode, side: "in" | "out") => ({ x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 });
+  const portPos = (n: CanvasNode, side: "in" | "out") => n.kind === "group" && side === "out" ? { x: n.x + n.w - 13, y: n.y + 10 } : { x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 };
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     closePop();
@@ -224,7 +224,15 @@ export function Viewport() {
     const w = ctl.toWorld(e.clientX, e.clientY); addMenu(ctl, { x: e.clientX + 4, y: e.clientY + 4 }, w);
   };
   const renameInline = (id: string, el: HTMLElement) => {
-    const n = store.node(id); if (!n || !isGenKind(n.kind)) return;
+    const n = store.node(id); if (!n) return;
+    // 分组 / 堆叠：名字存在 node.text（起名「首帧」「尾帧」后连到文本节点，出表时按组名放图）
+    if (n.kind === "group") {
+      el.contentEditable = "true"; el.classList.add("rename"); el.focus(); const rg = document.createRange(); rg.selectNodeContents(el); const sl = getSelection()!; sl.removeAllRanges(); sl.addRange(rg);
+      const fin = (save: boolean) => { el.contentEditable = "false"; el.classList.remove("rename"); const v = (el.textContent || "").trim().slice(0, 40); if (save && v && v !== n.text) { store.updateNode(id, (x) => ({ ...x, text: v }), { history: true }); store.toast(`已重命名为「${v}」`); } else el.textContent = n.text || "分组"; };
+      el.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); el.onblur = null; fin(true); } if (ev.key === "Escape") { el.onblur = null; fin(false); } };
+      el.onblur = () => fin(true); return;
+    }
+    if (!isGenKind(n.kind)) return;
     el.contentEditable = "true"; el.classList.add("rename"); el.focus(); const r = document.createRange(); r.selectNodeContents(el); const s = getSelection()!; s.removeAllRanges(); s.addRange(r);
     const done = (save: boolean) => { el.contentEditable = "false"; el.classList.remove("rename"); const v = (el.textContent || "").trim().slice(0, 40); const old = genOf(n).title; if (save && v && v !== old) { store.patchGen(id, { title: v }, { history: true }); store.toast(`已重命名为「${v}」，引用它的提示词需要同步修改`); } else el.textContent = old; };
     el.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); el.onblur = null; done(true); } if (ev.key === "Escape") { el.onblur = null; done(false); } };

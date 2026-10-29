@@ -440,6 +440,8 @@ export function connectBlock(doc: CanvasDoc, from: string, to: string): string |
   const a = doc.nodes.find((n) => n.id === from), b = doc.nodes.find((n) => n.id === to);
   if (!a || !b) return "节点不存在";
   if (b.kind === "image" && a.kind === "audio") return "图片节点不接收音频输入";
+  if (b.kind === "group") return "分组不接收输入";
+  if (a.kind === "group" && b.kind !== "text") return "分组只能连到文本节点：按组生成多维表格（如「首帧」组、「尾帧」组）";
   return null;
 }
 

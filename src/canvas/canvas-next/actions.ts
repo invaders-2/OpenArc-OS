@@ -1,6 +1,6 @@
 /** 画布上的编辑动作（连线、删除、复制粘贴、上传……），界面和 Agent 共用 */
 import type { CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { autoVideoMode, connectBlock, genOf, inputsOf, isGenKind, uid, withGen, type GenKind, type VideoParams } from "./model";
+import { autoVideoMode, connectBlock, genOf, inputsOf, isGenKind, uid, withGen, type GenKind, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { tableAutoSize, tableMedia, tableOf } from "./table";
 import { hiddenIds, isStack } from "./stack";
@@ -21,6 +21,8 @@ export const title = (n: CanvasNode) => (isGenKind(n.kind) ? genOf(n).title : n.
 export function afterInputsChanged(store: CanvasStore, id: string) {
   const n = store.node(id); if (!n) return;
   if (n.kind === "video") { const m = store.modelOf(n); if (m) { const mode = autoVideoMode(store.state.doc, id, m); if (mode && mode !== (genOf(n).params as VideoParams).mode) store.patchGen(id, (g) => ({ params: { ...(g.params as VideoParams), mode } })); } }
+  // 文本节点连进了分组（首帧组 / 尾帧组）：输出还是「文本」时切到「多维表格」，出表时按组逐行放图
+  if (n.kind === "text" && inputsOf(store.state.doc, id).some((x) => x.node.kind === "group")) { const tp = genOf(n).params as TextParams; if (!tp.output || tp.output === "text") { store.patchGen(id, (g) => ({ params: { ...(g.params as TextParams), output: "table" } })); store.toast("已把输出切到「多维表格」：出表时会按组把图逐行放进首帧 / 尾帧列"); } }
   if (n.kind === "table") { const s = tableAutoSize(tableOf(n), tableMedia(store.state.doc, id).length ? 1 : 0); if (s.w > n.w) store.updateNode(id, (x) => ({ ...x, w: s.w })); }
 }
 

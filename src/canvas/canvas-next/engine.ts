@@ -14,7 +14,7 @@ import { applyElements, elementInputs } from "./elements";
 import { nodeError } from "./errorText";
 import { autoVideoMode, clamp, draftRes, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
-import { batchOf, batchRows, keepMediaCells, withStoryboardMedia, emptyRunHint, fillTargetOf, parseTableJson, planRow, repairPrompt, rowHasFirst, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableMedia, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type FillTarget, type TableData } from "./table";
+import { batchOf, batchRows, ROLE_META, fillGroupColumns, groupInputs, groupNote, keepMediaCells, withStoryboardMedia, emptyRunHint, fillTargetOf, parseTableJson, planRow, repairPrompt, rowHasFirst, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableMedia, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type FillTarget, type TableData } from "./table";
 
 /* ---------- 请求组装 ---------- */
 export function rolesFor(kind: GenKind, p: unknown, m: ModelSpec | undefined, ins: ReturnType<typeof inputsOf>) {
@@ -218,11 +218,16 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
   const node = store.node(id)!; const g = genOf(node); const m = store.modelOf(node)!;
   const mode = (g.params as TextParams).output === "storyboard" ? "storyboard" : "table";
   const ins = inputsOf(store.state.doc, id);
-  const media = ins.filter((x) => x.node.kind !== "text" && x.node.kind !== "table").length;
-  const base = buildRequest(store, node); if (!base) return false;
+  const media = ins.filter((x) => x.node.kind !== "text" && x.node.kind !== "table" && x.node.kind !== "group").length;
+  // 连进来的分组（「首帧」组、「尾帧」组…）：出表后按顺序把图逐行放进对应列；能看图的模型把图一起发过去写提示词
+  const groups = groupInputs(store.state.doc, id);
+  const base0 = buildRequest(store, node); if (!base0) return false;
+  const seeImages = !!m.vision && groups.some((x) => x.images.length);
+  const groupRefs = seeImages ? groups.flatMap((gr) => gr.images.map((im, k) => ({ nodeId: im.nodeId, title: `${gr.name} 第 ${k + 1} 张`, kind: "image" as const, role: "reference" as const, url: im.url }))).slice(0, 24) : [];
+  const base = { ...base0, inputs: [...base0.inputs, ...groupRefs.filter((r) => !base0.inputs.some((i) => i.nodeId === r.nodeId)).map((r, k) => ({ ...r, order: base0.inputs.length + k + 1 }))] };
   if (!g.prompt.trim() && !ins.length) { store.toast("LLM 表格工作流需要拆分任务的文字要求。"); return false; }
   const ctx = ins.filter((x) => x.node.kind === "text").map((x) => `【${genOf(x.node).title}】\n${textOf(x.node)}`).join("\n\n");
-  const task = [ctx, g.prompt].filter(Boolean).join("\n\n");
+  const task = [ctx, g.prompt, groupNote(groups, seeImages)].filter(Boolean).join("\n\n");
   const abort = new AbortController(); const t0 = performance.now();
   store.patchGen(id, { err: undefined, errCode: undefined });
   store.setRun(id, { status: "running", progress: .02, abort, startedAt: Date.now() });
@@ -235,7 +240,7 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
     const doc = store.state.doc;
     const existing = doc.nodes.find((n) => n.kind === "table" && tableOf(n).sourceId === id);
     // 重新出表：已经放进首帧 / 尾帧等图片列的图按行保留（列名相同才算）
-    const table: TableData = keepMediaCells({ ...t, title: existing ? tableOf(existing).title : title, sourceId: id }, existing ? tableOf(existing) : null);
+    const table: TableData = keepMediaCells(fillGroupColumns({ ...t, title: existing ? tableOf(existing).title : title, sourceId: id }, groups), existing ? tableOf(existing) : null);
     const size = tableAutoSize(table, media ? 1 : 0);
     if (existing) store.updateNode(existing.id, (n) => ({ ...withTable(n, table), w: Math.max(n.w, size.w), h: size.h }), { history: true });
     else {
@@ -243,7 +248,8 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
       const tn: CanvasNode = withTable({ id: uid("t"), kind: "table", x: pos.x, y: pos.y, w: size.w, h: size.h, text: title }, table);
       store.addNodes([tn], [{ id: uid("e"), from: id, to: tn.id }]);
     }
-    const summary = `已生成${title}：${table.rows.length} 行 × ${table.columns.length} 列\n列：${table.columns.join("、")}`;
+    const placed = groups.filter((x) => x.images.length).map((x) => `「${x.name}」${x.images.length} 张 → ${ROLE_META[x.role].label}列`).join("，");
+    const summary = `已生成${title}：${table.rows.length} 行 × ${table.columns.length} 列\n列：${table.columns.join("、")}` + (placed ? `\n已放图：${placed}` : "");
     const hist = [...genOf(store.node(id)!).hist, { text: summary, meta: { model: m.name, at: Date.now() } }];
     store.patchGen(id, { hist, hi: hist.length - 1, manual: false });
     store.setRun(id, null);
