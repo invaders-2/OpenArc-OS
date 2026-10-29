@@ -102,6 +102,7 @@ function scheduleText(s: Schedule | null | undefined) {
 }
 const ACTION_LABEL: Record<string, string> = {
   agent_instruction: "让助理执行",
+  chat_task: "全局 AI 新开对话执行",
   dingtalk_group_notify: "钉钉群通知",
   dingtalk_person_notify: "钉钉个人通知",
   lingxing_cache_sync: "领星数据同步",

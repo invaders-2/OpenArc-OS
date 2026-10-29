@@ -125,6 +125,54 @@ let agentBundle;
 let skillBundle;
 let mediaBundle;
 let automationBundle;
+/**
+ * 自动化 → 全局 AI：到点时以当前登录用户新开一段对话执行提示词。
+ * 等这一轮跑完（最多 8 分钟，短于自动化 10 分钟的僵尸判定），之后的进度在对话里看。
+ * 对话标题记成「自动化名 · 月/日 时:分」，方便在列表里认出来。
+ */
+const CHAT_TASK_WAIT_MS = 8 * 60000;
+const CHAT_TASK_ERRORS = {
+  TASK_NOT_SIGNED_IN: "需要登录创建这条自动化的账号，OpenArc 才能替你执行",
+  MODEL_CONFIG_UNAVAILABLE: "没有可用的对话模型（或选的模型已停用）",
+  CAPABILITY_UNAVAILABLE: "选的模型不支持对话",
+  TASK_FORBIDDEN: "当前身份无权使用全局 AI",
+  INVALID_INPUT: "提示词为空",
+};
+function createChatTaskAutomationAdapter() {
+  return {
+    async run(prompt, options = {}) {
+      const started = chatTaskRunner.runAsCurrentUser({ userId: options.userId, goal: prompt, modelConfigId: options.modelConfigId || null });
+      if (!started || !started.ok) {
+        const code = (started && started.error) || "INTERNAL_ERROR";
+        const error = new Error(CHAT_TASK_ERRORS[code] || ("全局 AI 没有启动（" + code + "）"));
+        error.code = code;
+        throw error;
+      }
+      if (options.title) {
+        const d = new Date();
+        const stamp = (d.getMonth() + 1) + "/" + d.getDate() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+        try { getChatPrefs().update({ userId: options.userId, taskId: started.taskId, action: "rename", title: String(options.title).slice(0, 60) + " · " + stamp }); } catch { /* 标题写不进去不影响执行 */ }
+      }
+      let timer = null;
+      const result = await Promise.race([
+        started.settled,
+        new Promise((resolve) => { timer = setTimeout(() => resolve(null), CHAT_TASK_WAIT_MS); if (timer.unref) timer.unref(); }),
+      ]);
+      if (timer) clearTimeout(timer);
+      const status = result && result.task ? result.task.status : "RUNNING";
+      const text = result && result.artifact && result.artifact.content != null ? String(result.artifact.content) : "";
+      return { taskId: started.taskId, status, text };
+    },
+  };
+}
+/** 对话列表偏好（重命名 / 置顶 / 隐藏）：对话 IPC 与「自动化」共用同一个实例，避免两份缓存互相覆盖。 */
+let chatPrefsStore = null;
+function getChatPrefs() {
+  if (!chatPrefsStore) chatPrefsStore = createChatPrefs({ file: path.join(app.getPath("userData"), "chat-prefs.json") });
+  return chatPrefsStore;
+}
+/** 全局 AI 对话的「以当前登录用户开新对话」入口（registerTaskIpc 返回），供自动化到点时调用。 */
+let chatTaskRunner = null;
 let platformBundle;
 let developerBundle;
 let pluginBundle;
@@ -403,7 +451,7 @@ function registerRuntimeDomains(context) {
     registerUploadConsentIpc({ ipcMain, service: uploadConsent, identity: identity.service, isTrusted: trusted });
     registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted, extension: identity.canvasDxosExtension, assetPublicUrl: canvasAssetPublicUrl, importRemote: canvasImportRemote });
 
-    registerTaskIpc({
+    chatTaskRunner = registerTaskIpc({
       ipcMain,
       taskService: identity.taskService,
       orchestrator: identity.orchestrator,
@@ -783,11 +831,13 @@ function registerRuntimeDomains(context) {
       agent: agentBundle && typeof agentBundle.runInstruction === "function"
         ? { runInstruction: (instruction, options) => agentBundle.runInstruction(instruction, options) }
         : null,
+      chatTask: chatTaskRunner ? createChatTaskAutomationAdapter() : null,
       toolCatalog: automationToolCatalog,
       adapterNotes: {
         desktop: automationDesktopNote,
         integrations: automationIntegrationsNote,
         agent: agentBundle ? null : "agent-service 未装配",
+        chatTask: chatTaskRunner ? null : "全局 AI 对话任务未装配",
       },
       logger: null,
       clock: null,
@@ -1085,7 +1135,7 @@ function registerRuntimeDomains(context) {
     protocol.handle(chatPreview.scheme, (request) => chatPreview.handle(request));
     registerChatIpc({
       ipcMain, preview: chatPreview, isTrusted: trusted, shell,
-      prefs: createChatPrefs({ file: path.join(app.getPath("userData"), "chat-prefs.json") }),
+      prefs: getChatPrefs(),
       getUserId: () => { try { const s = identity.service && identity.service.snapshot; return (s && (typeof s === "function" ? s.call(identity.service) : s).userId) || null; } catch { return null; } },
       voice: createVoiceTranscriber({
         getStore: () => (identity.modelService && identity.modelService.providerProtocol && identity.modelService.providerProtocol.store) || null,

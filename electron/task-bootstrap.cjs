@@ -183,6 +183,63 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
       else if (update.kind === "tool") send({ type: "task/progress", taskId, kind: "tool", name: String(update.name || "").slice(0, 80) });
     });
   }
+  function emitResultFor(context, taskId, r) {
+    if (!send) return;
+    send({
+      type: "task/result", taskId,
+      goal: r && r.task && typeof r.task.goal === "string" ? r.task.goal.slice(0, 120) : null,
+      ok: !!(r && r.ok),
+      status: r && r.task ? r.task.status : null,
+      stepStatus: r && r.step ? r.step.status : null,
+      artifact: r && r.artifact ? { type: r.artifact.type, content: String(r.artifact.content == null ? "" : r.artifact.content).slice(0, 4000), checksum: r.artifact.checksum || null } : null,
+      verification: r && r.verification ? { type: r.verification.type, status: r.verification.status } : null,
+      error: r && r.error ? String(r.error).slice(0, 120) : null,
+    });
+    // 后台任务：一轮跑完（成功 / 停下 / 失败）交给宿主决定要不要发系统通知（窗口不在前台时）。
+    if (typeof onResult === "function") {
+      try { onResult({ taskId, ok: !!(r && r.ok), status: r && r.task ? r.task.status : null, goal: r && r.task && typeof r.task.goal === "string" ? r.task.goal : "" }); } catch { /* 通知失败不影响结果推送 */ }
+    }
+    // task-52：运行结束后把步骤/模型/工具事件一次性推给对话 UI（safeEvent/safeCall，不含密钥）。
+    if (taskId && typeof taskService.getEvents === "function") {
+      const events = taskService.getEvents({ context, taskId });
+      const calls = typeof taskService.getCalls === "function" ? taskService.getCalls({ context, taskId }) : null;
+      if (events && events.ok) send({ type: "task/event", taskId, events: events.items, calls: calls && calls.ok ? calls.items : [] });
+    }
+  }
+  /**
+   * 开一段新对话并开始执行（task/run 与「自动化」共用）。
+   * 返回 { ok, taskId, status, settled }：settled 在这一轮跑完（成功 / 停下 / 失败）时 resolve 成编排结果。
+   */
+  function startRun(context, payload) {
+    const goal = typeof payload.goal === "string" ? payload.goal.slice(0, MAX_GOAL_CHARS) : "";
+    if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
+    const canvasInput = normalizeCanvasTaskContext(payload.canvasContext);
+    if (!canvasInput.ok) return { ok: false, error: canvasInput.error };
+    if (canvasInput.context) {
+      if (!canvasService || typeof canvasService.getCanvas !== "function") return { ok: false, error: "CANVAS_UNAVAILABLE" };
+      const target = canvasService.getCanvas({ context, canvasId: canvasInput.context.canvasId });
+      if (!target || !target.ok) return { ok: false, error: "CANVAS_NOT_FOUND_OR_FORBIDDEN" };
+    }
+    // D4-03：产品任务的 model config 一律由**后端**按可信 context 解析后冻结（createTask 内再按当时
+    // version 落库）；renderer 自报的 modelConfigVersion 一概忽略。解析不出来就明确
+    // 拒绝，绝不静默回退、绝不建未绑定任务（旧任务的懒绑定见 TaskService.startHarnessRun）。
+    // 对话的「切换模型」：renderer 只能点名一个 configId，能不能用（启用 / 有 chat 能力 / 当前身份有 model.use 授权）
+    // 仍由 resolveModel 判定；点名的模型不可用就明确拒绝，不回退到默认模型。
+    const modelService = taskService.modelService;
+    const wanted = typeof payload.modelConfigId === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(payload.modelConfigId) ? payload.modelConfigId : null;
+    const resolved = modelService && typeof modelService.resolveModel === "function"
+      ? modelService.resolveModel({ context, capability: "chat", configId: wanted })
+      : { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    const created = taskService.createTask({ context, goal, modelConfigId: resolved.snapshot.modelConfigId });
+    if (!created.ok) return created;
+    const taskId = created.task.taskId;
+    // 不等待整条 Harness 链：立即返回，进度经 send 推送；approval 由 sideeffect:event 推送。
+    const running = orchestrator.runTask({ context, taskId, expectedRevision: created.task.revision, stepInput: canvasInput.context, verify: { type: "SCHEMA_VALID" } });
+    const settled = running.then((r) => { emitResultFor(context, taskId, r); return r; }).catch(() => { try { if (send) send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } return null; });
+    return { ok: true, taskId, status: created.task.status, settled };
+  }
+
   ipcMain.handle("task:command", async (e, raw) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!taskService || !orchestrator) return { ok: false, error: "INTERNAL_ERROR", detail: "task-not-ready" };
@@ -192,59 +249,12 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
     const payload = raw.payload && typeof raw.payload === "object" ? raw.payload : raw;
     // sessionRef / appId 一律来自可信宿主，忽略 Renderer 自报的 userId / role / appId / sessionRef。
     const context = { sessionRef: (identity && identity.current) || null, appId: hostAppId, source: "ui", requestId: typeof payload.requestId === "string" ? payload.requestId.slice(0, 80) : null };
-    const emitResult = (taskId, r) => {
-      if (!send) return;
-      send({
-        type: "task/result", taskId,
-        goal: r && r.task && typeof r.task.goal === "string" ? r.task.goal.slice(0, 120) : null,
-        ok: !!(r && r.ok),
-        status: r && r.task ? r.task.status : null,
-        stepStatus: r && r.step ? r.step.status : null,
-        artifact: r && r.artifact ? { type: r.artifact.type, content: String(r.artifact.content == null ? "" : r.artifact.content).slice(0, 4000), checksum: r.artifact.checksum || null } : null,
-        verification: r && r.verification ? { type: r.verification.type, status: r.verification.status } : null,
-        error: r && r.error ? String(r.error).slice(0, 120) : null,
-      });
-      // 后台任务：一轮跑完（成功 / 停下 / 失败）交给宿主决定要不要发系统通知（窗口不在前台时）。
-      if (typeof onResult === "function") {
-        try { onResult({ taskId, ok: !!(r && r.ok), status: r && r.task ? r.task.status : null, goal: r && r.task && typeof r.task.goal === "string" ? r.task.goal : "" }); } catch { /* 通知失败不影响结果推送 */ }
-      }
-      // task-52：运行结束后把步骤/模型/工具事件一次性推给对话 UI（safeEvent/safeCall，不含密钥）。
-      if (taskId && typeof taskService.getEvents === "function") {
-        const events = taskService.getEvents({ context, taskId });
-        const calls = typeof taskService.getCalls === "function" ? taskService.getCalls({ context, taskId }) : null;
-        if (events && events.ok) send({ type: "task/event", taskId, events: events.items, calls: calls && calls.ok ? calls.items : [] });
-      }
-    };
+    const emitResult = (taskId, r) => emitResultFor(context, taskId, r);
     try {
       switch (command) {
         case "task/run": {
-          const goal = typeof payload.goal === "string" ? payload.goal.slice(0, MAX_GOAL_CHARS) : "";
-          if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
-          const canvasInput = normalizeCanvasTaskContext(payload.canvasContext);
-          if (!canvasInput.ok) return { ok: false, error: canvasInput.error };
-          if (canvasInput.context) {
-            if (!canvasService || typeof canvasService.getCanvas !== "function") return { ok: false, error: "CANVAS_UNAVAILABLE" };
-            const target = canvasService.getCanvas({ context, canvasId: canvasInput.context.canvasId });
-            if (!target || !target.ok) return { ok: false, error: "CANVAS_NOT_FOUND_OR_FORBIDDEN" };
-          }
-          // D4-03：产品任务的 model config 一律由**后端**按可信 context 解析后冻结（createTask 内再按当时
-          // version 落库）；renderer 自报的 modelConfigVersion 一概忽略。解析不出来就明确
-          // 拒绝，绝不静默回退、绝不建未绑定任务（旧任务的懒绑定见 TaskService.startHarnessRun）。
-          // 对话的「切换模型」：renderer 只能点名一个 configId，能不能用（启用 / 有 chat 能力 / 当前身份有 model.use 授权）
-          // 仍由 resolveModel 判定；点名的模型不可用就明确拒绝，不回退到默认模型。
-          const modelService = taskService.modelService;
-          const wanted = typeof payload.modelConfigId === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(payload.modelConfigId) ? payload.modelConfigId : null;
-          const resolved = modelService && typeof modelService.resolveModel === "function"
-            ? modelService.resolveModel({ context, capability: "chat", configId: wanted })
-            : { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
-          if (!resolved.ok) return { ok: false, error: resolved.error };
-          const created = taskService.createTask({ context, goal, modelConfigId: resolved.snapshot.modelConfigId });
-          if (!created.ok) return created;
-          const taskId = created.task.taskId;
-          // 不等待整条 Harness 链：立即返回，进度经 send 推送；approval 由 sideeffect:event 推送。
-          const running = orchestrator.runTask({ context, taskId, expectedRevision: created.task.revision, stepInput: canvasInput.context, verify: { type: "SCHEMA_VALID" } });
-          running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
-          return { ok: true, taskId, status: created.task.status };
+          const started = startRun(context, payload);
+          return started.ok ? { ok: true, taskId: started.taskId, status: started.status } : started;
         }
         case "task/get": {
           const taskId = String(payload.taskId == null ? "" : payload.taskId);
@@ -334,6 +344,26 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
       return { ok: false, error: "INTERNAL_ERROR" };
     }
   });
+  /**
+   * 「自动化」到点时用：以当前登录会话开一段新对话。必须是自动化所属的同一个用户在登录——
+   * 换了账号或已退出就明确拒绝（TASK_NOT_SIGNED_IN），绝不借别人的会话执行。
+   */
+  function runAsCurrentUser({ userId, goal, modelConfigId = null } = {}) {
+    if (!taskService || !orchestrator) return { ok: false, error: "INTERNAL_ERROR", detail: "task-not-ready" };
+    const sessionRef = (identity && identity.current) || null;
+    const context = { sessionRef, appId: hostAppId, source: "automation", requestId: null };
+    let actor = null;
+    try { actor = sessionRef && taskService.authService ? taskService.authService.resolveActor({ context }) : null; } catch { actor = null; }
+    if (!actor || !actor.ok || !actor.user || String(actor.user.id) !== String(userId || "")) return { ok: false, error: "TASK_NOT_SIGNED_IN" };
+    try {
+      const started = startRun(context, { goal, modelConfigId });
+      if (started.ok && send) { try { send({ type: "task/created", taskId: started.taskId, source: "automation" }); } catch { /* ignore */ } }
+      return started;
+    } catch {
+      return { ok: false, error: "INTERNAL_ERROR" };
+    }
+  }
+  return { runAsCurrentUser };
 }
 
 module.exports = { MAX_GOAL_CHARS, AGENT_SESSION_DEFAULTS, AGENT_PERSONA, createTaskBundle, registerTaskIpc, normalizeCanvasTaskContext, TASK_COMMANDS, TOOL_FACADE_CONFIG };
