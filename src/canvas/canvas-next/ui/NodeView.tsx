@@ -217,7 +217,8 @@ function VideoBody({ node, out, res }: { node: CanvasNode; out: GenOutput; res?:
     {showTrim ? <TrimBar trim={trim} dur={out.dur} playing onSeek={(t) => seekTo(vref.current, t)} onTrim={saveTrim} /> : null}
     <VideoControls now={now || 0} length={length} paused={paused} muted={muted}
       onToggle={toggle} onMute={() => { const v = vref.current; const m = !muted; if (v) v.muted = m; setMuted(m); }}
-      onSeek={(t) => { seekTo(vref.current, t); setNow(t); }} onClose={() => { vref.current?.pause(); setPlaying(false); setNow(null); }} />
+      onSeek={(t) => { seekTo(vref.current, t); setNow(t); }} onClose={() => { vref.current?.pause(); setPlaying(false); setNow(null); }}
+      onFrame={() => { vref.current?.pause(); window.dispatchEvent(new CustomEvent("cn:editor", { detail: { kind: "frame", id: node.id } })); }} />
   </>;
   return <>
     {frame ? <img src={frame} alt="" draggable={false} /> : url ? <video src={url} muted preload="metadata" onLoadedMetadata={(e) => learnDur(e.currentTarget)} onError={() => media.onError()} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
@@ -228,7 +229,7 @@ function VideoBody({ node, out, res }: { node: CanvasNode; out: GenOutput; res?:
 }
 
 /** 播放控制条：播放/暂停 · 当前/总时长 · 可点可拖的进度条 · 静音 · 收起 */
-function VideoControls({ now, length, paused, muted, onToggle, onMute, onSeek, onClose }: { now: number; length: number; paused: boolean; muted: boolean; onToggle: () => void; onMute: () => void; onSeek: (t: number) => void; onClose: () => void }) {
+function VideoControls({ now, length, paused, muted, onToggle, onMute, onSeek, onClose, onFrame }: { now: number; length: number; paused: boolean; muted: boolean; onToggle: () => void; onMute: () => void; onSeek: (t: number) => void; onClose: () => void; onFrame: () => void }) {
   const track = useRef<HTMLDivElement>(null);
   const frac = length > 0 ? Math.max(0, Math.min(1, now / length)) : 0;
   const scrub = (e: React.PointerEvent) => {
@@ -246,6 +247,7 @@ function VideoControls({ now, length, paused, muted, onToggle, onMute, onSeek, o
     <div className="vctl-track" data-vtrack data-frac={frac.toFixed(3)} ref={track} onPointerDown={scrub}>
       <span className="vctl-rail" /><span className="vctl-fill" style={{ width: frac * 100 + "%" }} /><span className="vctl-knob" style={{ left: frac * 100 + "%" }} />
     </div>
+    <button className="vctl-b" data-act="vframe" title="导出当前帧（生成图片节点）" onClick={onFrame}><Icon name="camera" size="s" /></button>
     <button className="vctl-b" data-act="mute" title={muted ? "取消静音" : "静音"} onClick={onMute}><Icon name={muted ? "mute" : "volume"} size="s" /></button>
     <button className="vctl-b" data-act="stop" title="停止播放" onClick={onClose}><Icon name="x" size="s" /></button>
   </div>;

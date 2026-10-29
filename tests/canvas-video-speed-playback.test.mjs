@@ -90,3 +90,13 @@ test("视频参数弹层：底栏一个入口，弹层只列当前模型支持�
   assert.match(gp, /if \(k === "vset"\) return pop\(\(\) => <VideoSetPop node=\{node\} m=\{mm\} disabled=\{dis\} \/>\);/);
   assert.match(gp, /data-vopt=\{"dur:" \+ d\}/);
 });
+
+test("播放控制条「导出当前帧」：暂停并截当前帧成图片节点；流式地址画不出时按同一时间点回退", () => {
+  const nv = read("src/canvas/canvas-next/ui/NodeView.tsx");
+  assert.match(nv, /data-act="vframe"/);
+  assert.match(nv, /onFrame=\{\(\) => \{ vref\.current\?\.pause\(\); window\.dispatchEvent\(new CustomEvent\("cn:editor", \{ detail: \{ kind: "frame", id: node\.id \} \}\)\); \}\}/);
+  const reg = read("src/canvas/canvas-next/ui/editors/registry.tsx");
+  assert.match(reg, /catch \{ nowAt = vid\.currentTime \|\| 0; \}/);
+  assert.match(reg, /v\.currentTime = nowAt >= 0 \?/);
+  assert.match(reg, /h: Math\.round\(\(n\.w \* fh\) \/ fw\)/);
+});
