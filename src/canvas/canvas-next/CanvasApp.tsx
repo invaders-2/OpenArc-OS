@@ -14,6 +14,7 @@ import { CanvasStore } from "./store";
 import { Chrome, Lightbox, openSearch, showKeys, Toasts, toggleCmt } from "./ui/Chrome";
 import { Ctl, CtlCtx, useS, type HostActions } from "./ui/ctx";
 import { Editors } from "./ui/Editors";
+import { grabVideoFrame } from "./ui/editors/registry";
 import { SelectionUI } from "./ui/GenPanel";
 import { closePop, modalOpen, OverlayHost, popOpen } from "./ui/overlay";
 import { applyTheme, watchSystemTheme } from "./ui/theme";
@@ -40,6 +41,8 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ctl = useMemo(() => new Ctl(new CanvasStore(backend, canvasId, name), host || {}), [backend, canvasId]);
   ctl.host = host || {};
+  // 批量「镜头串联」要取上一镜视频的最后一帧：用编辑器里的截帧（需要 DOM）
+  ctl.store.grabFrame = (id, at) => { const n = ctl.store.node(id); return n ? grabVideoFrame(ctl.store, n, at) : Promise.resolve(""); };
   // 窗口标题变了只同步名字，不重建
   useEffect(() => { if (name && ctl.store.state.name !== name) ctl.store.set({ name }); }, [name, ctl]);
   // onReady 用引用保存：调用方每次渲染传新函数也不会触发重新载入画布（重载会冲掉还没保存的改动）

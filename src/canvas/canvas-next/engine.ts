@@ -14,7 +14,7 @@ import { applyElements, elementInputs } from "./elements";
 import { nodeError } from "./errorText";
 import { autoVideoMode, clamp, draftRes, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
-import { batchOf, batchRows, emptyRunHint, parseTableJson, repairPrompt, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableMedia, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type TableData, type TableMedia } from "./table";
+import { batchOf, batchRows, keepMediaCells, withStoryboardMedia, emptyRunHint, fillTargetOf, parseTableJson, planRow, repairPrompt, rowHasFirst, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableMedia, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type FillTarget, type TableData } from "./table";
 
 /* ---------- 请求组装 ---------- */
 export function rolesFor(kind: GenKind, p: unknown, m: ModelSpec | undefined, ins: ReturnType<typeof inputsOf>) {
@@ -53,18 +53,22 @@ export function resolvePrompt(doc: CanvasDoc, node: CanvasNode, extra = ""): str
 }
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export function buildRequest(store: CanvasStore, node: CanvasNode, row?: { text: string; media: TableMedia[]; row: number }): GenRequest | null {
+export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRow): GenRequest | null {
   if (!isGenKind(node.kind)) return null;
   const doc = store.state.doc; const m = store.modelOf(node); if (!m) return null;
-  const g = genOf(node); const ins = inputsOf(doc, node.id).filter((x) => x.node.kind !== "table");
-  const { roles, ignored } = rolesFor(node.kind, g.params, m, ins);
+  const g = genOf(node);
+  // 表格的一行：时长 / 比例 / 首尾帧按行定（planRow），这一行自带图时生成节点自己连的图片不再发送
+  const plan = row ? planRow(node.kind, g.params, m, row) : null;
+  const eff = plan ? plan.params : g.params;
+  const ins = inputsOf(doc, node.id).filter((x) => x.node.kind !== "table" && !(plan?.ownImages && x.node.kind === "image"));
+  const { roles, ignored } = rolesFor(node.kind, eff, m, ins);
   const inputs: GenInput[] = ins.filter((x) => !ignored.has(x.edge.id)).map((x) => ({ nodeId: x.node.id, title: genOf(x.node).title, kind: x.node.kind as GenKind, order: x.order + 1, role: roles.get(x.edge.id) || "context", url: outOf(x.node)?.url || (x.node.kind === "video" ? outOf(x.node)?.frame : undefined), text: x.node.kind === "text" ? textOf(x.node) : undefined }));
-  if (row) row.media.forEach((md) => { if (!inputs.some((i) => i.nodeId === md.nodeId)) inputs.push({ nodeId: md.nodeId, title: md.title, kind: md.kind, order: inputs.length + 1, role: md.kind === "image" ? (node.kind === "video" ? "first_frame" : "reference") : md.kind === "video" ? "source_video" : md.kind === "audio" ? "driving_audio" : "context", url: md.url || md.src }); });
+  if (plan) plan.inputs.forEach((ri) => { if (!inputs.some((i) => i.nodeId === ri.nodeId)) inputs.push({ ...ri, order: inputs.length + 1 }); });
   // 元素（@名字）：参考图按模型剩余的参考名额加进来
-  inputs.push(...elementInputs(g.prompt, node.kind, m, g.params, inputs));
-  const vm = node.kind === "video" ? (g.params as VideoParams).mode : undefined;
+  inputs.push(...elementInputs(g.prompt, node.kind, m, eff, inputs));
+  const vm = node.kind === "video" ? (eff as VideoParams).mode : undefined;
   // 草稿模式：按模型最低清晰度出片（请求预览里看到的就是实际发出的清晰度）
-  const params = node.kind === "video" && (g.params as VideoParams).draft ? { ...(g.params as VideoParams), res: draftRes(g.params as VideoParams, m) } : g.params;
+  const params = node.kind === "video" && (eff as VideoParams).draft ? { ...(eff as VideoParams), res: draftRes(eff as VideoParams, m) } : eff;
   return { canvasId: store.state.canvasId, nodeId: node.id, kind: node.kind, model: m, prompt: g.prompt, resolvedPrompt: resolvePrompt(doc, node, row?.text || ""), params, inputs, ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
 }
 
@@ -226,11 +230,12 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
   try {
     let raw = await call(tablePrompt(task, mode, media)); let t: TableData;
     try { t = parseTableJson(raw); } catch { store.patchRun(id, { stream: "表格格式校验未通过，正在修复…" }); raw = await call(repairPrompt(raw)); t = parseTableJson(raw); }
-    if (mode === "storyboard") t = { ...t, columns: t.columns.length ? t.columns : STORYBOARD_COLUMNS };
+    if (mode === "storyboard") t = withStoryboardMedia({ ...t, columns: t.columns.length ? t.columns : STORYBOARD_COLUMNS });
     const title = mode === "storyboard" ? "分镜表" : "多维表格";
     const doc = store.state.doc;
     const existing = doc.nodes.find((n) => n.kind === "table" && tableOf(n).sourceId === id);
-    const table: TableData = { ...t, title: existing ? tableOf(existing).title : title, sourceId: id };
+    // 重新出表：已经放进首帧 / 尾帧等图片列的图按行保留（列名相同才算）
+    const table: TableData = keepMediaCells({ ...t, title: existing ? tableOf(existing).title : title, sourceId: id }, existing ? tableOf(existing) : null);
     const size = tableAutoSize(table, media ? 1 : 0);
     if (existing) store.updateNode(existing.id, (n) => ({ ...withTable(n, table), w: Math.max(n.w, size.w), h: size.h }), { history: true });
     else {
@@ -258,27 +263,38 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
 /* ---------- 表格 → 逐行批量生成 ---------- */
 export async function runTableBatch(store: CanvasStore, id: string): Promise<boolean> {
   const gen = store.node(id)!; const g = genOf(gen); const m = store.modelOf(gen)!;
-  const rows = batchRows(store.state.doc, id); const { settings, journal } = batchOf(gen);
+  const { settings, journal } = batchOf(gen);
+  // 图片批量回填（分镜「首帧图」）：自动选中的列第一次运行时记下来，重跑仍填同一列
+  const fill = fillTargetOf(store.state.doc, id, settings);
+  if (fill && settings.fill === undefined) store.updateNode(id, (n) => withBatch(n, { settings: { fill } }));
+  const rows = batchRows(store.state.doc, id, fill);
   const todo = rowsToRun(rows, settings);
   if (!todo.length) { store.toast(emptyRunHint(rows, settings)); return false; }
+  const chain = gen.kind === "video" && !!settings.chain;
   // 续跑：上次 journal 里没完成的行（且仍在本次范围内）
   const resumable = journal && journal.rows.some((r) => r.status !== "completed") ? journal : null;
   const jr: BatchJournal = resumable ? { ...resumable, rows: resumable.rows.map((r) => (r.status === "running" ? { ...r, status: "pending" } : r)) } : { runId: uid("b"), rows: todo.map((r) => ({ row: r.row, status: "pending" })) };
-  const pending = jr.rows.filter((r) => r.status !== "completed" && todo.some((t) => t.row === r.row));
+  const pending = jr.rows.filter((r) => r.status !== "completed" && todo.some((t) => t.row === r.row)).sort((a, b) => a.row - b.row);
   if (!pending.length) { store.updateNode(id, (n) => withBatch(n, { journal: null })); return runTableBatch(store, id); }
-  const conc = Math.min(settings.concurrency, pending.length);
-  store.toast(resumable ? `继续上次未完成的 ${pending.length} 行，已完成的行跳过` : `已开始批量生成：${pending.length} 行，并发 ${conc}`);
+  const conc = chain ? 1 : Math.min(settings.concurrency, pending.length);
+  // 每行的参数（时长 / 比例 / 方式）和要提醒的地方，开跑前算一遍
+  const plans = new Map(todo.map((r) => [r.row, planRow(gen.kind as GenKind, g.params, m, r)]));
+  const notes = new Map<string, number[]>();
+  for (const r of pending) for (const w of plans.get(r.row)?.warnings || []) notes.set(w, [...(notes.get(w) || []), r.row]);
+  const noteText = [...notes].slice(0, 2).map(([w, rs]) => `第 ${rs.slice(0, 6).join("、")}${rs.length > 6 ? " 等" : ""} 行：${w}`).join("；");
+  store.toast((resumable ? `继续上次未完成的 ${pending.length} 行，已完成的行跳过` : `已开始批量生成：${pending.length} 行，${chain ? "镜头串联逐行生成" : "并发 " + conc}`) + (fill ? "，结果会填回表格" : "") + (noteText ? "。" + noteText : ""), noteText ? 6000 : 2600);
   // 结果节点：每行一个，排在生成节点右侧一列
   const doc = store.state.doc; const colX = gen.x + gen.w + 120;
   const existingY = doc.nodes.filter((n) => (n.data as any)?.batchOf === id).map((n) => n.y + n.h + 24 + 40);
   let y = Math.max(gen.y, ...existingY);
   const created: CanvasNode[] = []; const edges = [];
-  // 按所选比例预估出图后的高度来排行间距（出图后节点会按比例长高，按原高度排会互相压住）
-  const pr = (g.params as { ratio?: string }).ratio; const rowH = (gen.kind === "image" || gen.kind === "video") && pr && /^\d+(\.\d+)?:\d+(\.\d+)?$/.test(pr) ? (() => { const [a, b] = pr.split(":").map(Number); return Math.round(clamp((gen.w * b) / a, 100, 520)); })() : gen.h;
+  // 按（这一行的）比例预估出图后的高度来排行间距（出图后节点会按比例长高，按原高度排会互相压住）
+  const hOf = (ratio: unknown) => { const pr = String(ratio ?? ""); return (gen.kind === "image" || gen.kind === "video") && /^\d+(\.\d+)?:\d+(\.\d+)?$/.test(pr) ? (() => { const [a, b] = pr.split(":").map(Number); return Math.round(clamp((gen.w * b) / a, 100, 520)); })() : gen.h; };
   for (const r of pending) {
     const old = r.nodeId && store.node(r.nodeId);
     if (old) continue;
-    const c = withGen({ id: uid("n"), kind: gen.kind, x: colX, y, w: gen.w, h: rowH, text: "", data: { batchOf: id, tableRow: r.row } }, { title: `${g.title} · 行${r.row}`, prompt: g.prompt, params: JSON.parse(JSON.stringify(g.params)), hist: [], hi: 0, order: [] });
+    const row = todo.find((t) => t.row === r.row)!; const params = plans.get(r.row)?.params || g.params; const rowH = hOf((params as { ratio?: string }).ratio);
+    const c = withGen({ id: uid("n"), kind: gen.kind, x: colX, y, w: gen.w, h: rowH, text: "", data: { batchOf: id, tableRow: r.row } }, { title: `${g.title} · ${row.label || "行" + r.row}`, prompt: g.prompt, params: JSON.parse(JSON.stringify(params)), hist: [], hi: 0, order: [] });
     y += rowH + 24 + 40; r.nodeId = c.id; created.push(c); edges.push({ id: uid("e"), from: id, to: c.id });
   }
   if (created.length) store.addNodes(created, edges);
@@ -289,16 +305,18 @@ export async function runTableBatch(store: CanvasStore, id: string): Promise<boo
   let cursor = 0;
   const worker = async () => {
     while (cursor < pending.length && !stop && !abort.signal.aborted) {
-      const jrow = pending[cursor++]; const row = todo.find((t) => t.row === jrow.row) as BatchRow; const target = store.node(jrow.nodeId)!;
+      const jrow = pending[cursor++]; let row = todo.find((t) => t.row === jrow.row) as BatchRow; const target = store.node(jrow.nodeId)!;
       setRow(jrow.row, { status: "running" });
+      // 镜头串联：这一行没有首帧时，接上一行（已完成）视频的最后一帧
+      if (chain && !rowHasFirst(row)) { const tail = await chainFrame(store, jr, todo, row.row); if (tail) row = { ...row, media: [...row.media, tail] }; }
       const req = buildRequest(store, gen, row); if (!req) { setRow(jrow.row, { status: "failed", error: "无法组装请求" }); continue; }
       const rowReq = { ...req, nodeId: target.id };
       store.updateNode(target.id, (n) => ({ ...n, data: { ...(n.data as object), frozen: rowReq } }));
       const onParentAbort = () => store.state.runtime[target.id]?.abort.abort(); abort.signal.addEventListener("abort", onParentAbort);
-      const ok = await execute(store, store.node(target.id)!, rowReq, `${g.title} · 行${jrow.row}`);
+      const ok = await execute(store, store.node(target.id)!, rowReq, `${g.title} · ${row.label || "行" + jrow.row}`);
       abort.signal.removeEventListener("abort", onParentAbort);
       done++; store.patchRun(id, { progress: done / pending.length, batch: { done, total: pending.length } });
-      if (ok) setRow(jrow.row, { status: "completed" });
+      if (ok) { setRow(jrow.row, { status: "completed" }); if (fill) fillBack(store, fill, jrow.row, target.id); }
       else { failed.push(jrow.row); setRow(jrow.row, { status: "failed", error: genOf(store.node(target.id)!).err }); if (settings.failure === "stop") stop = true; }
     }
   };
@@ -306,8 +324,26 @@ export async function runTableBatch(store: CanvasStore, id: string): Promise<boo
   store.setRun(id, null);
   const left = jr.rows.filter((r) => r.status !== "completed").length;
   if (!left) store.updateNode(id, (n) => withBatch(n, { journal: { ...jr } }));
-  store.toast(abort.signal.aborted ? `已停止：完成 ${done - failed.length} 行，剩下的行再点生成会接着跑` : failed.length ? `批量生成未全部完成：计划 ${pending.length}，成功 ${pending.length - failed.length}，失败 ${failed.length}（第 ${failed.join("、")} 行）。再点生成只重跑失败的行` : `批量生成完成：${pending.length} 行`, 4200);
+  store.toast(abort.signal.aborted ? `已停止：完成 ${done - failed.length} 行，剩下的行再点生成会接着跑` : failed.length ? `批量生成未全部完成：计划 ${pending.length}，成功 ${pending.length - failed.length}，失败 ${failed.length}（第 ${failed.join("、")} 行）。再点生成只重跑失败的行` : `批量生成完成：${pending.length} 行` + (fill ? "，已填回表格" : ""), 4200);
   return !failed.length;
+}
+
+/** 图片批量：把这一行的结果写进表格的回填列（首帧列） */
+function fillBack(store: CanvasStore, fill: FillTarget, row: number, resultId: string) {
+  const url = outOf(store.node(resultId)!)?.url; const tn = store.node(fill.table);
+  if (!url || !tn) return;
+  store.updateNode(fill.table, (n) => { const t = tableOf(n); if (fill.col >= t.columns.length) return n; const rows = t.rows.map((r) => [...r]); while (rows.length < row) rows.push(t.columns.map(() => "")); rows[row - 1][fill.col] = url; return withTable(n, { ...t, rows }); });
+}
+
+/** 镜头串联：上一行（本次范围内、已完成）视频的最后一帧，存进资源库后作为这一行的首帧 */
+async function chainFrame(store: CanvasStore, jr: BatchJournal, todo: BatchRow[], row: number) {
+  const prev = todo.filter((t) => t.row < row).pop(); if (!prev) return null;
+  const j = jr.rows.find((r) => r.row === prev.row); const pn = j?.status === "completed" ? store.node(j.nodeId) : undefined;
+  if (!pn || !outOf(pn)?.url) return null;
+  const data = store.grabFrame ? await store.grabFrame(pn.id, "last").catch(() => "") : "";
+  if (!data) return null;
+  const url = data.startsWith("data:") ? await store.backend.importAsset(store.state.canvasId, data, `${genOf(pn).title} · 尾帧`) : data;
+  return { nodeId: `chain:${pn.id}`, kind: "image" as const, title: `${genOf(pn).title} · 尾帧`, src: url, url, as: "first" as const };
 }
 
 /** 上游表格变化时，table 节点输入列数（界面显示用） */

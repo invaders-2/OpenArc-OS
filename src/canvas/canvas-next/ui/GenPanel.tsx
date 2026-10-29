@@ -11,7 +11,7 @@ import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
 import { buildRequest, rolesFor, ROLE_LABEL, runNode, stopNode } from "../engine";
 import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, STYLES, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
-import { batchOf, batchRows, OUTPUT_MODES, rowsToRun, withBatch, type BatchSettings } from "../table";
+import { batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
 import { Icon, type IconName } from "./Icon";
 import { download } from "./menus";
@@ -359,7 +359,7 @@ function ChipImg({ src }: { src: string }) { const u = useAssetUrl(src); return 
 
 /** 请求预览：生成节点给出发给后端的请求；连着表格时给出第一行的请求和总行数 */
 function previewOf(ctl: ReturnType<typeof useCtl>, node: CanvasNode) {
-  const store = ctl.store; const rows = batchRows(store.state.doc, node.id);
+  const store = ctl.store; const rows = batchRows(store.state.doc, node.id, fillTargetOf(store.state.doc, node.id, batchOf(node).settings));
   const req = buildRequest(store, node, rows[0]); if (!req) return { error: "没有可用模型" };
   const { model, ...rest } = req;
   return { ...rest, model: { configId: model.id, name: model.name }, ...(rows.length ? { batch: { rows: rowsToRun(rows, batchOf(node).settings).length, previewRow: rows[0]?.row } } : {}) };
@@ -368,7 +368,11 @@ function previewOf(ctl: ReturnType<typeof useCtl>, node: CanvasNode) {
 /* ---------------- 批量（上游连着多维表格） ---------------- */
 function BatchPanel({ node }: { node: CanvasNode }) {
   const ctl = useCtl(); const store = ctl.store; const doc = useS((s) => s.doc);
-  const rows = batchRows(doc, node.id); const { settings: s, journal } = batchOf(node); const todo = new Set(rowsToRun(rows, s).map((r) => r.row));
+  const { settings: s, journal } = batchOf(node); const fill = fillTargetOf(doc, node.id, s);
+  const rows = batchRows(doc, node.id, fill); const todo = new Set(rowsToRun(rows, s).map((r) => r.row));
+  const m = store.modelOf(node); const g = genOf(node);
+  const cands = node.kind === "image" ? fillCandidates(doc, node.id) : [];
+  const fillName = fill ? `${tableOf(store.node(fill.table)!).columns[fill.col]}` : "";
   const setS = (patch: Partial<BatchSettings>) => store.updateNode(node.id, (n) => withBatch(n, { settings: patch }));
   const stOf = (row: number) => journal?.rows.find((r) => r.row === row);
   const first = rows.filter((r) => todo.has(r.row)).slice(0, s.concurrency).map((r) => r.row);
@@ -379,7 +383,7 @@ function BatchPanel({ node }: { node: CanvasNode }) {
         <button key={r.row} className={"brow" + (sel ? " sel" : "") + (todo.has(r.row) ? "" : " skip") + (s.manual ? "" : " dim")} onClick={() => { if (!s.manual) return; setS({ selected: s.selected.includes(r.row) ? s.selected.filter((x) => x !== r.row) : [...s.selected, r.row].sort((a, b) => a - b) }); }}>
           <span className="n tnum">{r.row}</span>
           <span className="md">{r.media.slice(0, 3).map((md) => <RowThumb key={md.nodeId} src={md.src} kind={md.kind} />)}</span>
-          <p>{r.text || "仅媒体输入"}</p>
+          <p>{(() => { const pl = planRow(node.kind as GenKind, g.params, m, r); const pp = pl.params as { mode?: string; dur?: number; ratio?: string }; const tags = [r.label, node.kind === "video" && pp.mode !== (g.params as { mode?: string }).mode ? pp.mode : null, r.dur != null && node.kind === "video" ? pp.dur + "s" : null, r.ratio ? pp.ratio : null].filter(Boolean); return <>{tags.length ? <b className="btag">{tags.join(" · ")}</b> : null}{r.text || (r.media.length ? "仅媒体输入" : "")}{pl.warnings.length ? <i className="bwarn" title={pl.warnings.join("\n")}> · {pl.warnings[0]}</i> : null}</>; })()}</p>
           <span className={"st" + (j?.status === "completed" ? " ok" : j?.status === "failed" ? " bad" : "")}>{j ? { completed: "已完成", failed: "失败", running: "生成中", pending: "待生成" }[j.status] : ""}</span>
         </button>); })}
       {!rows.length ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>上游表格还没有行</span></div> : null}
@@ -389,6 +393,13 @@ function BatchPanel({ node }: { node: CanvasNode }) {
       {!s.manual ? <label title="从第几行开始">起始行<input type="number" min={1} max={Math.max(1, rows.length)} value={s.startRow} onChange={(e) => setS({ startRow: clamp(+e.target.value || 1, 1, Math.max(1, rows.length)) })} onKeyDown={(e) => e.stopPropagation()} /><span style={{ color: "var(--fg3)" }}>/ {rows.length}</span></label> : null}
       <button className={"tg" + (s.manual ? " on" : "")} onClick={() => setS({ manual: !s.manual })}>独立运行</button>
       <button className="tg" title="某一行失败后的处理" onClick={() => setS({ failure: s.failure === "stop" ? "continue" : "stop" })}>{s.failure === "stop" ? "遇错停止" : "遇错继续"}</button>
+      {node.kind === "video" ? <button className={"tg" + (s.chain ? " on" : "")} data-act="chain" title="镜头串联：上一行视频的最后一帧作为下一行的首帧（这一行自己有首帧时不替换），按顺序逐行生成" onClick={() => setS({ chain: !s.chain })}>镜头串联</button> : null}
+      {node.kind === "image" && cands.length ? <button className={"tg" + (fill ? " on" : "")} data-act="fill" title="出图后把每行的结果填回表格的图片列，下游视频节点就能按行读到首帧" onClick={(e) => openPop(e.currentTarget, (close) => <>
+        <div className="mh">结果填回表格</div>
+        <button className={"mi" + (s.fill === undefined ? " on" : "")} onClick={() => { close(); setS({ fill: undefined }); }}><span>自动<span className="d">有空着的「首帧」列就填回去</span></span></button>
+        {cands.map((c) => <button key={c.table + c.col} className={"mi" + (s.fill && s.fill.table === c.table && s.fill.col === c.col ? " on" : "")} onClick={() => { close(); setS({ fill: { table: c.table, col: c.col } }); }}><span>填回「{c.name}」列</span></button>)}
+        <button className={"mi" + (s.fill === null ? " on" : "")} onClick={() => { close(); setS({ fill: null }); }}><span>不回填<span className="d">表格里的图都当参考图</span></span></button>
+      </>, "up")}>{fill ? `填回「${fillName}」` : "不回填"}</button> : null}
     </div>
   </div>;
 }

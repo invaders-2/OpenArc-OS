@@ -258,7 +258,7 @@ async function split(ctl: Ctl, id: string, k: number) {
  * 视频截帧：current = 正在播放的那一帧（没在播就退回封面）；
  * first / last = 用临时 video 定位到开头 / 结尾再画（对齐 TapNow 的截帧 1 / 首帧 2 / 尾帧 3）。
  */
-async function grabVideoFrame(store: CanvasStore, n: CanvasNode, at: "current" | "first" | "last"): Promise<string> {
+export async function grabVideoFrame(store: CanvasStore, n: CanvasNode, at: "current" | "first" | "last"): Promise<string> {
   const o = outOf(n);
   if (!o) return "";
   if (at === "current") {

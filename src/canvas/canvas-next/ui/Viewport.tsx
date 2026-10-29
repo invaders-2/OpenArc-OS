@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { addFiles, commitText, connect, replaceNodeMedia } from "../actions";
 import { connectBlock, genOf, inputsOf, isGenKind, outOf, srcOf } from "../model";
-import { batchOf } from "../table";
+import { batchOf, dropImageOnCell } from "../table";
 import { useCtl, useS } from "./ctx";
 import { Edges } from "./Edges";
 import { addMenu, blankMenu, nodeMenu, portMenu, onNodeAct } from "./menus";
@@ -34,6 +34,14 @@ export function Viewport() {
   const setGuides = (g: Guide[]) => { if (!g.length && !guidesRef.current) return; guidesRef.current = g.length; setGuidesState(g); };
   /** 拖动节点经过的堆叠（松开就放进去） */
   const [dropStack, setDropStack] = useState<string | null>(null); const dropRef = useRef<string | null>(null);
+  // 把一张图片节点拖到表格的图片单元格（首帧 / 尾帧 / 参考图列）上：松手后图填进单元格，节点回到原位
+  const cellRef = useRef<HTMLElement | null>(null);
+  const cellUnder = (x: number, y: number, orig: Array<{ id: string }>) => {
+    if (orig.length !== 1) return null; const n = store.node(orig[0].id);
+    if (!n || n.kind !== "image" || !outOf(n)?.url) return null;
+    return (document.elementsFromPoint(x, y).find((el) => (el as HTMLElement).dataset?.mcell) as HTMLElement | undefined) || null;
+  };
+  const markCell = (el: HTMLElement | null) => { if (cellRef.current === el) return; cellRef.current?.classList.remove("drop"); el?.classList.add("drop"); cellRef.current = el; };
   const stackUnder = (x: number, y: number, moving: Set<string>) => {
     for (const el of document.elementsFromPoint(x, y)) { const id = (el as HTMLElement).closest?.(".node")?.getAttribute("data-id"); if (id && !moving.has(id) && isStack(store.node(id))) return id; }
     return null;
@@ -130,6 +138,7 @@ export function Viewport() {
       store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (pos.has(n.id) ? { ...n, ...pos.get(n.id)! } : n)) }));
       const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
       if (over !== dropRef.current) { dropRef.current = over; setDropStack(over); }
+      markCell(cellUnder(e.clientX, e.clientY, d.orig));
     } else if (d.kind === "resize") {
       const dx = (e.clientX - d.sx) / st.view.k, dy = (e.clientY - d.sy) / st.view.k;
       const w = Math.round(Math.max(140, Math.min(900, d.w + dx))); const h = d.keepRatio ? Math.round(w * d.ar) : Math.round(Math.max(80, Math.min(900, d.h + dy)));
@@ -166,6 +175,8 @@ export function Viewport() {
     if (d.kind === "pan" && !d.moved) { if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur(); store.setUI({ sel: new Set(), edge: null, editCell: null }); }
     if (d.kind === "node" && d.moved) {
       setGuides([]); store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
+      const cell = cellUnder(e.clientX, e.clientY, d.orig); markCell(null);
+      if (cell && dropImageOnCell(store, cell.dataset.mcell!, d.orig[0].id, cell.dataset.multi === "1")) { const o = d.orig[0]; store.updateNode(o.id, (n) => ({ ...n, x: o.x, y: o.y })); return; }
       const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
       // 拖的是普通分组：只叠分组外单独选中的节点，组里的节点跟着分组走，不拆进叠
       const dragged = new Set(d.orig.map((o) => o.id)); const inDraggedGroup = new Set(d.orig.flatMap((o) => { const g = store.node(o.id); return g && g.kind === "group" ? g.children || [] : []; }));
