@@ -852,6 +852,7 @@ const uiSpec = (model) => {
       maxRefs: img.refs,
       i2i: img.refs > 0,
       ...(img.mask ? { mask: true } : {}),
+      ...(img.secs ? { secs: img.secs } : {}),
       search: false,
       style: false,
       camera: false,
