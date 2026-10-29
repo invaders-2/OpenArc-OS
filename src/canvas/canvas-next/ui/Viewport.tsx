@@ -55,7 +55,7 @@ export function Viewport() {
     addEventListener("keydown", dn); addEventListener("keyup", up); return () => { removeEventListener("keydown", dn); removeEventListener("keyup", up); };
   }, []);
 
-  const portPos = (n: CanvasNode, side: "in" | "out") => n.kind === "group" && side === "out" ? { x: n.x + n.w - 13, y: n.y + 10 } : { x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 };
+  const portPos = (n: CanvasNode, side: "in" | "out") => ({ x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 });
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     closePop();

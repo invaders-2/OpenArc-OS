@@ -53,7 +53,7 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
     <div className={cls + " snode"} data-id={node.id} style={style}>
       <div className="nhead"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "堆叠" ? node.text : "堆叠"}</span></div>
       <div className="nbody sbody" style={{ height: node.h }}><StackBody node={node} /></div>
-      <Ports h={node.h} only="out" atHead />
+      <Ports h={node.h} only="out" />
     </div>
   );
   if (node.kind === "group") return (
@@ -61,7 +61,7 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
       <div className="nhead"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "分组" ? node.text : "分组"}</span></div>
       <div className="nbody gbody" style={{ height: node.h }}><GroupBody node={node} /></div>
       <div className="rz" data-rz title="拖动调整大小" />
-      <Ports h={node.h} only="out" atHead />
+      <Ports h={node.h} only="out" />
     </div>
   );
   if (!isGenKind(node.kind)) {
@@ -117,9 +117,9 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
   );
 });
 
-/** 连线端口；分组 / 堆叠只有输出端（连到文本节点按组出表），放在标题行旁，避免被组内节点的端口挡住 */
-function Ports({ h, only, atHead }: { h: number; only?: "out"; atHead?: boolean }) {
-  return <>{(only ? [only] : ["in", "out"] as const).map((s) => <div key={s} className={"pz " + s} data-port={s} style={{ top: atHead ? 10 : 24 + h / 2 }}><div className="pf"><div className="port"><Icon name="plus" /></div></div></div>)}</>;
+/** 连线端口；分组 / 堆叠只有输出端（连到文本节点按组出表） */
+function Ports({ h, only }: { h: number; only?: "out" }) {
+  return <>{(only ? [only] : ["in", "out"] as const).map((s) => <div key={s} className={"pz " + s} data-port={s} style={{ top: 24 + h / 2 }}><div className="pf"><div className="port"><Icon name="plus" /></div></div></div>)}</>;
 }
 
 function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean }) {

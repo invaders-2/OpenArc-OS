@@ -5,7 +5,7 @@ import { inputsOf } from "../model";
 import { useCtl, useS } from "./ctx";
 import { hiddenIds } from "../stack";
 
-const portPos = (n: CanvasNode, side: "in" | "out") => n.kind === "group" && side === "out" ? { x: n.x + n.w - 13, y: n.y + 10 } : { x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 };
+const portPos = (n: CanvasNode, side: "in" | "out") => ({ x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 });
 function pathD(a: { x: number; y: number }, b: { x: number; y: number }) { const dx = Math.max(60, Math.abs(b.x - a.x) * .5); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; }
 
 /** 连线层：新连线画出动效；选中节点 / 连线时高亮并显示输入序号 */

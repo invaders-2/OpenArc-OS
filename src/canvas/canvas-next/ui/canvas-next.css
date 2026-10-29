@@ -114,10 +114,8 @@
 .cn-root .port svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.6;}
 .cn-root .pz.in .port{transform:translateX(24px);}
 .cn-root .pz.out .port{transform:translateX(-24px);}
-/* 分组 / 堆叠的输出端口在标题行右端（组内节点的端口占着两侧中线；也不挡相邻分组的标题） */
-.cn-root .gnode>.pz.out,.cn-root .snode>.pz.out{width:26px;height:26px;margin-top:-14px;right:0;}
-.cn-root .gnode>.pz.out .pf,.cn-root .snode>.pz.out .pf{left:0;top:0;width:26px;height:26px;}
-.cn-root .gnode>.pz.out .port,.cn-root .snode>.pz.out .port{width:26px;height:26px;transform:none;}
+/* 分组 / 堆叠的输出端口在右侧中线：压在组内节点的端口之上（节点不建层叠上下文，z-index 直接比） */
+.cn-root .gnode>.pz.out,.cn-root .snode>.pz.out{z-index:4;}
 .cn-root .node:hover .port,.cn-root .node.sel .port,.cn-root.connecting .node:not(.noconn) .pz.in .port{opacity:1;transform:none;}
 .cn-root .pz:hover .port{color:var(--hi);border-color:rgba(var(--ink),.85);transform:scale(1.06);}
 .cn-root.connecting .pz,.cn-root .node.running .pz.in{pointer-events:none;}
