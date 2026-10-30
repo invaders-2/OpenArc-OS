@@ -867,13 +867,13 @@ class CanvasService {
   }
 
   /** 用户停止：任务级取消 + run 终结；**在途请求由调用方 abort**，迟到结果不再被接受。*/
-  startAsyncModelCall({ context, canvasId, runId, nodeId = null, prompt = "", ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, size = null, style = null, camera = null, webSearch = false } = {}) {
+  startAsyncModelCall({ context, canvasId, runId, nodeId = null, prompt = "", ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, size = null, style = null, camera = null, webSearch = false, mj = null } = {}) {
     const run = this.store.runById(runId);
     if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
     this.asyncRuns.set(runId, { status: "RUNNING", result: null, error: null, startedAt: this.clock(), finishedAt: null, canvasId });
     void (async () => {
       try {
-        const result = await this.modelCall({ context, canvasId, runId, kind: "image", prompt, ratio, resolution, customSize, customRatio, count, configId, size, style, camera, webSearch });
+        const result = await this.modelCall({ context, canvasId, runId, kind: "image", prompt, ratio, resolution, customSize, customRatio, count, configId, size, style, camera, webSearch, mj });
         const currentEntry = this.asyncRuns.get(runId);
         if (currentEntry && currentEntry.status === "STOPPED") return;
         const after = this.store.runById(runId);
@@ -981,7 +981,7 @@ class CanvasService {
   async editImage({
     context, canvasId = null, runId = null, configId = null, mode = "prompt", prompt = "",
     sourceDataUrl = "", originalDataUrl = "", maskPngDataUrl = "", inputs = [],
-    size = null, ratio = null, resolution = null, customSize = null, customRatio = null, requestId = null,
+    size = null, ratio = null, resolution = null, customSize = null, customRatio = null, requestId = null, mj = null,
   } = {}) {
     if (!this.modelService || typeof this.modelService.editImage !== "function") return fail("RUN_UNAVAILABLE");
     const run = runId ? this.store.runById(runId) : null;
@@ -990,7 +990,7 @@ class CanvasService {
     return this.modelService.editImage({
       context: ctx, configId: configId || null, mode, prompt, sourceDataUrl, originalDataUrl, maskPngDataUrl, inputs,
       size: effectiveSize,
-      hints: { ratio: customRatio || ratio || null, resolution: resolution || null },
+      hints: { ratio: customRatio || ratio || null, resolution: resolution || null, ...(mj ? { mj } : {}) },
       requestId,
     });
   }
@@ -1012,7 +1012,7 @@ class CanvasService {
     })) });
   }
 
-  async modelCall({ context, canvasId, runId, kind = "chat", messages = null, prompt = "", size = null, ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, signal = null, style = null, camera = null, webSearch = false } = {}) {
+  async modelCall({ context, canvasId, runId, kind = "chat", messages = null, prompt = "", size = null, ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, signal = null, style = null, camera = null, webSearch = false, mj = null } = {}) {
     const run = this.store.runById(runId);
     if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
     const r = this.#load(context, canvasId, { needEdit: true });
@@ -1058,7 +1058,7 @@ class CanvasService {
         ? await this.modelService.generateImage({
             context: ctx, configId: configId || null, prompt: String(prompt || ""), size: effectiveSize, count: Math.max(1, Math.min(4, Number(count) || 1)), signal: ac.signal, capability: "image-generation",
             // 面板的风格 / 摄影机 / 联网：params 与 hints 同时给（适配器按自己的形状消费，没支持就不发）
-            params: { ...(style ? { style } : {}), ...(camera ? { camera } : {}), ...(webSearch === true ? { webSearch: true } : {}) },
+            params: { ...(style ? { style } : {}), ...(camera ? { camera } : {}), ...(webSearch === true ? { webSearch: true } : {}), ...(mj ? { mj } : {}) },
             hints: { ratio: customRatio || ratio || null, resolution: resolution || null, ...(style ? { style } : {}), ...(camera ? { camera } : {}), ...(webSearch === true ? { webSearch: true } : {}) },
           })
         : await this.modelService.chat({ context: ctx, configId: configId || null, messages: Array.isArray(messages) ? messages : [], signal: ac.signal, capability: "chat" });
