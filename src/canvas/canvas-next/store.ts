@@ -80,6 +80,8 @@ type Listener = () => void;
 export class CanvasStore {
   state: CanvasState;
   readonly backend: CanvasBackend;
+  /** 视频截帧（批量「镜头串联」用）：CanvasApp 接上编辑器里的截帧实现；测试里换成桩 */
+  grabFrame: ((nodeId: string, at: "first" | "last") => Promise<string>) | null = null;
   private listeners = new Set<Listener>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private saveFlight: Promise<void> | null = null;

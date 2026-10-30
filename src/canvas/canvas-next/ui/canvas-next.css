@@ -114,6 +114,8 @@
 .cn-root .port svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.6;}
 .cn-root .pz.in .port{transform:translateX(24px);}
 .cn-root .pz.out .port{transform:translateX(-24px);}
+/* 分组 / 堆叠的输出端口在右侧中线：压在组内节点的端口之上（节点不建层叠上下文，z-index 直接比） */
+.cn-root .gnode>.pz.out,.cn-root .snode>.pz.out{z-index:4;}
 .cn-root .node:hover .port,.cn-root .node.sel .port,.cn-root.connecting .node:not(.noconn) .pz.in .port{opacity:1;transform:none;}
 .cn-root .pz:hover .port{color:var(--hi);border-color:rgba(var(--ink),.85);transform:scale(1.06);}
 .cn-root.connecting .pz,.cn-root .node.running .pz.in{pointer-events:none;}
@@ -967,6 +969,20 @@
 .cn-root .tgrid tbody tr:hover td.tact button{opacity:1}
 .cn-root .tgrid td.tact button:hover{background:var(--hover);color:var(--fg)}
 .cn-root .tgrid .rownum{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:6px;background:var(--sunken);color:var(--fg3);font-size:10px;margin:10px 0 0 8px}
+.cn-root .tgrid thead th .trole{flex:none;height:18px;padding:0 6px;border-radius:5px;font-size:10.5px;line-height:18px;color:var(--fg2);background:rgba(var(--ink),.08);white-space:nowrap}
+.cn-root .tgrid thead th .trole.auto{color:var(--fg3);background:rgba(var(--ink),.04)}
+.cn-root .tgrid thead th .trole.media{color:var(--fg);background:rgba(var(--ink),.12)}
+.cn-root .tgrid thead th .trole:hover{background:var(--hover);color:var(--fg)}
+.cn-root .tgrid th.tin .tmode{display:inline-flex;align-items:center;gap:2px;height:22px;padding:0 4px;border-radius:6px;color:inherit;font-size:inherit}
+.cn-root .tgrid th.tin .tmode:hover{background:var(--hover);color:var(--fg)}
+.cn-root .tgrid td.tmc .mcell{display:flex;gap:4px;flex-wrap:wrap;align-items:flex-start;min-height:72px;margin:4px;padding:4px;border-radius:8px;border:1px dashed transparent;transition:background .12s,border-color .12s}
+.cn-root .tgrid td.tmc .mcell.empty{border-color:rgba(var(--ink),.14);align-items:center;justify-content:center}
+.cn-root .tgrid td.tmc .mcell.over,.cn-root .tgrid td.tmc .mcell.drop{border-color:rgba(var(--ink),.5);background:rgba(var(--ink),.06)}
+.cn-root .tgrid td.tmc .mcell em{font-style:normal;font-size:11px;color:var(--fg3)}
+.cn-root .tgrid td.tmc .mthumb{position:relative;display:block}
+.cn-root .tgrid td.tmc .mthumb img,.cn-root .tgrid td.tmc .mthumb .mi-ph{width:56px;height:56px;border-radius:7px;object-fit:cover;background:var(--sunken);display:grid;place-items:center;color:var(--fg3)}
+.cn-root .tgrid td.tmc .mthumb button{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:5px;display:grid;place-items:center;background:#000a;color:#fff;opacity:0}
+.cn-root .tgrid td.tmc .mthumb:hover button{opacity:1}
 .cn-root .tfoot{display:flex;align-items:center;gap:4px;padding:6px 8px;background:var(--card)}
 .cn-root .tfoot button{height:26px;padding:0 8px;border-radius:7px;display:inline-flex;align-items:center;gap:5px;color:var(--fg2);font-size:12px}
 .cn-root .tfoot button:hover{background:var(--hover);color:var(--fg)}
@@ -985,6 +1001,8 @@
 .cn-root .brow .md{display:flex;gap:3px}
 .cn-root .brow .md img,.cn-root .brow .md i{width:34px;height:34px;border-radius:7px;object-fit:cover;background:var(--sunken);display:grid;place-items:center;color:var(--fg3)}
 .cn-root .brow p{margin:0;font-size:11px;line-height:1.4;color:var(--fg2);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.cn-root .brow p .btag{font-weight:500;color:var(--fg);margin-right:6px}
+.cn-root .brow p .bwarn{font-style:normal;color:var(--fg3)}
 .cn-root .brow .st{font-size:10.5px;color:var(--fg3);white-space:nowrap}
 .cn-root .brow .st.ok{color:var(--fg2)}
 .cn-root .brow .st.bad{color:var(--bad)}
