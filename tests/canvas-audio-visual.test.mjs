@@ -1,5 +1,5 @@
 /**
- * 音频节点：真实波形峰值 + 实时频谱（低 / 中 / 高）。纯函数真跑 + 节点接线契约。
+ * 音频节点（对齐 TapNow）：真实波形峰值 + 滚动波形 / 居中指针 / 时间气泡 / ±10 秒。纯函数真跑 + 节点接线契约。
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -11,62 +11,55 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const esbuild = require("esbuild");
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const out = path.join(ROOT, "node_modules/.cache/oa-audio-" + process.pid + ".mjs");
-await esbuild.build({ entryPoints: [path.join(ROOT, "src/canvas/canvas-next/audioAnalysis.ts")], bundle: true, format: "esm", platform: "neutral", outfile: out, logLevel: "silent" });
-const A = await import(pathToFileURL(out).href);
-test.after(() => fs.rmSync(out, { force: true }));
+const outs = [];
+async function bundle(rel, name, opts = {}) {
+  const out = path.join(ROOT, "node_modules/.cache/oa-audio-" + process.pid + "-" + name + ".mjs"); outs.push(out);
+  await esbuild.build({ entryPoints: [path.join(ROOT, rel)], bundle: true, format: "esm", platform: "neutral", outfile: out, logLevel: "silent", ...opts });
+  return import(pathToFileURL(out).href);
+}
+const A = await bundle("src/canvas/canvas-next/audioAnalysis.ts", "an");
+test.after(() => { for (const f of outs) fs.rmSync(f, { force: true }); });
 
 const SR = 44100;
-/** 0~1s 80Hz 低音，1~2s 1kHz 中音，2~3s 6kHz 高音，3~4s 静音 */
+/** 0~2s 响，2~3s 静音，3~4s 小声 */
 function clip() {
   const s = new Float32Array(SR * 4);
-  for (let i = 0; i < s.length; i++) {
-    const t = i / SR; const f = t < 1 ? 80 : t < 2 ? 1000 : t < 3 ? 6000 : 0;
-    s[i] = f ? 0.8 * Math.sin(2 * Math.PI * f * t) : 0;
-  }
+  for (let i = 0; i < s.length; i++) { const t = i / SR; const a = t < 2 ? 0.8 : t < 3 ? 0 : 0.2; s[i] = a * Math.sin(2 * Math.PI * 220 * t); }
   return { samples: s, sampleRate: SR, duration: 4 };
 }
 
-test("spectrum：低音 / 中音 / 高音分别落在对应频段", () => {
-  const d = clip();
-  const lo = A.spectrum(d, 0.5, 48), mid = A.spectrum(d, 1.5, 48), hi = A.spectrum(d, 2.5, 48);
-  assert.ok(lo.low > lo.mid && lo.low > lo.high, "80Hz 时低频最强 " + JSON.stringify(lo));
-  assert.ok(mid.mid > mid.low && mid.mid > mid.high, "1kHz 时中频最强 " + JSON.stringify(mid));
-  assert.ok(hi.high > hi.low && hi.high > hi.mid, "6kHz 时高频最强 " + JSON.stringify(hi));
-  // 最高的那根条在左 / 中 / 右
-  const argmax = (a) => a.indexOf(Math.max(...a));
-  assert.ok(argmax(lo.bars) < argmax(mid.bars) && argmax(mid.bars) < argmax(hi.bars));
-  assert.equal(lo.bars.length, 48);
-});
-
-test("spectrum：静音段全部接近 0，越界时间不报错", () => {
-  const d = clip();
-  const s = A.spectrum(d, 3.5, 32);
-  assert.ok(Math.max(...s.bars) < 0.05, JSON.stringify(s.bars));
-  assert.doesNotThrow(() => A.spectrum(d, -1, 16));
-  assert.doesNotThrow(() => A.spectrum(d, 99, 16));
-});
-
-test("peaks：按最大值归一，静音段保留最小高度", () => {
-  const d = clip();
-  const p = A.peaks(d, 40);
-  assert.equal(p.length, 40);
+test("peaks：按最大值归一，静音段保留最小高度，小声段明显矮", () => {
+  const p = A.peaks(clip(), 8); // 每根 0.5s
+  assert.equal(p.length, 8);
   assert.ok(Math.abs(Math.max(...p) - 1) < 1e-6);
-  assert.ok(p.slice(31).every((v) => v === 0.04), "最后 1s 静音");
+  assert.deepEqual(p.slice(4, 6), [0.04, 0.04], "2~3s 静音");
+  assert.ok(p[6] > 0.2 && p[6] < 0.3, "小声段约 0.25：" + p[6]);
 });
 
-test("fakeSpectrum：演示数据也有起伏，条数正确", () => {
-  const a = A.fakeSpectrum(0.3, 24), b = A.fakeSpectrum(0.9, 24);
-  assert.equal(a.length, 24);
-  assert.notDeepEqual(a, b);
-});
-
-test("节点接线：音频节点用 AudioBody，带频谱画布、播放指针和可拖动进度条", () => {
+test("节点接线：音频节点用 AudioBody；波形画布、居中指针、时间气泡、±10 秒、播放按钮都在", () => {
   const nv = fs.readFileSync(path.join(ROOT, "src/canvas/canvas-next/ui/NodeView.tsx"), "utf8");
   const ab = fs.readFileSync(path.join(ROOT, "src/canvas/canvas-next/ui/AudioBody.tsx"), "utf8");
   assert.match(nv, /import \{ AudioBody \} from "\.\/AudioBody"/);
   assert.match(nv, /<AudioBody out=\{out\} sel=\{p\.sel\} \/>/);
-  for (const k of ["data-aviz", "data-atrack", "data-atrack-head", "data-atime", "data-act=\"back10\"", "data-act=\"fwd10\"", 'data-act="play"', "spectrum(", "peaks("]) assert.ok(ab.includes(k), k);
+  for (const k of ["data-aviz", "ahead-tri", "ahead-line", "data-atime", 'data-act="back10"', 'data-act="fwd10"', 'data-act="play"', "peaks(", "useMediaUrl("]) assert.ok(ab.includes(k), k);
+  // 指针固定在正中，波形按当前时间整体左移
+  assert.match(ab, /const x0 = w \/ 2 - \(time \/ SEC_PER_BAR\) \* pitch/);
+});
+
+test("clock2：两位分钟 00:08 / 02:38", async () => {
+  const src = fs.readFileSync(path.join(ROOT, "src/canvas/canvas-next/ui/AudioBody.tsx"), "utf8");
+  const fn = src.match(/export function clock2[\s\S]*?\n}\n/)[0].replace("export ", "").replace("(sec: number): string", "(sec)");
+  const clock2 = new Function(fn + "; return clock2;")();
+  assert.equal(clock2(8.9), "00:08");
+  assert.equal(clock2(158), "02:38");
+  assert.equal(clock2(-1), "00:00");
+});
+
+test("新建 / 上传的音频节点默认 320×180（时间气泡和按钮放得下）", () => {
+  const model = fs.readFileSync(path.join(ROOT, "src/canvas/canvas-next/model.ts"), "utf8");
+  const act = fs.readFileSync(path.join(ROOT, "src/canvas/canvas-next/actions.ts"), "utf8");
+  assert.match(model, /audio: \{ w: 320, h: 180 \}/);
+  assert.match(act, /: NODE_DEFAULT_SIZE\.audio\.h;/);
 });
 
 test("decodeAudio：桌面版 CSP 禁止 fetch，data URL 必须本地解 base64 而不是走 fetch", () => {

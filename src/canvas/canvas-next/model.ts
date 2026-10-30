@@ -353,7 +353,7 @@ export const PLACEHOLDER_SPECS: Record<GenKind, ModelSpec> = {
 export function placeholderSpec(kind: GenKind): ModelSpec { return PLACEHOLDER_SPECS[kind]; }
 
 /* ---------- 节点读写 ---------- */
-export const NODE_DEFAULT_SIZE: Record<GenKind, { w: number; h: number }> = { text: { w: 280, h: 200 }, image: { w: 240, h: 240 }, video: { w: 320, h: 180 }, audio: { w: 320, h: 120 } };
+export const NODE_DEFAULT_SIZE: Record<GenKind, { w: number; h: number }> = { text: { w: 280, h: 200 }, image: { w: 240, h: 240 }, video: { w: 320, h: 180 }, audio: { w: 320, h: 180 } };
 
 /** 读节点的生成数据；旧画布的节点没有 data.gen，按通用字段补出来（不改原节点）。 */
 export function genOf(node: CanvasNode): GenData {

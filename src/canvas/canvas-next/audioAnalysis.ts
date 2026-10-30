@@ -1,11 +1,9 @@
 /**
- * 音频节点的波形 / 频谱数据。
+ * 音频节点的波形数据。
  *
- * 把音频整段解码成单声道采样（只做一次，按地址缓存），之后：
- *   · peaks()：整段波形的峰值，用来画静态波形和进度条；
- *   · spectrum()：任意时间点附近 2048 个采样做 FFT，按对数频率分组，得到低 → 高的能量条。
- * 频谱直接从解码数据算，不经过 <audio> 的 Web Audio 管线：播放地址换成流式（openarc-resource，
- * 不开 CORS）时 createMediaElementSource 只会拿到静音，而这里不受影响。
+ * 把音频整段解码成单声道采样（只做一次，按地址缓存），再按段算音量（peaks）画胶囊波形。
+ * 直接解码数据、不经过 <audio> 的 Web Audio 管线：播放地址是流式的 openarc-resource（不开 CORS），
+ * createMediaElementSource 只会拿到静音，而这里不受影响。
  */
 
 export type Decoded = { samples: Float32Array; sampleRate: number; duration: number };
@@ -76,69 +74,4 @@ export function peaks(d: Decoded, count: number): number[] {
     out.push(rms); if (rms > max) max = rms;
   }
   return out.map((v) => (max > 0 ? Math.max(0.04, v / max) : 0.04));
-}
-
-/* ---------- FFT ---------- */
-const N = 2048;
-const hann = new Float32Array(N).map((_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1)));
-const rev = new Uint32Array(N).map((_, i) => { let r = 0, x = i; for (let b = 1; b < N; b <<= 1) { r = (r << 1) | (x & 1); x >>= 1; } return r; });
-const re = new Float32Array(N), im = new Float32Array(N);
-
-function fft() {
-  for (let i = 0; i < N; i++) { const j = rev[i]; if (j > i) { const t = re[i]; re[i] = re[j]; re[j] = t; const u = im[i]; im[i] = im[j]; im[j] = u; } }
-  for (let size = 2; size <= N; size <<= 1) {
-    const half = size >> 1; const ang = (-2 * Math.PI) / size;
-    const wr = Math.cos(ang), wi = Math.sin(ang);
-    for (let s = 0; s < N; s += size) {
-      let cr = 1, ci = 0;
-      for (let k = 0; k < half; k++) {
-        const a = s + k, b = a + half;
-        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
-        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
-        const nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr;
-      }
-    }
-  }
-}
-
-export const SPEC_MIN_HZ = 40;
-export const SPEC_MAX_HZ = 16000;
-
-/**
- * time 秒附近的频谱：count 根条，从低频到高频（对数分组），每根 0~1。
- * 同时返回低（<250Hz）/ 中（250Hz~4kHz）/ 高（>4kHz）三段的平均能量。
- */
-export function spectrum(d: Decoded, time: number, count: number): { bars: number[]; low: number; mid: number; high: number } {
-  const c = Math.floor(time * d.sampleRate) - N / 2;
-  for (let i = 0; i < N; i++) { const k = c + i; re[i] = k >= 0 && k < d.samples.length ? d.samples[k] * hann[i] : 0; im[i] = 0; }
-  fft();
-  const binHz = d.sampleRate / N; const top = Math.min(SPEC_MAX_HZ, d.sampleRate / 2);
-  const ratio = top / SPEC_MIN_HZ;
-  const bars: number[] = [];
-  const band = { low: [0, 0], mid: [0, 0], high: [0, 0] };
-  for (let b = 0; b < count; b++) {
-    const f0 = SPEC_MIN_HZ * Math.pow(ratio, b / count), f1 = SPEC_MIN_HZ * Math.pow(ratio, (b + 1) / count);
-    let i0 = Math.floor(f0 / binHz), i1 = Math.max(i0 + 1, Math.ceil(f1 / binHz));
-    i0 = Math.max(1, i0); i1 = Math.min(N / 2, i1);
-    let m = 0; for (let i = i0; i < i1; i++) { const v = Math.hypot(re[i], im[i]); if (v > m) m = v; }
-    // 幅度 → dB（满幅正弦约 0dB），-72dB ~ -6dB 映射到 0~1
-    // 再按每倍频程 +3dB 补偿：真实音乐高频能量天然偏弱，不补的话高音区总是一条平线
-    const db = 20 * Math.log10(m / (N / 4) + 1e-9) + 3 * Math.log2(Math.sqrt(f0 * f1) / 1000);
-    const v = Math.max(0, Math.min(1, (db + 72) / 66));
-    bars.push(v);
-    const mid = (f0 + f1) / 2; const k = mid < 250 ? band.low : mid < 4000 ? band.mid : band.high;
-    k[0] += v; k[1]++;
-  }
-  const avg = (x: number[]) => (x[1] ? x[0] / x[1] : 0);
-  return { bars, low: avg(band.low), mid: avg(band.mid), high: avg(band.high) };
-}
-
-/** 没有真实音频（演示数据 / 解码失败）时的假频谱：低频强、高频弱，随时间起伏 */
-export function fakeSpectrum(time: number, count: number): number[] {
-  return Array.from({ length: count }, (_, i) => {
-    const x = i / count;
-    const env = 0.85 - x * 0.55;
-    const wob = 0.5 + 0.5 * Math.sin(time * (3 + x * 9) + i * 1.7) * Math.sin(time * 1.3 + i * 0.4);
-    return Math.max(0.03, env * (0.35 + 0.65 * wob));
-  });
 }

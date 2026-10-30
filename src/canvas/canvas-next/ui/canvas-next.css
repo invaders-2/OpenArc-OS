@@ -145,27 +145,34 @@
 .cn-root .vctl ~ .trim,.cn-root .trim:has(~ .vctl){bottom:40px;}
 .cn-root .nbody.playing img{animation:kb var(--dur,5s) linear forwards;}
 @keyframes kb{from{transform:scale(1)}to{transform:scale(1.14) translate(-2%,-1%)}}
-.cn-root .abody{position:absolute;inset:0;}
-.cn-root .aviz{position:absolute;left:14px;right:14px;top:10px;bottom:46px;width:calc(100% - 28px);height:calc(100% - 56px);display:block;}
-.cn-root .aviz.seek{cursor:pointer;}
-.cn-root .aband{position:absolute;left:14px;right:14px;bottom:36px;height:10px;pointer-events:none;opacity:0;transition:opacity var(--d-quick) var(--e-std);}
-.cn-root .aband.on{opacity:1;}
-.cn-root .aband span{position:absolute;top:0;transform:translateX(-50%);font-size:9px;line-height:10px;color:var(--fg3);}
-.cn-root .actl{position:absolute;bottom:8px;left:10px;right:12px;height:26px;display:flex;gap:6px;align-items:center;}
-.cn-root .actl button{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex:none;}
-.cn-root .actl button.p{background:var(--hi);color:var(--on-solid);}
-.cn-root .actl button.sk{width:24px;height:24px;color:var(--fg2);transition:color var(--d-feedback) var(--e-std),background-color var(--d-feedback) var(--e-std);}
-.cn-root .actl button.sk:hover{color:var(--hi);background:var(--hover);}
-.cn-root .actl button.sk svg{width:18px;height:18px;stroke-width:1.6;}
-.cn-root .actl button.p svg{fill:var(--on-solid);stroke:none;width:12px;height:12px;margin-left:1px;}
-.cn-root .actl button.p svg.apause{margin-left:0;}
-.cn-root .atrack{position:relative;flex:1;min-width:40px;height:26px;margin-left:4px;cursor:pointer;touch-action:none;}
-.cn-root .atrack-rail,.cn-root .atrack-fill{position:absolute;left:0;top:50%;height:3px;margin-top:-1.5px;border-radius:2px;}
-.cn-root .atrack-rail{right:0;background:rgba(var(--ink),.18);}
-.cn-root .atrack-fill{background:var(--hi);}
-.cn-root .atrack-head{position:absolute;top:50%;width:3px;height:14px;margin:-7px 0 0 -1.5px;border-radius:2px;background:var(--hi);box-shadow:0 0 0 2px rgba(0,0,0,.25);transition:transform var(--d-feedback) var(--e-std);}
-.cn-root .atrack:hover .atrack-head{transform:scaleY(1.2);}
-.cn-root .atime{flex:none;font-size:11px;color:var(--fg2);min-width:60px;text-align:right;}
+.cn-root .abody{position:absolute;inset:0;--a-head:#38bdf8;container-type:size;} /* 指针蓝：对齐 TapNow 音频节点，设计系统里没有对应 token */
+.cn-root .awave{position:absolute;left:0;right:0;top:22%;height:38%;-webkit-mask-image:linear-gradient(90deg,transparent,#000 9%,#000 91%,transparent);mask-image:linear-gradient(90deg,transparent,#000 9%,#000 91%,transparent);}
+.cn-root .awave.seek{cursor:ew-resize;touch-action:none;}
+.cn-root .awave.drag{cursor:grabbing;}
+.cn-root .awave canvas{display:block;width:100%;height:100%;}
+.cn-root .ahead{position:absolute;left:50%;top:calc(22% - 8px);height:calc(38% + 8px);width:0;pointer-events:none;}
+.cn-root .ahead-tri{position:absolute;left:-5px;top:0;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid var(--a-head);}
+.cn-root .ahead-line{position:absolute;left:-1px;top:5px;bottom:0;width:2px;border-radius:1px;background:var(--a-head);}
+.cn-root .atime{position:absolute;left:50%;top:calc(60% + 6px);transform:translateX(-50%);padding:2px 8px;border-radius:999px;background:var(--a-head);color:#fff;font-size:10.5px;font-weight:600;line-height:15px;white-space:nowrap;pointer-events:none;}
+.cn-root .atime::before{content:"";position:absolute;left:50%;top:-3px;margin-left:-3px;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:3px solid var(--a-head);}
+.cn-root .actl{position:absolute;left:0;right:0;bottom:6%;display:flex;justify-content:center;align-items:center;gap:22px;}
+.cn-root .actl button{display:grid;place-items:center;flex:none;}
+.cn-root .actl button.p{width:30px;height:30px;border-radius:50%;background:var(--fg1);color:var(--on-solid);transition:transform var(--d-feedback) var(--e-std);}
+.cn-root .actl button.p:active{transform:scale(.94);}
+.cn-root .actl button.p svg{width:13px;height:13px;fill:currentColor;stroke:none;}
+.cn-root .actl button.p svg.pl{margin-left:1px;}
+.cn-root .actl button.sk{width:22px;height:22px;color:rgba(var(--ink),.42);transition:color var(--d-feedback) var(--e-std);}
+.cn-root .actl button.sk:hover{color:rgba(var(--ink),.85);}
+.cn-root .actl button.sk svg{width:13px;height:13px;fill:currentColor;stroke:none;}
+/* 旧版矮节点（320×120）：波形上移、按钮缩小，避免时间气泡和按钮挤在一起 */
+@container (max-height:150px){
+  .cn-root .awave{top:9%;height:42%;}
+  .cn-root .ahead{top:calc(9% - 7px);height:calc(42% + 7px);}
+  .cn-root .atime{top:calc(51% + 5px);font-size:10px;line-height:14px;padding:1px 7px;}
+  .cn-root .actl{bottom:4px;gap:18px;}
+  .cn-root .actl button.p{width:24px;height:24px;}
+  .cn-root .actl button.p svg{width:11px;height:11px;}
+}
 .cn-root .cpin{position:absolute;width:26px;height:26px;margin:-26px 0 0 0;border-radius:13px 13px 13px 3px;background:var(--solid);color:var(--on-solid);font:600 11px var(--font);display:grid;place-items:center;cursor:pointer;z-index:3;}
 .cn-root .float{position:absolute;z-index:20;}
 .cn-root .cap{background:var(--raised);border-radius:12px;box-shadow:0 1px 0 rgba(var(--ink),.06) inset,0 8px 24px rgba(0,0,0,.35);}

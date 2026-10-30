@@ -1,27 +1,36 @@
 /**
- * 音频节点卡片。
- *   · 没在播：显示整段真实波形，已播部分高亮，竖线是播放指针；节点选中或播过之后，点 / 拖波形可跳转。
- *   · 播放中：波形变成实时频谱（左低频 → 右高频），跟着当前播放位置的低音 / 中音 / 高音起伏。
- *   · 底部：后退 10 秒 / 播放暂停 / 前进 10 秒（同 TapNow）、可拖动的进度条（带指针）、当前时间 / 总时长。
- * 波形和频谱都从解码后的音频数据算（见 audioAnalysis.ts），不依赖播放地址能不能接 Web Audio。
+ * 音频节点卡片（对齐 TapNow）。
+ *   · 中间一排胶囊形波形条，每根代表 0.5 秒的真实音量；播放时整排向左滚动，
+ *     播放指针固定在正中（蓝色竖线 + 顶部小三角），下方气泡显示「当前 / 总时长」。
+ *   · 底部居中：后退 10 秒 / 播放暂停（大圆钮）/ 前进 10 秒。
+ *   · 节点选中或播过之后，左右拖动波形就是拖动播放位置（向左拖 = 往后走）。
+ * 波形从解码后的音频数据算（见 audioAnalysis.ts），不依赖播放地址能不能接 Web Audio。
  */
 import { useEffect, useRef, useState } from "react";
-import { formatClock, type GenOutput } from "../model";
-import { decodeAudio, fakeSpectrum, peaks, spectrum, type Decoded } from "../audioAnalysis";
-import { Icon } from "./Icon";
+import type { GenOutput } from "../model";
+import { decodeAudio, peaks, type Decoded } from "../audioAnalysis";
 import { useAssetUrl } from "./useAsset";
 import { useMediaUrl } from "./useMedia";
 
-const BAR_PX = 6; // 每根条（含间隔）大约占的宽度
+/** 每根波形条代表的秒数（TapNow 实测约 0.5s 一根） */
+export const SEC_PER_BAR = 0.5;
+/** 节点宽度里大约放多少根条：条距 = 宽度 / 这个数 */
+const BARS_ACROSS = 34;
+
+/** 00:08 这种两位分钟格式 */
+export function clock2(sec: number): string {
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
 
 /** 旧数据里的 bars（生成时给的粗略波形）重采样到 count 根 */
 function resample(src: number[], count: number): number[] {
-  if (!src.length) return Array.from({ length: count }, (_, i) => 0.2 + Math.abs(Math.sin(i * 0.5)) * 0.6);
+  if (!src.length) return Array.from({ length: count }, (_, i) => 0.2 + Math.abs(Math.sin(i * 0.7)) * 0.6);
   return Array.from({ length: count }, (_, i) => src[Math.min(src.length - 1, Math.floor((i / count) * src.length))]);
 }
 
 export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
-  // 播放走流式地址（PR #24，支持 Range、秒开）；波形 / 频谱要整段字节，读资源库的 data URL 来解码
+  // 播放走流式地址（支持 Range、秒开）；波形要整段字节，读资源库的 data URL 来解码
   const media = useMediaUrl(out.url || ""); const url = media.url;
   const dataUrl = useAssetUrl(out.url || "");
   const aref = useRef<HTMLAudioElement>(null);
@@ -31,7 +40,6 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
   const [t, setT] = useState(0);
   const [mediaDur, setMediaDur] = useState(0);
   const dur = dec?.duration || mediaDur || Number(out.dur) || 0;
-  const frac = dur ? Math.max(0, Math.min(1, t / dur)) : 0;
 
   useEffect(() => {
     let alive = true; setDec(null);
@@ -40,9 +48,9 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
   }, [dataUrl]);
 
   // 动画状态放在 ref 里，每帧直接画 canvas，不走 React 渲染
-  const anim = useRef({ disp: [] as number[], overview: { count: 0, bars: [] as number[] }, fake0: 0, raf: 0, ink: "255,255,255", hi: "#fff", styleAt: 0 });
-  const live = useRef({ on, t, frac, dec, dur, bars: out.bars || [] });
-  live.current = { on, t, frac, dec, dur, bars: out.bars || [] };
+  const anim = useRef({ bars: [] as number[], barsKey: "", fake0: 0, raf: 0, ink: "255,255,255", styleAt: 0 });
+  const live = useRef({ on, t, dec, dur, bars: out.bars || [] });
+  live.current = { on, t, dec, dur, bars: out.bars || [] };
 
   /** 当前播放时间：有 <audio> 读它，没有（演示数据）按开始时刻推算 */
   const now = () => {
@@ -51,50 +59,36 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
     return L.on ? (performance.now() - anim.current.fake0) / 1000 : L.t;
   };
 
-  const draw = (): boolean => {
-    const c = cvs.current; if (!c) return false;
+  const draw = () => {
+    const c = cvs.current; if (!c) return;
     const A = anim.current; const L = live.current;
-    const w = c.clientWidth, h = c.clientHeight; if (!w || !h) return false;
+    const w = c.clientWidth, h = c.clientHeight; if (!w || !h) return;
     const dpr = Math.min(3, (globalThis.devicePixelRatio || 1) * 1.5);
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
-    const g = c.getContext("2d"); if (!g) return false;
+    const g = c.getContext("2d"); if (!g) return;
     const stamp = performance.now();
-    if (stamp - A.styleAt > 500) {
-      const cs = getComputedStyle(c); A.ink = cs.getPropertyValue("--ink").trim() || A.ink; A.hi = cs.getPropertyValue("--hi").trim() || A.hi; A.styleAt = stamp;
-    }
-    const count = Math.max(16, Math.min(96, Math.floor(w / BAR_PX)));
-    if (A.overview.count !== count || A.overview.bars.length !== count) {
-      A.overview = { count, bars: L.dec ? peaks(L.dec, count) : resample(L.bars, count) };
-    }
-    const time = now();
-    const target = L.on ? (L.dec ? spectrum(L.dec, time, count).bars : fakeSpectrum(time, count)) : A.overview.bars;
-    if (A.disp.length !== count) A.disp = target.slice();
-    let moving = false;
-    for (let i = 0; i < count; i++) {
-      const d = target[i] - A.disp[i];
-      // 起得快、落得慢，像电平表；切换播放 / 暂停时平滑过渡
-      A.disp[i] += d * (L.on ? (d > 0 ? 0.6 : 0.2) : 0.22);
-      if (Math.abs(d) > 0.003) moving = true;
-    }
+    if (stamp - A.styleAt > 500) { A.ink = getComputedStyle(c).getPropertyValue("--ink").trim() || A.ink; A.styleAt = stamp; }
+    const n = Math.max(1, Math.ceil((L.dur || 10) / SEC_PER_BAR));
+    const key = (L.dec ? "d" : "b") + n;
+    if (A.barsKey !== key) { A.bars = L.dec ? peaks(L.dec, n) : resample(L.bars, n); A.barsKey = key; }
+    const pitch = w / BARS_ACROSS; const bw = Math.max(2, pitch * 0.6);
+    const time = Math.max(0, Math.min(L.dur || 0, now()));
+    // 指针固定在正中；时间 t 对应的位置画在中线上，波形整体向左滚
+    const x0 = w / 2 - (time / SEC_PER_BAR) * pitch;
+    const mid = h / 2; const maxH = h * 0.56;
     g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-    const gap = 2; const bw = Math.max(1, (w - gap * (count - 1)) / count); const mid = h / 2;
-    const playedFrac = L.dur ? Math.max(0, Math.min(1, time / L.dur)) : 0;
-    for (let i = 0; i < count; i++) {
-      const v = Math.max(0.03, Math.min(1, A.disp[i]));
-      const bh = Math.max(2, v * h * 0.94);
-      const x = i * (bw + gap);
-      if (L.on) g.fillStyle = `rgba(${A.ink},${(0.45 + 0.55 * v).toFixed(3)})`;
-      else g.fillStyle = (i + 0.5) / count <= playedFrac && (time > 0) ? A.hi : `rgba(${A.ink},.38)`;
+    const first = Math.max(0, Math.floor(-x0 / pitch) - 1), last = Math.min(n - 1, Math.ceil((w - x0) / pitch));
+    for (let i = first; i <= last; i++) {
+      const cx = x0 + (i + 0.5) * pitch;
+      const bh = Math.max(bw * 0.9, Math.min(1, A.bars[i] || 0) * maxH);
+      const top = mid - bh / 2;
+      const grad = g.createLinearGradient(0, top, 0, top + bh);
+      grad.addColorStop(0, `rgba(${A.ink},.42)`); grad.addColorStop(1, `rgba(${A.ink},.16)`);
+      g.fillStyle = grad;
       g.beginPath();
-      if (g.roundRect) g.roundRect(x, mid - bh / 2, bw, bh, Math.min(2, bw / 2)); else g.rect(x, mid - bh / 2, bw, bh);
+      if (g.roundRect) g.roundRect(cx - bw / 2, top, bw, bh, bw / 2); else g.rect(cx - bw / 2, top, bw, bh);
       g.fill();
     }
-    // 暂停 / 停在中途：波形上画播放指针
-    if (!L.on && time > 0 && L.dur) {
-      const x = Math.round(playedFrac * w);
-      g.fillStyle = A.hi; g.fillRect(Math.min(w - 1.5, Math.max(0, x - 0.75)), 0, 1.5, h);
-    }
-    return L.on || moving;
   };
 
   const loop = () => {
@@ -103,21 +97,20 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
       const L = live.current;
       if (L.on) {
         const tm = now();
-        if (!aref.current || !url) { if (L.dur && tm >= L.dur) { setOn(false); setT(0); } else setT(tm); }
-        else setT(tm);
+        if ((!aref.current || !url) && L.dur && tm >= L.dur) { setOn(false); setT(0); } else setT(tm);
       }
-      A.raf = draw() ? requestAnimationFrame(step) : 0;
+      draw();
+      A.raf = L.on ? requestAnimationFrame(step) : 0;
     };
     A.raf = requestAnimationFrame(step);
   };
 
-  // 状态变化（播放 / 暂停 / 解码完成 / 跳转）后重画；尺寸变化也重画
-  useEffect(() => { anim.current.overview.count = 0; loop(); }, [dec, out.bars]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { anim.current.barsKey = ""; loop(); }, [dec, out.bars, dur]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loop(); }, [on]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!on) loop(); }, [t]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const c = cvs.current; if (!c || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { anim.current.overview.count = 0; loop(); }); ro.observe(c);
+    const ro = new ResizeObserver(() => loop()); ro.observe(c);
     return () => { ro.disconnect(); cancelAnimationFrame(anim.current.raf); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -132,51 +125,52 @@ export function AudioBody({ out, sel }: { out: GenOutput; sel?: boolean }) {
     else { a.pause(); setT(a.currentTime); setOn(false); }
   };
 
-  const seekTo = (f: number) => {
+  const seekTime = (sec: number) => {
     if (!dur) return;
-    const tm = Math.max(0, Math.min(dur, f * dur));
+    const tm = Math.max(0, Math.min(dur, sec));
     const a = aref.current;
     if (a && url) a.currentTime = tm; else anim.current.fake0 = performance.now() - tm * 1000;
     setT(tm);
   };
-  /** 后退 / 前进 10 秒（对齐 TapNow 音频节点） */
-  const skip = (d: number) => { if (dur) seekTo((now() + d) / dur); };
-  const skipIcon = (fwd: boolean) => <svg viewBox="0 0 24 24" className="i" aria-hidden style={fwd ? { transform: "scaleX(-1)" } : undefined}><path d="M4 12a8 8 0 1 0 2.4-5.7" /><path d="M4 3.5V8h4.5" /><text x="12" y="15.5" textAnchor="middle" fontSize="8" fontWeight="600" stroke="none" fill="currentColor" style={fwd ? { transform: "scaleX(-1)", transformOrigin: "12px 12px" } : undefined}>10</text></svg>;
-  /** 按下 → 拖动跳转；el 是用来算位置的那条（波形或进度条） */
+  /** 后退 / 前进 10 秒 */
+  const skip = (d: number) => seekTime(now() + d);
+  /** 左右拖波形：向左拖 = 往后走，按条距换算成秒 */
   const scrub = (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0 || !dur) return;
     e.stopPropagation(); e.preventDefault();
     const el = e.currentTarget; el.setPointerCapture?.(e.pointerId);
-    const at = (x: number) => { const r = el.getBoundingClientRect(); seekTo((x - r.left) / Math.max(1, r.width)); };
-    at(e.clientX);
-    const move = (ev: PointerEvent) => at(ev.clientX);
-    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
+    const pitch = el.clientWidth / BARS_ACROSS || 1;
+    const x0 = e.clientX; const t0 = now();
+    // 画布可能被缩放：用屏幕上的实际宽度换算
+    const scale = el.getBoundingClientRect().width / Math.max(1, el.clientWidth) || 1;
+    const move = (ev: PointerEvent) => seekTime(t0 - ((ev.clientX - x0) / scale / pitch) * SEC_PER_BAR);
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); el.classList.remove("drag"); };
+    el.classList.add("drag");
     addEventListener("pointermove", move); addEventListener("pointerup", up);
   };
-  // 没选中、也没播过时，波形区按下仍是拖节点；选中或播过之后才拿来跳转
-  const vizSeek = sel || on || t > 0;
-  const top = dec ? Math.min(16000, dec.sampleRate / 2) : 16000;
-  const lab = (hz: number) => Math.max(4, Math.min(96, (Math.log(hz / 40) / Math.log(top / 40)) * 100));
+  // 没选中、也没播过时，波形区按下仍是拖节点；选中或播过之后才拿来拖播放位置
+  const canScrub = sel || on || t > 0;
 
   return <div className="abody" data-audio-state={on ? "playing" : t > 0 ? "paused" : "idle"} data-audio-decoded={dec ? "1" : "0"}>
     {url ? <audio ref={aref} src={url} preload="metadata" onError={() => media.onError()}
       onLoadedMetadata={(e) => { const d = e.currentTarget.duration; if (Number.isFinite(d)) setMediaDur(d); }}
-      onPause={() => setOn(false)} onSeeked={(e) => { if (e.currentTarget.paused) setT(e.currentTarget.currentTime); }} onEnded={() => { setOn(false); setT(0); }} /> : null}
-    <canvas ref={cvs} className={"aviz" + (vizSeek ? " seek" : "")} data-aviz onPointerDown={vizSeek ? scrub : undefined} />
-    <div className={"aband" + (on ? " on" : "")} aria-hidden>
-      <span style={{ left: lab(100) + "%" }}>低</span><span style={{ left: lab(1000) + "%" }}>中</span><span style={{ left: lab(8000) + "%" }}>高</span>
+      onPause={() => setOn(false)} onSeeked={(e) => { if (e.currentTarget.paused) setT(e.currentTarget.currentTime); }} onEnded={(e) => { e.currentTarget.currentTime = 0; setOn(false); setT(0); }} /> : null}
+    <div className={"awave" + (canScrub ? " seek" : "")} onPointerDown={canScrub ? scrub : undefined}>
+      <canvas ref={cvs} data-aviz />
     </div>
+    <div className="ahead" aria-hidden><i className="ahead-tri" /><i className="ahead-line" /></div>
+    <span className="atime tnum" data-atime>{clock2(t)}/{clock2(dur)}</span>
     <div className="actl" onPointerDown={(e) => e.stopPropagation()}>
-      <button className="sk" data-act="back10" title="后退 10 秒" onPointerDown={(e) => { e.stopPropagation(); skip(-10); }}>{skipIcon(false)}</button>
-      <button className="p" data-act="play" title={on ? "暂停" : "播放"} onPointerDown={(e) => { e.stopPropagation(); toggle(); }}>
-        {on ? <svg viewBox="0 0 24 24" className="i apause" aria-hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg> : <Icon name="play" />}
+      <button className="sk" data-act="back10" title="后退 10 秒" onPointerDown={(e) => { e.stopPropagation(); skip(-10); }}>
+        <svg viewBox="0 0 24 24" aria-hidden><path d="M11.5 6.5v11L4 12zM20 6.5v11L12.5 12z" /></svg>
       </button>
-      <button className="sk" data-act="fwd10" title="前进 10 秒" onPointerDown={(e) => { e.stopPropagation(); skip(10); }}>{skipIcon(true)}</button>
-      <div className="atrack" data-atrack role="slider" aria-label="播放进度" aria-valuemin={0} aria-valuemax={Math.round(dur)} aria-valuenow={Math.round(t)} onPointerDown={scrub}>
-        <span className="atrack-rail" /><span className="atrack-fill" style={{ width: frac * 100 + "%" }} /><span className="atrack-head" data-atrack-head style={{ left: frac * 100 + "%" }} />
-      </div>
-      <span className="atime tnum" data-atime>{formatClock(t)} / {formatClock(dur)}</span>
+      <button className="p" data-act="play" title={on ? "暂停" : "播放"} onPointerDown={(e) => { e.stopPropagation(); toggle(); }}>
+        {on ? <svg viewBox="0 0 24 24" aria-hidden><rect x="7" y="5.5" width="3.6" height="13" rx="1.2" /><rect x="13.4" y="5.5" width="3.6" height="13" rx="1.2" /></svg>
+          : <svg viewBox="0 0 24 24" aria-hidden className="pl"><path d="M8 5.5v13l10.5-6.5z" /></svg>}
+      </button>
+      <button className="sk" data-act="fwd10" title="前进 10 秒" onPointerDown={(e) => { e.stopPropagation(); skip(10); }}>
+        <svg viewBox="0 0 24 24" aria-hidden><path d="M12.5 6.5v11L20 12zM4 6.5v11L11.5 12z" /></svg>
+      </button>
     </div>
   </div>;
 }
-
