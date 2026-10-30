@@ -22,7 +22,7 @@ import { isTyping, Viewport } from "./ui/Viewport";
 import "./ui/canvas-next.css";
 import { attachCollab } from "./collab";
 import { groupSelection, ungroup } from "./ui/LegacyNodes";
-import { StackGalleryHost } from "./ui/StackNode";
+import { runNodes, StackGalleryHost } from "./ui/StackNode";
 import { hiddenIds, isStack, stackSelection } from "./stack";
 
 /** 作用域根：所有样式都在 .cn-root 之下，主题写在它的 data-theme 上，不影响外壳 */
@@ -93,6 +93,11 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
       if (mod && k === "a") { e.preventDefault(); const hidden = hiddenIds(st.doc.nodes); store.setUI({ sel: new Set(st.doc.nodes.filter((n) => !hidden.has(n.id)).map((n) => n.id)) }); return; }
       if (mod && k === "c") { copySelection(store); return; }
       if (mod && k === "d") { e.preventDefault(); duplicate(store); return; }
+      if (mod && e.key === "Enter") {
+        // ⌘↵：选中分组 / 多个节点时一键运行（单个生成节点在面板里 ⌘↵ 生成）
+        const sel = [...st.ui.sel].map((id) => store.node(id)).filter((n): n is NonNullable<typeof n> => !!n);
+        if (sel.length > 1 || (sel.length === 1 && sel[0].kind === "group")) { e.preventDefault(); runNodes(ctl, sel); return; }
+      }
       if (mod && k === "g") { e.preventDefault(); e.shiftKey ? ungroup(store) : groupSelection(store); return; }
       if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); const r = ctl.rect(); ctl.zoomAt(st.view.k * 1.2, r.left + r.width / 2, r.top + r.height / 2); return; }
       if (mod && e.key === "-") { e.preventDefault(); const r = ctl.rect(); ctl.zoomAt(st.view.k / 1.2, r.left + r.width / 2, r.top + r.height / 2); return; }

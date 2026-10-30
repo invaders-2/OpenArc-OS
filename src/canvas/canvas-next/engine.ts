@@ -368,6 +368,8 @@ export type GroupPlan = {
   secs: number;
   /** 跳过的节点及原因（手写 / 上传 / 没提示词 / 组外上游没结果 / 没模型） */
   skipped: Array<{ id: string; title: string; why: string }>;
+  /** 范围里已经有结果的节点数（确认框里决定要不要显示「只跑没结果的」） */
+  hasOut: number;
 };
 
 /** 节点一次运行会产出几份结果（图片张数 / 视频次数），用于预估消耗 */
@@ -378,13 +380,19 @@ export function callsOf(n: CanvasNode): number {
   return 1;
 }
 
-export function planGroup(store: CanvasStore, ids: string[]): GroupPlan {
+export type PlanOpts = {
+  /** 只运行还没有结果的节点（已有结果的直接给下游用） */
+  onlyMissing?: boolean;
+};
+
+export function planGroup(store: CanvasStore, ids: string[], opts: PlanOpts = {}): GroupPlan {
   const doc = store.state.doc; const inGroup = new Set(ids);
-  const skipped: GroupPlan["skipped"] = []; const run = new Set<string>();
+  const skipped: GroupPlan["skipped"] = []; const run = new Set<string>(); let hasOut = 0;
   for (const id of ids) {
     const n = store.node(id); if (!n || !isGenKind(n.kind)) continue;
     const g = genOf(n); const ins = inputsOf(doc, id);
     if (g.manual || g.uploaded) continue; // 手写文本 / 上传素材本身就是结果，不算跳过
+    if (outOf(n)) { hasOut++; if (opts.onlyMissing) continue; }
     if (!g.prompt.trim() && !ins.length) { skipped.push({ id, title: g.title, why: "没有提示词也没有输入" }); continue; }
     if (!store.modelOf(n)) { skipped.push({ id, title: g.title, why: "没有可用模型" }); continue; }
     run.add(id);
@@ -411,22 +419,40 @@ export function planGroup(store: CanvasStore, ids: string[]): GroupPlan {
     for (const id of lv) { const n = store.node(id)!; const c = callsOf(n); const m = store.modelOf(n)!; calls += c; byKind[n.kind as GenKind] += c; models.set(m.name, (models.get(m.name) || 0) + c); slow = Math.max(slow, m.secs || 10); }
     secs += slow;
   }
-  return { levels, total: done.size, calls, byKind, byModel: [...models].map(([name, c]) => ({ name, calls: c })).sort((a, b) => b.calls - a.calls), secs, skipped };
+  return { levels, total: done.size, calls, byKind, byModel: [...models].map(([name, c]) => ({ name, calls: c })).sort((a, b) => b.calls - a.calls), secs, skipped, hasOut };
 }
 
-/** 按计划逐层运行：同层并行；某个节点失败时，它在组内的下游不再运行 */
-export async function runGroup(store: CanvasStore, plan: GroupPlan): Promise<{ ok: number; failed: number; skipped: number }> {
+/** 按计划逐层运行：同层并行；某个节点失败时，它在组内的下游不再运行。
+ *  key 用来登记进度（分组头 / 顶部进度条显示），stopGroup(key) 可以中途停下 */
+export async function runGroup(store: CanvasStore, plan: GroupPlan, meta: { key?: string; label?: string } = {}): Promise<{ ok: number; failed: number; skipped: number; stopped: boolean }> {
+  const key = meta.key || "run:" + Date.now();
   const failed = new Set<string>(); let ok = 0; let skippedDown = 0;
+  const all = plan.levels.flat();
+  store.setBatch(key, { key, label: meta.label || "分组", total: all.length, done: 0, failed: 0, queued: all, stopped: false, startedAt: Date.now() });
   const blocked = (id: string) => inputsOf(store.state.doc, id).some((x) => failed.has(x.node.id));
-  for (const lv of plan.levels) {
-    const results = await Promise.all(lv.map(async (id) => {
-      if (!store.node(id)) return null;
-      if (blocked(id)) { failed.add(id); skippedDown++; return null; }
-      const res = await runNode(store, id, { chain: true }).catch(() => false);
-      if (!res) failed.add(id); else ok++;
-      return res;
-    }));
-    void results;
+  const stopped = () => !!store.state.batches[key]?.stopped;
+  const tick = (id: string) => { const b = store.state.batches[key]; if (b) store.patchBatch(key, { done: ok, failed: failed.size - skippedDown, queued: b.queued.filter((x) => x !== id) }); };
+  let st = false;
+  try {
+    for (const lv of plan.levels) {
+      if (stopped()) break;
+      await Promise.all(lv.map(async (id) => {
+        if (!store.node(id) || stopped()) return;
+        if (blocked(id)) { failed.add(id); skippedDown++; tick(id); return; }
+        const res = await runNode(store, id, { chain: true }).catch(() => false);
+        if (!res) failed.add(id); else ok++;
+        tick(id);
+      }));
+    }
+  } finally {
+    st = stopped(); store.setBatch(key, null);
   }
-  return { ok, failed: failed.size - skippedDown, skipped: skippedDown };
+  return { ok, failed: failed.size - skippedDown, skipped: skippedDown, stopped: st };
+}
+
+/** 停止一键运行：正在跑的节点中止，后面的不再开始 */
+export function stopGroup(store: CanvasStore, key: string) {
+  const b = store.state.batches[key]; if (!b) return;
+  store.patchBatch(key, { stopped: true });
+  for (const id of b.queued) store.state.runtime[id]?.abort.abort();
 }

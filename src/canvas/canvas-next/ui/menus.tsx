@@ -13,7 +13,7 @@ import { groupSelection, LEGACY_DEFAULT, ungroup } from "./LegacyNodes";
 import { saveNodeToLibrary } from "./Library";
 import { blobToBase64, shortenPath } from "../exportCanvas";
 import { isStack, stackItems, stackSelection, unstack } from "../stack";
-import { confirmRunGroup, groupLabel, runnableIds, saveAsTemplate } from "./StackNode";
+import { groupLabel, runNodes, saveAsTemplate } from "./StackNode";
 import { makeZip } from "../zip";
 
 type At = Element | { x: number; y: number };
@@ -101,7 +101,7 @@ export function nodeMenu(ctl: Ctl, at: { x: number; y: number }) {
       <button className="mi" data-k="extractver" disabled={!g || g.hist.length < 2} onClick={act(() => extractCurrentVersion(store, n.id))}><Icon name="copy" size="s" />提取当前版本<span className="k">{g && g.hist.length > 1 ? "第 " + (g.hi + 1) + " 版" : ""}</span></button>
       <button className="mi" data-k="allhist" disabled={!g || g.hist.length < 2} onClick={act(() => spreadHistory(store, n.id))}><Icon name="layers" size="s" />应用所有历史<span className="k">{g && g.hist.length > 1 ? g.hist.length + " 个版本" : ""}</span></button>
       <div className="msep" />
-      {multi || n.kind === "group" ? <button className="mi" data-k="rungroup" onClick={act(() => { const ns = sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x); confirmRunGroup(ctl, runnableIds(store, ns), multi ? `选中的 ${ns.length} 个节点` : groupLabel(n)); })}><Icon name="play" size="s" />{multi ? "运行选中节点" : isStack(n) ? "运行堆叠" : "运行分组"}</button> : null}
+      {multi || n.kind === "group" ? <button className="mi" data-k="rungroup" onClick={act(() => runNodes(ctl, sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x)))}><Icon name="play" size="s" />{multi ? "一键运行选中节点" : isStack(n) ? "一键运行堆叠" : "一键运行分组"}<span className="k">⌘↵</span></button> : null}
       {multi || n.kind === "group" ? <button className="mi" data-k="savetpl" onClick={act(() => { const ns = sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x); saveAsTemplate(ctl, ns, multi ? store.state.name + " 模板" : groupLabel(n) + " 模板"); })}><Icon name="layout" size="s" />存为我的模板</button> : null}
       <button className="mi" data-k="runup" disabled={!gen} onClick={act(() => void runChain(store, n.id, "up"))}><Icon name="runup" size="s" />运行到此（含上游）</button>
       <button className="mi" data-k="rundown" onClick={act(() => void runChain(store, n.id, "down"))}><Icon name="rundown" size="s" />从此运行下游</button>

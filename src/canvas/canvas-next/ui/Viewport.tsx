@@ -23,7 +23,7 @@ type Drag =
 
 export function Viewport() {
   const ctl = useCtl(); const store = ctl.store;
-  const doc = useS((s) => s.doc); const view = useS((s) => s.view); const ui = useS((s) => s.ui); const runtime = useS((s) => s.runtime);
+  const doc = useS((s) => s.doc); const view = useS((s) => s.view); const ui = useS((s) => s.ui); const runtime = useS((s) => s.runtime); const batches = useS((s) => s.batches);
   const vpRef = useRef<HTMLDivElement>(null); const drag = useRef<Drag | null>(null); const space = useRef(false);
   /** 右键菜单已在 pointerup 里弹过（Windows 的 contextmenu 在松开后才来，避免弹两次） */
   const menuAt = useRef(0);
@@ -249,6 +249,7 @@ export function Viewport() {
     else blankMenu(ctl, { x: e.clientX, y: e.clientY }, ctl.toWorld(e.clientX, e.clientY));
   };
 
+  const queuedIds = new Set(Object.values(batches).flatMap((b) => b.queued));
   const k = view.k; const gs = 24 * (k < .45 ? 2 : 1) * k;
   const conn = ui.conn;
   return (
@@ -258,16 +259,17 @@ export function Viewport() {
       onPointerLeave={() => { if (store.state.collab.transport) window.dispatchEvent(new CustomEvent("cn:cursor", { detail: null })); }}
       onDoubleClick={onDouble} onContextMenu={onContext}
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const files = [...(e.dataTransfer?.files || [])]; if (files.length) void addFiles(store, files, ctl.toWorld(e.clientX, e.clientY)); }}>
-      <div id="world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${k})` }}>
+      <div id="world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${k})`, ["--zinv" as string]: String(1 / k) }}>
         <Edges />
         {guides.map((g, i) => <div key={i} className={"snapguide " + g.axis} style={g.axis === "x" ? { left: g.at, top: g.from, height: g.to - g.from, width: 1 / k } : { top: g.at, left: g.from, width: g.to - g.from, height: 1 / k }} />)}
         <div id="nodes">
           {(() => { const hidden = hiddenIds(doc.nodes); return doc.nodes.filter((n) => !hidden.has(n.id)); })().sort((a, b) => (a.kind === "group" && !isStack(a) ? 0 : 1) - (b.kind === "group" && !isStack(b) ? 0 : 1)).map((n) => {
             const run = runtime[n.id];
+            const queued = queuedIds.has(n.id);
             const loadSrc = run ? srcOf(n) || inputsOf(doc, n.id).map((x) => srcOf(x.node)).find(Boolean) : undefined;
             const bj = run ? null : batchOf(n).journal;
             const batchInfo = bj && n.kind !== "table" ? `${bj.rows.filter((r) => r.status === "completed").length}/${bj.rows.length} 行` : undefined;
-            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} modelName={(store.modelOf(n) || {}).name} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id || dropStack === n.id} noconn={!!conn && conn.over !== n.id && !!connectBlock(doc, conn.rev ? n.id : conn.id, conn.rev ? conn.id : n.id)} hl={ui.hlNode === n.id} loadSrc={loadSrc} batchInfo={batchInfo}
+            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} modelName={(store.modelOf(n) || {}).name} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id || dropStack === n.id} noconn={!!conn && conn.over !== n.id && !!connectBlock(doc, conn.rev ? n.id : conn.id, conn.rev ? conn.id : n.id)} hl={ui.hlNode === n.id} loadSrc={loadSrc} batchInfo={batchInfo} queued={queued}
               onAct={(node, act, ev) => onNodeAct(ctl, node, act, ev)} onTextCommit={(id, text) => commitText(store, id, text)} />;
           })}
         </div>

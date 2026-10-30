@@ -17,7 +17,7 @@ fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(ENTRY, [
   `export * from ${JSON.stringify(path.join(ROOT, "src/canvas/canvas-next/stack.ts"))};`,
   `export * from ${JSON.stringify(path.join(ROOT, "src/canvas/canvas-next/zip.ts"))};`,
-  `export { planGroup, callsOf } from ${JSON.stringify(path.join(ROOT, "src/canvas/canvas-next/engine.ts"))};`,
+  `export { planGroup, callsOf, runGroup, stopGroup } from ${JSON.stringify(path.join(ROOT, "src/canvas/canvas-next/engine.ts"))};`,
   `export { copySelection, paste, deleteSelection } from ${JSON.stringify(path.join(ROOT, "src/canvas/canvas-next/actions.ts"))};`,
   `export { CanvasStore } from ${JSON.stringify(path.join(ROOT, "src/canvas/canvas-next/store.ts"))};`,
   `export { newNode, specFor } from ${JSON.stringify(path.join(ROOT, "src/canvas/canvas-next/model.ts"))};`,
@@ -107,6 +107,59 @@ test("分组运行计划：按依赖分层、统计调用次数、跳过上游�
   assert.equal(plan.byKind.image, 4);
   assert.deepEqual(plan.skipped.map((x) => x.id), ["b"]);
   assert.match(plan.skipped[0].why, /组外|上游/);
+});
+
+test("一键运行：只跑没结果的节点时，已有结果的上游直接给下游用", () => {
+  const t = M.newNode("text", 0, 0, { id: "t", prompt: "写文案", hist: [{ text: "旧文案" }] }, models[1]);
+  const a = img("a", 400);
+  const b = img("b", 800, { hist: [{ url: "data:image/png;base64,AA" }] });
+  const store = makeStore([t, a, b], [{ id: "e1", from: "t", to: "a" }, { id: "e2", from: "a", to: "b" }]);
+  const all = M.planGroup(store, ["t", "a", "b"]);
+  assert.deepEqual(all.levels, [["t"], ["a"], ["b"]]); assert.equal(all.hasOut, 2);
+  const miss = M.planGroup(store, ["t", "a", "b"], { onlyMissing: true });
+  assert.deepEqual(miss.levels, [["a"]], "t、b 已有结果不跑；a 的上游 t 有结果，可以跑");
+  assert.equal(miss.skipped.length, 0);
+});
+
+/** 假后端：每次生成等 ms 毫秒，支持中止 */
+function runStore(nodes, edges, ms = 30) {
+  const store = makeStore(nodes, edges); const calls = [];
+  Object.assign(store.backend, {
+    importAsset: async (_c, u) => u,
+    generate: (req, _on, signal) => new Promise((res, rej) => {
+      calls.push(req.nodeId);
+      const t = setTimeout(() => res({ outputs: [req.kind === "text" ? { text: "结果" } : { url: "data:image/png;base64,AA", w: 1, h: 1 }] }), ms);
+      signal?.addEventListener("abort", () => { clearTimeout(t); const e = new Error("stopped"); e.code = "STOPPED"; rej(e); });
+    }),
+  });
+  return { store, calls };
+}
+
+test("一键运行：按层运行、登记进度，结束后清掉", async () => {
+  const t = M.newNode("text", 0, 0, { id: "t", prompt: "写文案" }, models[1]);
+  const { store, calls } = runStore([t, img("a", 400), img("b", 800)], [{ id: "e1", from: "t", to: "a" }, { id: "e2", from: "t", to: "b" }]);
+  const plan = M.planGroup(store, ["t", "a", "b"]);
+  const seen = [];
+  const off = store.subscribe(() => { const b = store.state.batches.g1; if (b) seen.push(`${b.done}/${b.total}:${b.queued.length}`); });
+  const r = await M.runGroup(store, plan, { key: "g1", label: "海报组" });
+  off();
+  assert.deepEqual(r, { ok: 3, failed: 0, skipped: 0, stopped: false });
+  assert.equal(calls[0], "t", "上游先跑"); assert.deepEqual(calls.slice(1).sort(), ["a", "b"]);
+  assert.ok(seen.includes("0/3:3") && seen.includes("1/3:2"), "进度：开始 0/3，跑完上游 1/3");
+  assert.equal(store.state.batches.g1, undefined, "结束后进度清掉");
+});
+
+test("一键运行：中途停止，正在跑的中止、后面的不再开始", async () => {
+  const t = M.newNode("text", 0, 0, { id: "t", prompt: "写文案" }, models[1]);
+  const { store, calls } = runStore([t, img("a", 400)], [{ id: "e1", from: "t", to: "a" }], 200);
+  const p = M.runGroup(store, M.planGroup(store, ["t", "a"]), { key: "g2" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(store.state.runtime.t, "t 正在跑");
+  M.stopGroup(store, "g2");
+  const r = await p;
+  assert.equal(r.stopped, true); assert.equal(r.ok, 0);
+  assert.deepEqual(calls, ["t"], "a 没有开始");
+  assert.equal(store.state.batches.g2, undefined);
 });
 
 test("zip：文件名去重、可被系统 unzip 解开且内容一致", async () => {
