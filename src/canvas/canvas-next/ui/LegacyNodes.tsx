@@ -3,6 +3,7 @@
  * 数据结构沿用 CanvasDoc（node.text / clips / scene / url / children），旧画布和新画布读写同一份。
  * 节点内可交互区域都包在 data-act 里：不触发拖动，节点靠标题栏拖。
  */
+import { frameOf, strayInFrame } from "../groupFit";
 import { useEffect, useRef, useState } from "react";
 import { Model3DViewer } from "../../react-canvas/Model3DViewer";
 import { Scene3D } from "../../react-canvas/Scene3D";
@@ -50,11 +51,11 @@ export function GroupRunTool({ node }: { node: CanvasNode }) {
 /** ⌘G：把选中的节点放进一个分组框（分组本身也是节点，排在最底层） */
 export function groupSelection(store: ReturnType<typeof useCtl>["store"]) {
   const ids = [...store.state.ui.sel].filter((id) => store.node(id) && store.node(id)!.kind !== "group"); if (ids.length < 2) { store.toast("至少选中 2 个节点再分组"); return; }
-  const ns = ids.map((id) => store.node(id)!); const pad = 28;
-  const x = Math.min(...ns.map((n) => n.x)) - pad, y = Math.min(...ns.map((n) => n.y)) - pad - 10;
-  const w = Math.max(...ns.map((n) => n.x + n.w)) - x + pad, h = Math.max(...ns.map((n) => n.y + n.h + 24)) - y + pad - 24;
-  const g: CanvasNode = { id: uid("g"), kind: "group", x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), text: "分组", children: ids };
-  store.addNodes([g], [], { select: true, history: true }); store.toast(`已把 ${ids.length} 个节点编为一组`);
+  // 框里压着但没选中的节点一起编进来，免得看着在组里、其实不在
+  const box0 = frameOf(ids.map((id) => store.node(id)!)); const extra = strayInFrame(store.state.doc, ids, box0); const all = [...ids, ...extra];
+  const box = frameOf(all.map((id) => store.node(id)!));
+  const g: CanvasNode = { id: uid("g"), kind: "group", ...box, text: "分组", children: all };
+  store.addNodes([g], [], { select: true, history: true }); store.toast(extra.length ? `已把 ${all.length} 个节点编为一组（框里另外 ${extra.length} 个也一起编进来了）` : `已把 ${ids.length} 个节点编为一组`);
 }
 export function ungroup(store: ReturnType<typeof useCtl>["store"], gid?: string) {
   const ids = gid ? [gid] : [...store.state.ui.sel].filter((id) => store.node(id)?.kind === "group"); if (!ids.length) return;

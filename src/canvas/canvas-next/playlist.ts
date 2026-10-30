@@ -43,12 +43,19 @@ export function addToTimeline(store: CanvasStore, tlId: string, ids: string[]): 
 /** 选中的视频 / 音频 → 新建一条剪辑时间线，放在选区右侧 */
 export function createTimelineFrom(store: CanvasStore, nodes: CanvasNode[]): CanvasNode | null {
   const src = readingOrder(nodes.filter(clipable)); if (!src.length) { store.toast("选中的节点里没有生成好的视频 / 音频"); return null; }
+  const tl = timelineFromOrdered(store, src);
+  if (tl) store.toast(`已用 ${src.length} 段建好剪辑时间线`);
+  return tl;
+}
+
+/** 按给定顺序建时间线（不排序、不提示），放在这些节点右侧 */
+export function timelineFromOrdered(store: CanvasStore, nodes: CanvasNode[], name = "剪辑时间线"): CanvasNode | null {
+  const src = nodes.filter(clipable); if (!src.length) return null;
   const right = Math.max(...nodes.map((n) => n.x + n.w)); const top = Math.min(...nodes.map((n) => n.y));
   const w = 760, h = 540; let x = right + 120, y = top;
   const hit = () => store.state.doc.nodes.some((o) => o.kind !== "group" && x < o.x + o.w + 20 && x + w + 20 > o.x && y < o.y + o.h + 44 && y + h + 44 > o.y);
   for (let i = 0; i < 40 && hit(); i++) y += 60;
-  const tl = { id: uid("n"), kind: "timeline", x, y, w, h, text: "剪辑时间线", clips: normalize(src.map(clipFromNode)) } as unknown as CanvasNode;
+  const tl = { id: uid("n"), kind: "timeline", x, y, w, h, text: name, clips: normalize(src.map(clipFromNode)) } as unknown as CanvasNode;
   store.addNodes([tl], [], { select: true });
-  store.toast(`已用 ${src.length} 段建好剪辑时间线`);
   return tl;
 }
