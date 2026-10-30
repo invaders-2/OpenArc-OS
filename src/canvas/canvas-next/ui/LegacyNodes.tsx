@@ -8,10 +8,11 @@ import { Model3DViewer } from "../../react-canvas/Model3DViewer";
 import { Scene3D } from "../../react-canvas/Scene3D";
 import type { CanvasNode, Scene3DData } from "../../react-canvas/reactCanvasStore";
 import { uid } from "../model";
-import { useCtl } from "./ctx";
+import { useCtl, useS } from "./ctx";
+import { stopGroup } from "../engine";
 import { Icon } from "./Icon";
 import { useAssetUrl } from "./useAsset";
-import { confirmRunGroup, groupLabel, runnableIds } from "./StackNode";
+import { runnableIds, runNodes } from "./StackNode";
 
 const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 
@@ -28,12 +29,23 @@ export function NoteBody({ node }: { node: CanvasNode }) {
 /* ---------------- 分组 ---------------- */
 export function GroupBody({ node }: { node: CanvasNode }) {
   const store = useCtl().store; const n = (node.children || []).filter((id) => store.node(id)).length;
-  const ctl = useCtl();
-  return <div className="lg-group"><span>{n} 个节点</span><small>拖动标题移动整组 · ⇧⌘G 取消分组</small>
+  return <div className="lg-group"><span>{n} 个节点</span><small>拖动标题移动整组 · ⌘↵ 一键运行 · ⇧⌘G 取消分组</small>
     <span className="lg-group-acts">
-      <button className="linkbtn" data-act="rungroup" onPointerDown={stop} onClick={() => confirmRunGroup(ctl, runnableIds(store, [node]), groupLabel(node))}><Icon name="play" size="xs" />运行分组</button>
       <button className="linkbtn" data-act="ungroup" onPointerDown={stop} onClick={() => ungroup(store, node.id)}>取消分组</button>
     </span></div>;
+}
+/** 分组右上角：一键运行（TapNow Run Group）；运行中显示进度和停止。按钮不随画布缩小，缩到很小也点得到 */
+export function GroupRunTool({ node }: { node: CanvasNode }) {
+  const ctl = useCtl(); const store = ctl.store;
+  const b = useS((s) => s.batches[node.id]);
+  const count = useS((s) => runnableIds(store, [s.doc.nodes.find((x) => x.id === node.id) || node]).length);
+  if (b) return <div className="gtool running" data-act="grun" data-grun="running" onPointerDown={stop}>
+    <span className="gt-prog tnum"><span className="runsig" />运行中 {b.done + b.failed}/{b.total}</span>
+    <button className="gt-btn" data-grun="stop" disabled={b.stopped} title="停止这次一键运行" onClick={() => stopGroup(store, node.id)}><Icon name="x" size="xs" />{b.stopped ? "正在停止" : "停止"}</button>
+  </div>;
+  return <div className="gtool" data-act="grun" onPointerDown={stop}>
+    <button className="gt-btn solid" data-grun="run" disabled={!count} title={count ? `按依赖顺序运行组内 ${count} 个生成节点（⌘↵）` : "组里没有可运行的生成节点"} onClick={() => runNodes(ctl, [store.node(node.id) || node])}><Icon name="play" size="xs" />一键运行</button>
+  </div>;
 }
 /** ⌘G：把选中的节点放进一个分组框（分组本身也是节点，排在最底层） */
 export function groupSelection(store: ReturnType<typeof useCtl>["store"]) {

@@ -8,7 +8,7 @@ import { savePersonalTemplate } from "../personalTemplates";
 import { title } from "../actions";
 import { planGroup, runGroup, type GroupPlan } from "../engine";
 import { isGenKind, outOf, TYPE_ICON, TYPE_LABEL, type GenKind } from "../model";
-import { isStack, stackCover, stackItems, takeFromStack, unstack } from "../stack";
+import { groupLabel, isStack, stackCover, stackItems, takeFromStack, unstack } from "../stack";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { Icon } from "./Icon";
 import { saveNodesToLibrary } from "./Library";
@@ -87,36 +87,61 @@ function StackItem({ n, onTake }: { n: CanvasNode; onTake: () => void }) {
 /* ---------- 分组运行 ---------- */
 const fmtSecs = (s: number) => (s < 60 ? `${Math.round(s)} 秒` : `${Math.round(s / 60)} 分钟`);
 
-/** 运行前确认：列出要跑的节点数、预计调用次数（按类型 / 模型）、预计耗时、跳过的节点 */
-export function confirmRunGroup(ctl: Ctl, ids: string[], label = "分组") {
-  const plan = planGroup(ctl.store, ids);
-  if (!plan.total) { ctl.store.toast(plan.skipped.length ? `没有可运行的节点：${plan.skipped[0].title}（${plan.skipped[0].why}）` : "分组里没有可运行的生成节点"); return; }
-  openModal((close) => <RunGroupConfirm ctl={ctl} plan={plan} label={label} close={close} />, "rungroup");
+const ONLY_MISSING_KEY = "canvas-next:rungroup:onlyMissing";
+const loadOnlyMissing = () => { try { return localStorage.getItem(ONLY_MISSING_KEY) === "1"; } catch { return false; } };
+
+/** 一键运行的进度 key：分组用分组 id；多选用排好序的节点 id（同一批节点再点一次能认出来） */
+export function runKeyOf(nodes: CanvasNode[]): string {
+  if (nodes.length === 1 && nodes[0].kind === "group") return nodes[0].id;
+  return "sel:" + nodes.map((n) => n.id).sort().join(",");
 }
-function RunGroupConfirm({ ctl, plan, label, close }: { ctl: Ctl; plan: GroupPlan; label: string; close: () => void }) {
+
+/** 运行前确认：列出要跑的节点数、预计调用次数（按类型 / 模型）、预计耗时、跳过的节点 */
+export function confirmRunGroup(ctl: Ctl, ids: string[], label = "分组", key?: string) {
+  if (key && ctl.store.state.batches[key]) { const b = ctl.store.state.batches[key]; ctl.store.toast(`「${label}」正在运行（${b.done}/${b.total}），可以在上方进度条里停止`); return; }
+  const onlyMissing = loadOnlyMissing();
+  const plan = planGroup(ctl.store, ids, { onlyMissing });
+  // 「只跑没结果的」打开时全都有结果了：退回全部运行，不让用户卡在“没有可运行的节点”
+  const full = !plan.total && onlyMissing ? planGroup(ctl.store, ids) : plan;
+  if (!full.total) { ctl.store.toast(full.skipped.length ? `没有可运行的节点：${full.skipped[0].title}（${full.skipped[0].why}）` : "分组里没有可运行的生成节点"); return; }
+  openModal((close) => <RunGroupConfirm ctl={ctl} ids={ids} label={label} runKey={key} initOnlyMissing={onlyMissing && !!plan.total} close={close} />, "rungroup");
+}
+function RunGroupConfirm({ ctl, ids, label, runKey, initOnlyMissing, close }: { ctl: Ctl; ids: string[]; label: string; runKey?: string; initOnlyMissing: boolean; close: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [onlyMissing, setOnlyMissing] = useState(initOnlyMissing);
+  const plan = planGroup(ctl.store, ids, { onlyMissing });
+  const allPlan = onlyMissing ? planGroup(ctl.store, ids) : plan;
   const kinds = (Object.keys(plan.byKind) as GenKind[]).filter((k) => plan.byKind[k]);
+  const toggle = (v: boolean) => { setOnlyMissing(v); try { localStorage.setItem(ONLY_MISSING_KEY, v ? "1" : "0"); } catch { /* 忽略 */ } };
   const go = async () => {
+    if (!plan.total) return;
     setBusy(true); close();
     ctl.store.toast(`开始运行「${label}」：${plan.total} 个节点，按依赖分 ${plan.levels.length} 步`);
-    const r = await runGroup(ctl.store, plan);
+    const r = await runGroup(ctl.store, plan, { key: runKey, label });
+    if (r.stopped) { ctl.store.toast(`已停止「${label}」：完成 ${r.ok} 个`, 4000); return; }
     ctl.store.toast(r.failed || r.skipped ? `「${label}」运行结束：成功 ${r.ok}，失败 ${r.failed}${r.skipped ? `，${r.skipped} 个因上游失败未运行` : ""}` : `「${label}」运行完成：${r.ok} 个节点`, 5000);
   };
   return <>
-    <ModalHead title={<>运行「{label}」</>} icon="play" />
+    <ModalHead title={<>一键运行「{label}」</>} icon="play" />
     <div className="mbd rg">
       <div className="rg-sum">
         <div><b className="tnum">{plan.total}</b><span>个节点</span></div>
         <div><b className="tnum">{plan.calls}</b><span>次模型调用</span></div>
         <div><b className="tnum">≈{fmtSecs(plan.secs)}</b><span>预计耗时</span></div>
       </div>
+      {allPlan.hasOut ? <label className="rg-opt" data-rg="onlyMissing">
+        <input type="checkbox" checked={onlyMissing} onChange={(e) => toggle(e.target.checked)} />
+        <span>只运行还没有结果的节点<small>{allPlan.hasOut} 个已有结果，{onlyMissing ? "直接给下游用" : "会追加一个新版本"}</small></span>
+      </label> : null}
+      {plan.levels.length > 1 ? <><div className="sec"><span>运行顺序（{plan.levels.length} 步）</span></div>
+        <div className="rg-steps" data-rg="steps">{plan.levels.map((lv, i) => <div key={i} className="rg-step"><span className="n tnum">{i + 1}</span><span className="names">{lv.map((id) => title(ctl.store.node(id)!)).join("、")}</span></div>)}</div></> : null}
       <div className="sec"><span>预计消耗</span></div>
-      {kinds.map((k) => <div key={k} className="row"><span>{TYPE_LABEL[k]}</span><b className="tnum">{plan.byKind[k]} 次</b></div>)}
+      {kinds.length ? kinds.map((k) => <div key={k} className="row"><span>{TYPE_LABEL[k]}</span><b className="tnum">{plan.byKind[k]} 次</b></div>) : <div className="row sub"><span>都已有结果，不需要运行</span></div>}
       {plan.byModel.map((m) => <div key={m.name} className="row sub"><span>{m.name}</span><span className="tnum">{m.calls} 次</span></div>)}
       {plan.skipped.length ? <><div className="sec"><span>不会运行（{plan.skipped.length}）</span></div>
         {plan.skipped.slice(0, 6).map((x) => <div key={x.id} className="row sub"><span>{x.title}</span><span>{x.why}</span></div>)}</> : null}
-      <p className="rg-note">按服务商的用量计费；已有结果的节点会追加一个新版本。同一步里互不依赖的节点并行运行，某个节点失败时它的下游不再运行。</p>
-      <div className="rg-foot"><button className="btn" onClick={close}>取消</button><button className="btn solid" data-rg="go" disabled={busy} onClick={() => void go()}><Icon name="play" size="s" />运行 {plan.total} 个节点</button></div>
+      <p className="rg-note">按服务商的用量计费。同一步里互不依赖的节点并行运行，某个节点失败时它的下游不再运行；运行中可以随时停止。</p>
+      <div className="rg-foot"><button className="btn" onClick={close}>取消</button><button className="btn solid" data-rg="go" disabled={busy || !plan.total} onClick={() => void go()}><Icon name="play" size="s" />运行 {plan.total} 个节点</button></div>
     </div>
   </>;
 }
@@ -131,6 +156,13 @@ export function runnableIds(store: Ctl["store"], nodes: CanvasNode[]): string[] 
   return [...new Set(out)];
 }
 export { groupLabel } from "../stack";
+
+/** 一键运行：一个分组 / 堆叠，或多选的节点（分组展开成员），按依赖顺序跑 */
+export function runNodes(ctl: Ctl, nodes: CanvasNode[]) {
+  if (!nodes.length) return;
+  const one = nodes.length === 1 && nodes[0].kind === "group";
+  confirmRunGroup(ctl, runnableIds(ctl.store, nodes), one ? groupLabel(nodes[0]) : `选中的 ${nodes.length} 个节点`, runKeyOf(nodes));
+}
 
 /* ---------- 分组 / 选中节点「存为我的模板」（TapNow Create Template） ---------- */
 /** 分组 / 堆叠展开成员，取出子画布（只保留两端都在里面的连线） */
