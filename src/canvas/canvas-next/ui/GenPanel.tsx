@@ -276,7 +276,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）
     if (m?.style) gline.push(gdot("c2"), <button key="chip-style" ref={styleRef} type="button" data-p="style" data-chip="style"
       className={"gp-chip style" + (ip.style !== "无" ? " on" : "")} title="风格仅基于图片生效" onClick={() => setStyleOpen(true)}>
-      <span className="ic"><StyleGlyph /></span><span className="lbl">{ip.style === "无" ? "风格" : ip.style}</span>
+      <span className="ic">{styleTile(ip.style) ? <img className="tile" src={styleTile(ip.style)} alt="" draggable={false} /> : <StyleGlyph />}</span><span className="lbl">{ip.style === "无" ? "风格" : ip.style}</span>
     </button>);
     if (m?.camera) gline.push(gdot("c3"), <button key="chip-camera" ref={camRef} type="button" data-p="camera" data-chip="camera"
       className={"gp-chip cam" + (ip.camera.on ? " on" : "")} title={ip.camera.on ? cameraSummary(ip.camera) : "摄影机控制"} onClick={openCamera}>
@@ -603,6 +603,12 @@ function StyleGlyph() {
   return <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M11 3.5l1.6 4.4 4.4 1.6-4.4 1.6L11 15.5 9.4 11.1 5 9.5l4.4-1.6z" /><path d="M18 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" /></svg>;
 }
 
+/** 内置风格预览图（集中一处，换图只改这里）：名称 → public/style-tiles/<file>.webp；「无」没有图 */
+const STYLE_TILES: Record<string, string> = {
+  "电影感": "cinematic", "胶片": "film", "极简棚拍": "studio", "赛博": "cyber", "水彩": "watercolor", "3D 渲染": "render-3d", "国潮": "guochao",
+};
+const styleTile = (name: string): string => (STYLE_TILES[name] ? "./style-tiles/" + STYLE_TILES[name] + ".webp" : "");
+
 /** 摄影机控制浮层：602×272、4 列轮盘、标题 + 保存（保存只关闭）；enter/exit 150ms linear */
 function CamLayer({ node, anchor, onClose }: { node: CanvasNode; anchor: HTMLElement | null; onClose: () => void }) {
   const store = useCtl().store;
@@ -685,9 +691,16 @@ const STYLE_FOLDERS: Array<{ id: string; name: string; me: boolean; team: boolea
 ];
 
 /** 风格缩略图位：有真实资产就显示该资产图，没有就用色块；24×24 圆角 6 + 1px 描边（选中 2px 主色） */
-function StyleDot({ src }: { src?: string }) {
+function StyleDot({ src, none }: { src?: string; none?: boolean }) {
   const url = useAssetUrl(src || "");
-  return <span className="dot">{url ? <img src={url} alt="" draggable={false} /> : null}</span>;
+  const [bad, setBad] = useState(false);
+  return <span className={"dot" + (none ? " none" : "")}>{url && !bad ? <img src={url} alt="" draggable={false} onError={() => setBad(true)} /> : null}</span>;
+}
+
+function StylePeek({ src, name, top }: { src: string; name: string; top: number }) {
+  const url = useAssetUrl(src);
+  if (!url) return null;
+  return <div className="style-peek" data-style-peek={name} style={{ top }} aria-hidden="true"><img src={url} alt="" draggable={false} /><span>{name}</span></div>;
 }
 
 /** 选择风格图片：360×528 居中模态（TapNow 无进出动效，这里照做）；个人/团队 + 搜索 + 可折叠文件夹 + 取消/确认 */
@@ -701,6 +714,15 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
   const [err, setErr] = useState("");
   const [pickStyle, setPickStyle] = useState<string>(current || "无");
   const [pickAsset, setPickAsset] = useState<AssetItem | null>(null);
+  /** 悬停大图：在弹窗右侧和这一行对齐显示 160×160 预览（没有图就不显示） */
+  const [peek, setPeek] = useState<{ src: string; name: string; top: number } | null>(null);
+  const dlgRef = useRef<HTMLDivElement>(null);
+  const peekAt = (row: HTMLElement, src: string, name: string) => {
+    const box = dlgRef.current?.getBoundingClientRect();
+    if (!src || !box) { setPeek(null); return; }
+    const r = row.getBoundingClientRect();
+    setPeek({ src, name, top: Math.max(0, Math.min(box.height - 196, r.top - box.top + r.height / 2 - 98)) });
+  };
   const cmd = assetCmd();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key !== "Escape") return; e.preventDefault(); e.stopPropagation(); onClose(); };
@@ -749,7 +771,8 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
   const host = document.querySelector(".cn-root");
   if (!host) return null;
   return createPortal(<div className="style-mask" data-style-mask onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div className="style-dlg" data-style-dlg role="dialog" aria-modal="true" aria-label="选择风格图片">
+    <div className="style-dlg" ref={dlgRef} data-style-dlg role="dialog" aria-modal="true" aria-label="选择风格图片">
+      {peek ? <StylePeek src={peek.src} name={peek.name} top={peek.top} /> : null}
       <div className="style-hd"><StyleGlyph /><b>选择风格图片</b><span className="sp" /><button type="button" className="style-x" data-style-x aria-label="关闭" onClick={onClose}><Icon name="x" size="s" /></button></div>
       <div className="style-tabs">
         <div className="style-tabwrap" role="tablist">
@@ -771,9 +794,10 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
             </button>
             {opened ? (f.id === "builtin"
               ? <div className="style-kids">{styles.map(([name]) => <button key={name} type="button" className={"style-item" + (pickStyle === name && !pickAsset ? " on" : "")} data-style-item={name}
-                onClick={() => { setPickStyle(name); setPickAsset(null); }}><StyleDot /><span className="t">{name}</span></button>)}</div>
+                onClick={() => { setPickStyle(name); setPickAsset(null); }} onPointerEnter={(e) => peekAt(e.currentTarget, styleTile(name), name)} onPointerLeave={() => setPeek(null)}>
+                <StyleDot src={styleTile(name)} none={name === "无"} /><span className="t">{name}</span></button>)}</div>
               : kids.length ? <div className="style-kids">{kids.map((it) => <button key={it.id} type="button" className={"style-item" + (pickAsset?.id === it.id ? " on" : "")} data-style-asset={it.id}
-                title={it.title || ""} onClick={() => { setPickAsset(it); setPickStyle("无"); }}><StyleDot src={assetRefOf(it)} /><span className="t">{it.title || "未命名素材"}</span></button>)}</div>
+                title={it.title || ""} onClick={() => { setPickAsset(it); setPickStyle("无"); }} onPointerEnter={(e) => peekAt(e.currentTarget, assetRefOf(it), it.title || "未命名素材")} onPointerLeave={() => setPeek(null)}><StyleDot src={assetRefOf(it)} /><span className="t">{it.title || "未命名素材"}</span></button>)}</div>
                 : <div className="style-empty" data-style-empty>该文件夹暂无素材</div>) : null}
           </div>;
         })}

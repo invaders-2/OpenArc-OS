@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0420"/><stop offset=".55" stop-color="#3a0b5e"/><stop offset=".7" stop-color="#7a1a7e"/></linearGradient>
+<linearGradient id="sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe14d"/><stop offset=".55" stop-color="#ff4fa8"/><stop offset="1" stop-color="#b21dff"/></linearGradient>
+<linearGradient id="floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b0636"/><stop offset="1" stop-color="#05010f"/></linearGradient>
+<filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<clipPath id="sc"><circle cx="128" cy="124" r="52"/></clipPath>
+</defs>
+<rect width="256" height="256" fill="url(#sky)"/>
+<g clip-path="url(#sc)"><rect x="70" y="70" width="116" height="110" fill="url(#sun)"/>
+<g fill="#3a0b5e"><rect x="70" y="132" width="116" height="4"/><rect x="70" y="143" width="116" height="5"/><rect x="70" y="155" width="116" height="7"/></g></g>
+<g fill="#0d0420">
+<rect x="6" y="104" width="26" height="72"/><rect x="34" y="122" width="20" height="54"/><rect x="56" y="92" width="18" height="84"/><rect x="74" y="136" width="24" height="40"/>
+<rect x="160" y="128" width="22" height="48"/><rect x="182" y="96" width="20" height="80"/><rect x="204" y="116" width="24" height="60"/><rect x="230" y="84" width="22" height="92"/>
+</g>
+<g fill="#29f3ff" opacity=".85"><rect x="12" y="112" width="3" height="3"/><rect x="20" y="124" width="3" height="3"/><rect x="60" y="102" width="3" height="3"/><rect x="66" y="118" width="3" height="3"/><rect x="188" y="106" width="3" height="3"/><rect x="194" y="128" width="3" height="3"/><rect x="236" y="96" width="3" height="3"/><rect x="242" y="120" width="3" height="3"/></g>
+<g fill="#ff4fd8" opacity=".85"><rect x="40" y="132" width="3" height="3"/><rect x="210" y="128" width="3" height="3"/><rect x="166" y="140" width="3" height="3"/><rect x="26" y="146" width="3" height="3"/></g>
+<rect y="176" width="256" height="80" fill="url(#floor)"/>
+<g stroke="#ff3fd0" stroke-width="1.6" filter="url(#glow)" fill="none">
+<path d="M0 176 H256"/><path d="M0 184 H256" opacity=".9"/><path d="M0 195 H256" opacity=".9"/><path d="M0 210 H256"/><path d="M0 231 H256"/>
+<path d="M128 176 V256 M128 176 L60 256 M128 176 L196 256 M128 176 L-8 256 M128 176 L264 256 M128 176 L-90 256 M128 176 L346 256"/>
+</g>
+<path d="M56 92 h18 M182 96 h20" stroke="#29f3ff" stroke-width="2" filter="url(#glow)"/>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d2f3a"/><stop offset=".55" stop-color="#2f6470"/><stop offset=".8" stop-color="#e3874a"/><stop offset="1" stop-color="#f6b56b"/></linearGradient>
+<radialGradient id="sun" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff4d6"/><stop offset=".35" stop-color="#ffd08a" stop-opacity=".9"/><stop offset="1" stop-color="#ff9a4d" stop-opacity="0"/></radialGradient>
+<linearGradient id="flare" x1="0" x2="1"><stop offset="0" stop-color="#ffcf8a" stop-opacity="0"/><stop offset=".5" stop-color="#ffe2b0" stop-opacity=".55"/><stop offset="1" stop-color="#ffcf8a" stop-opacity="0"/></linearGradient>
+</defs>
+<rect width="256" height="256" fill="url(#sky)"/>
+<circle cx="168" cy="170" r="70" fill="url(#sun)"/>
+<rect x="0" y="168" width="256" height="3" fill="url(#flare)"/>
+<path d="M0 196 L40 178 L78 188 L120 170 L160 186 L204 174 L256 190 V256 H0Z" fill="#132a30"/>
+<path d="M0 214 Q70 196 128 206 T256 202 V256 H0Z" fill="#081619"/>
+<g fill="#050c0e"><circle cx="96" cy="160" r="5.5"/><path d="M90 166 h12 l3 26 h-4 l-2-14 -2 22 h-4 l-1-18 -2 18 h-4 l-1-22 -2 14 h-4z"/></g>
+<rect width="256" height="40" fill="#000"/><rect y="216" width="256" height="40" fill="#000"/>
+</svg>
