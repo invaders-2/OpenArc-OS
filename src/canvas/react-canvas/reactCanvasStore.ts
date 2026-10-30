@@ -29,7 +29,8 @@ export type Scene3DData = { objects: Scene3DObject[]; camera: { position: [numbe
 export type BatchMode = "stack" | "variants" | "spread";
 export type CanvasSettings = { gridSnap: boolean; hideEdges: boolean; batchMode: BatchMode; voiceEnabled: boolean };
 export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = { gridSnap: false, hideEdges: false, batchMode: "variants", voiceEnabled: false };
-export type CanvasComment = { id: string; x: number; y: number; text: string; createdAt: number; clientId: string; author?: string };
+export type CanvasCommentReply = { id: string; text: string; createdAt: number; clientId: string; author?: string; editedAt?: number };
+export type CanvasComment = { id: string; x: number; y: number; text: string; createdAt: number; clientId: string; author?: string; editedAt?: number; replies?: CanvasCommentReply[] };
 export type CanvasDoc = { nodes: CanvasNode[]; edges: CanvasEdge[]; comments: CanvasComment[]; settings?: CanvasSettings };
 
 export type CanvasOp =
@@ -197,6 +198,8 @@ export function sanitizeDoc(raw: unknown): CanvasDoc | null {
         createdAt: clampNumber(c.createdAt, 0, Number.MAX_SAFE_INTEGER, Date.now()),
         clientId: typeof c.clientId === "string" ? c.clientId.slice(0, 64) : "local",
         ...(typeof c.author === "string" && c.author ? { author: c.author.slice(0, 80) } : {}),
+        ...(Number.isFinite(Number(c.editedAt)) && Number(c.editedAt) > 0 ? { editedAt: Number(c.editedAt) } : {}),
+        ...sanitizeReplies(c.replies),
       });
     }
   }
@@ -369,4 +372,24 @@ export function writeDoc(canvasId: string, doc: CanvasDoc): void {
   } catch {
     return;
   }
+}
+
+/** 评论回复：最多 200 条，每条 200 字 */
+function sanitizeReplies(raw: unknown): { replies?: CanvasCommentReply[] } {
+  if (!Array.isArray(raw)) return {};
+  const replies: CanvasCommentReply[] = [];
+  for (const item of raw.slice(0, 200)) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    const id = typeof r.id === "string" ? r.id.slice(0, 64) : ""; const text = typeof r.text === "string" ? r.text.slice(0, 200) : "";
+    if (!id || !text) continue;
+    replies.push({
+      id, text,
+      createdAt: Number.isFinite(Number(r.createdAt)) ? Math.max(0, Number(r.createdAt)) : Date.now(),
+      clientId: typeof r.clientId === "string" ? r.clientId.slice(0, 64) : "local",
+      ...(typeof r.author === "string" && r.author ? { author: r.author.slice(0, 80) } : {}),
+      ...(Number.isFinite(Number(r.editedAt)) && Number(r.editedAt) > 0 ? { editedAt: Number(r.editedAt) } : {}),
+    });
+  }
+  return replies.length ? { replies } : {};
 }

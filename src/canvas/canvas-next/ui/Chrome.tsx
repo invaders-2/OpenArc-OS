@@ -10,7 +10,7 @@ import { clearOf, filterHistory, histNode, historyItems, histTime, usable, type 
 import { createPortal } from "react-dom";
 import type { CanvasComment, CanvasDoc, CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { renderCanvasThumb } from "../../react-canvas/exportCanvas";
-import { alignSelection, deleteSelection, title } from "../actions";
+import { alignSelection, deleteSelection, extractCurrentVersion, title } from "../actions";
 import { runNode, stopGroup } from "../engine";
 import { minimapVisible } from "./minimap";
 import { download, downloadMany } from "./menus";
@@ -18,7 +18,7 @@ import { isStack, stackOf, stackSelection } from "../stack";
 import { groupSelection, ungroup } from "./LegacyNodes";
 import { groupName, groupsOf, membersOf, searchNodes, type SearchKind, type SearchScope } from "../search";
 import { groupLabel, runKeyOf, runnableIds, runNodes, saveAsTemplate } from "./StackNode";
-import { bounds, defaultParams, genOf, inputsOf, isGenKind, outOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, type AnyParams, type GenKind, type TextParams, type VideoMode, type VideoParams } from "../model";
+import { bounds, defaultParams, genOf, NODE_TAG, inputsOf, isGenKind, outOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, type AnyParams, type GenKind, type TextParams, type VideoMode, type VideoParams } from "../model";
 import { emptyTable, withTable } from "../table";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { EdgeBadge } from "./Edges";
@@ -27,6 +27,7 @@ import { addMenu } from "./menus";
 import { ModalHead, openModal, openPop } from "./overlay";
 import { computeExportBounds, exportCanvas, exportFileName, exportPixels, pickExportNodes, saveCanvasBlob, type ExportFormat, type ExportRange } from "../exportCanvas";
 import { applyTheme } from "./theme";
+import { clipable, createTimelineFrom } from "../playlist";
 import { useAssetUrl } from "./useAsset";
 import { useMediaUrl } from "./useMedia";
 import { deletePersonalTemplate, loadPersonalTemplates, savePersonalTemplate } from "../personalTemplates";
@@ -82,6 +83,7 @@ export function Chrome() {
     </div>
     {showMini ? <Minimap /> : null}
     {ui.sel.size ? <MultiBar /> : null}
+    <PinBar />
     <BatchRuns />
     {/* Agent 展开后画布区变窄，提示会压到左下工具栏上：此时不显示 */}
     {ui.agentOpen ? null : <div id="hint" className="float">{ui.leftDrag === "select" ? "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白框选 · 右键 / 空格拖动平移 · 双击空白添加节点" : "滚轮平移 · ⌘/Ctrl+滚轮缩放 · 拖动空白平移 · Shift 拖动框选 · 双击空白添加节点"}</div>}
@@ -248,20 +250,29 @@ function SearchModal({ ctl, close }: { ctl: Ctl; close: () => void }) {
   const [q, setQ] = useState(""); const [f, setF] = useState<SearchKind>("all"); const [scope, setScope] = useState<SearchScope>("world"); const doc = useS((s) => s.doc);
   const groups = groupsOf(doc); const sc = scope !== "world" && !groups.some((g) => g.id === scope) ? "world" : scope;
   const list = searchNodes(doc, { q, kind: f, scope: sc });
+  // ↑↓ 选结果，↵ 打开；条件一变回到第一条
+  const [hi, setHi] = useState(0); const cur = Math.min(hi, Math.max(0, list.length - 1));
+  useEffect(() => setHi(0), [q, f, sc]);
+  useEffect(() => { document.querySelector(`#modal .hrow[data-i="${cur}"]`)?.scrollIntoView({ block: "nearest" }); }, [cur]);
   // 堆叠里收起的节点：定位到所在堆叠
   const go = (n: CanvasNode) => { close(); const s = n.kind === "group" ? null : stackOf(doc, n.id); ctl.focusNode(s ? s.id : n.id); if (s) ctl.store.toast(`「${title(n)}」在堆叠里，双击堆叠展开`); };
   return <>
-    <div className="sinput"><Icon name="search" /><input id="sq" autoFocus placeholder={sc === "world" ? "搜索整张画布..." : "在分组里搜索..."} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" && list[0]) go(list[0]); }} /><button className="ib" onClick={close}><Icon name="x" /></button></div>
+    <div className="sinput"><Icon name="search" /><input id="sq" autoFocus placeholder={sc === "world" ? "搜索整张画布..." : "在分组里搜索..."} value={q} onChange={(e) => setQ(e.target.value)} data-esc-clear onKeyDown={(e) => {
+      e.stopPropagation();
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (list.length) setHi((cur + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length); }
+      else if (e.key === "Enter" && list[cur]) go(list[cur]);
+      else if (e.key === "Escape" && q) { e.preventDefault(); setQ(""); }
+    }} /><button className="ib" onClick={close}><Icon name="x" /></button></div>
     {groups.length ? <div className="tabs sscope" data-search-scope={sc}><button data-scope="world" className={sc === "world" ? "on" : ""} onClick={() => setScope("world")}><Icon name="map" size="xs" />整张画布</button>{groups.map((g) => <button key={g.id} data-scope={g.id} className={sc === g.id ? "on" : ""} onClick={() => setScope(g.id)}><Icon name="layers" size="xs" />{groupName(g)}<span className="tnum">{membersOf(doc, g.id).size}</span></button>)}</div> : null}
     <div className="tabs">{([["all", "全部"], ["image", "图片"], ["video", "视频"], ["text", "文本"], ["audio", "音频"], ["table", "表格"], ["group", "分组"]] as const).map(([k, l]) => <button key={k} data-kind={k} className={f === k ? "on" : ""} onClick={() => setF(k)}>{l}</button>)}</div>
     <div className="dbody" style={{ maxHeight: 360, padding: "0 12px 12px" }}>
-      {list.length ? list.map((n) => <NodeRow key={n.id} n={n} onClick={() => go(n)} sub={n.kind === "group" ? `${membersOf(doc, n.id).size} 个节点` : isGenKind(n.kind) ? (textOf(n) || genOf(n).prompt || TYPE_LABEL[n.kind]).slice(0, 60) : "多维表格"} extra={stackOf(doc, n.id) ? "在堆叠里" : inputsOf(doc, n.id).length ? inputsOf(doc, n.id).length + " 个输入" : ""} />) : <div style={{ minHeight: 240, display: "grid", placeItems: "center", color: "var(--fg3)" }}>{q ? "没有匹配的节点" : sc === "world" ? "画布上还没有这类节点" : "这个分组里没有这类节点"}</div>}
+      {list.length ? list.map((n, i) => <NodeRow key={n.id} n={n} i={i} on={i === cur} onHover={() => setHi(i)} onClick={() => go(n)} sub={n.kind === "group" ? `${membersOf(doc, n.id).size} 个节点` : isGenKind(n.kind) ? (textOf(n) || genOf(n).prompt || TYPE_LABEL[n.kind]).slice(0, 60) : "多维表格"} extra={stackOf(doc, n.id) ? "在堆叠里" : inputsOf(doc, n.id).length ? inputsOf(doc, n.id).length + " 个输入" : ""} />) : <div style={{ minHeight: 240, display: "grid", placeItems: "center", color: "var(--fg3)" }}>{q ? "没有匹配的节点" : sc === "world" ? "画布上还没有这类节点" : "这个分组里没有这类节点"}</div>}
     </div>
   </>;
 }
-function NodeRow({ n, sub, extra, onClick }: { n: CanvasNode; sub: string; extra?: string; onClick: () => void }) {
+function NodeRow({ n, sub, extra, onClick, i, on, onHover }: { n: CanvasNode; sub: string; extra?: string; onClick: () => void; i?: number; on?: boolean; onHover?: () => void }) {
   const src = srcOf(n); const url = useAssetUrl(src);
-  return <div className="hrow" data-focus={n.id} onClick={onClick}><span className="th">{url ? <img src={url} alt="" /> : <Icon name={n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers"} size="s" />}</span><span className="m"><b>{title(n)}</b><small>{sub}</small></span>{extra ? <span style={{ color: "var(--fg3)", fontSize: 11.5 }}>{extra}</span> : null}</div>;
+  return <div className={"hrow" + (on ? " on" : "")} data-focus={n.id} data-i={i} onClick={onClick} onMouseMove={onHover}><span className="th">{url ? <img src={url} alt="" /> : <Icon name={n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers"} size="s" />}</span><span className="m"><b>{title(n)}</b><small>{sub}</small></span>{extra ? <span style={{ color: "var(--fg3)", fontSize: 11.5 }}>{extra}</span> : null}</div>;
 }
 const TEMPLATES = [
   { id: "ecom", name: "电商卖点套图", desc: "产品图 + 产品信息 → 卖点拆解 → 3 张海报" },
@@ -976,6 +987,7 @@ function MultiBar() {
     </>, "down")}><Icon name="layers" size="s" />对齐</button>
     <button className="mb-btn" data-mb="stack" title="把选中的节点收成一叠（⇧S）" onClick={() => stackSelection(store)}><Icon name="layers" size="s" />堆叠</button>
     <button className="mb-btn" data-mb="group" title="编成一组（⌘G）" onClick={() => groupSelection(store)}><Icon name="grid" size="s" />分组</button>
+    {nodes.some(clipable) ? <button className="mb-btn" data-mb="playlist" title="把选中的视频 / 音频按画布上的顺序放进一条新的剪辑时间线" onClick={() => createTimelineFrom(store, nodes)}><Icon name="video" size="s" />建剪辑<span className="mb-n tnum">{nodes.filter(clipable).length}</span></button> : null}
     {runBtn}
     <button className="mb-btn" data-mb="dl" title="有结果的节点打包成 zip 下载" onClick={() => void downloadMany(nodes, store)}><Icon name="download" size="s" />下载</button>
     <button className="mb-btn danger" data-mb="del" onClick={() => deleteSelection(store)}><Icon name="trash" size="s" />删除</button>
@@ -983,6 +995,21 @@ function MultiBar() {
     <button className="mb-btn icon-only" data-mb="cancel" title="取消选择" onClick={() => store.setUI({ sel: new Set() })}><Icon name="x" size="s" /></button>
   </div>;
 }
+
+/** 顶部颜色标记栏（TapNow Pin bar）：按颜色分组计数，点一组列出节点，点节点跳过去并选中 */
+function PinBar() {
+  const ctl = useCtl(); const doc = useS((s) => s.doc);
+  const groups = NODE_TAG.map(([k, c]) => ({ k, c, list: doc.nodes.filter((n) => isGenKind(n.kind) && (genOf(n).tag || (genOf(n).pinned ? "red" : "")) === k) })).filter((g) => g.list.length);
+  if (!groups.length) return null;
+  const open = (el: HTMLElement, g: (typeof groups)[number]) => openPop(el, (close) => <div className="pinlist" data-pin-list={g.k}>
+    <div className="mh"><i className="pdot" style={{ background: g.c }} />{TAG_NAME[g.k] || g.k}标记 · {g.list.length} 个节点</div>
+    {g.list.map((n) => <NodeRow key={n.id} n={n} onClick={() => { close(); const s = stackOf(doc, n.id); ctl.focusNode(s ? s.id : n.id); }} sub={(textOf(n) || genOf(n).prompt || TYPE_LABEL[n.kind as GenKind] || "").slice(0, 40)} />)}
+  </div>, "down");
+  return <div id="pinbar" className="float cap">
+    {groups.map((g) => <button key={g.k} className="pin-g tipB" data-pin={g.k} data-tip={`${TAG_NAME[g.k] || g.k} · ${g.list.length} 个节点`} onClick={(e) => open(e.currentTarget, g)}><i className="pdot" style={{ background: g.c }} /><span className="tnum">{g.list.length}</span></button>)}
+  </div>;
+}
+const TAG_NAME: Record<string, string> = { red: "红色", orange: "橙色", yellow: "黄色", green: "绿色", blue: "蓝色", purple: "紫色" };
 
 /** 顶部进度条：进行中的一键运行（取消选择后也看得到、停得了） */
 function BatchRuns() {
@@ -1023,33 +1050,65 @@ function BackToNodes() {
   return <div id="back" className="float cap">当前视窗没有节点，可快速回到内容区域<button id="backBtn" onClick={() => ctl.fitTo(doc.nodes)}>回到节点</button></div>;
 }
 
-/* ---------- 评论 ---------- */
+/* ---------- 评论（TapNow：点位置发评论，点开看讨论串、回复；自己的可以编辑 / 删除；↵ 发送，⇧↵ 换行，200 字） ---------- */
+const CMT_MAX = 200;
+const cmtTime = (t: number) => new Date(t).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", month: "numeric", day: "numeric" });
+/** 评论输入框：↵ 发送，⇧↵ 换行，输入法组字时不发送 */
+function CmtInput({ init = "", placeholder, onSend, onCancel, send = "发送" }: { init?: string; placeholder: string; onSend: (t: string) => void; onCancel?: () => void; send?: string }) {
+  const [text, setText] = useState(init); const ref = useRef<HTMLTextAreaElement>(null);
+  // 放评论时画布的 pointerup 会把焦点抢走：挂载后下一帧再聚焦，光标放到末尾
+  useEffect(() => { const id = setTimeout(() => { const el = ref.current; if (!el) return; el.focus({ preventScroll: true }); el.setSelectionRange(el.value.length, el.value.length); }, 30); return () => clearTimeout(id); }, []);
+  const go = () => { const t = text.trim(); if (!t) return; onSend(t); setText(""); };
+  return <div className="cin">
+    <textarea ref={ref} maxLength={CMT_MAX} placeholder={placeholder} value={text} onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); go(); } if (e.key === "Escape" && onCancel) { e.preventDefault(); onCancel(); } }} />
+    <div className="cin-bar"><small className="tnum" title="↵ 发送 · ⇧↵ 换行">{text.length}/{CMT_MAX} · ↵ 发送</small><span className="grow" />
+      {onCancel ? <button className="btn" data-cmt="cancel" onClick={onCancel}>取消</button> : null}
+      <button className="btn solid" data-cmt="send" disabled={!text.trim()} onClick={go}>{send}</button></div>
+  </div>;
+}
 function Comments() {
   const ctl = useCtl(); const store = ctl.store; const comments = useS((s) => s.doc.comments); useS((s) => s.view);
-  const [open, setOpen] = useState<string | null>(null); const [draft, setDraft] = useState<{ x: number; y: number } | null>(null); const [text, setText] = useState("");
-  useEffect(() => { const on = (e: Event) => { setDraft((e as CustomEvent).detail); setText(""); setOpen(null); }; addEventListener("cn:place-comment", on); return () => removeEventListener("cn:place-comment", on); }, []);
+  const [open, setOpen] = useState<string | null>(null); const [draft, setDraft] = useState<{ x: number; y: number } | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  useEffect(() => { const on = (e: Event) => { setDraft((e as CustomEvent).detail); setOpen(null); setEditing(null); }; addEventListener("cn:place-comment", on); return () => removeEventListener("cn:place-comment", on); }, []);
+  const me = ctl.host.user?.name || "我";
+  const mine = (a?: string) => !a || a === me;
   const r = ctl.rect(); const pos = (x: number, y: number) => { const s = ctl.toScreen(x, y); return { left: s.x - r.left, top: s.y - r.top }; };
+  /** 气泡默认在图钉右边，靠右放不下就放左边；上下不出画布 */
+  const bub = (x: number, y: number, w = 300, h = 300) => { const p = pos(x, y); const left = p.left + 30 + w > r.width - 12 ? p.left - w - 12 : p.left + 30; return { left: Math.max(12, left), top: Math.max(12, Math.min(p.top - 30, r.height - h - 12)) }; };
+  // 编号按发出时间，不受同步顺序影响
+  const ordered = [...comments].sort((a, b) => a.createdAt - b.createdAt);
   const openC = comments.find((c) => c.id === open);
+  const patchC = (id: string, f: (c: CanvasComment) => CanvasComment | null) => store.mutate((d) => ({ ...d, comments: d.comments.flatMap((c) => { if (c.id !== id) return [c]; const n = f(c); return n ? [n] : []; }) }), { history: true });
+  const menu = (el: HTMLElement, edit: () => void, del: () => void) => openPop(el, (close) => <>
+    <button className="mi" data-cmt="edit" onClick={() => { close(); edit(); }}><Icon name="pencil" size="s" />编辑</button>
+    <button className="mi danger" data-cmt="del" onClick={() => { close(); del(); }}><Icon name="trash" size="s" />删除</button>
+  </>, "down", "right");
+  const Msg = ({ id, author, text, at, edited, onEdit, onDel }: { id: string; author?: string; text: string; at: number; edited?: number; onEdit: (t: string) => void; onDel: () => void }) => <div className="cmsg" data-cmsg={id}>
+    <div className="cmsg-h"><span className="cav">{(author || "协")[0]}</span><b>{author || "协作者"}</b><small>{cmtTime(at)}{edited ? " · 已编辑" : ""}</small><span className="grow" />
+      {mine(author) && editing !== id ? <button className="ib" data-cmt="more" aria-label="更多" onClick={(e) => menu(e.currentTarget, () => setEditing(id), onDel)}><Icon name="more" size="s" /></button> : null}</div>
+    {editing === id ? <CmtInput init={text} placeholder="修改评论…" send="保存" onCancel={() => setEditing(null)} onSend={(t) => { onEdit(t); setEditing(null); }} /> : <div className="cmsg-t">{text}</div>}
+  </div>;
   return <div id="cmts" onPointerDown={(e) => e.stopPropagation()}>
-    {comments.map((c, i) => <button key={c.id} className="cpin" style={pos(c.x, c.y)} onClick={() => setOpen(open === c.id ? null : c.id)}>{i + 1}</button>)}
-    {draft ? <div className="cbubble" style={{ left: pos(draft.x, draft.y).left + 30, top: pos(draft.x, draft.y).top - 30 }}>
-      <textarea autoFocus maxLength={200} placeholder={`输入你的评论…（${text.length}/200）`} style={{ width: "100%", minHeight: 60, resize: "none" }} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <small>{text.length}/200</small>
-        <span style={{ display: "flex", gap: 6 }}>
-          <button className="btn" style={{ height: 26 }} onClick={() => setDraft(null)}>取消</button>
-          <button className="btn solid" style={{ height: 26 }} onClick={() => {
-            const said = text.trim(); if (!said) return;
-            const made: CanvasComment = { id: uid("c"), x: Math.round(draft.x), y: Math.round(draft.y), text: said, createdAt: Date.now(), clientId: "local", author: ctl.host.user?.name || "我" };
-            store.mutate((d) => ({ ...d, comments: [...d.comments, made] }), { history: true });
-            setDraft(null); store.toast("评论已发送");
-          }}>发送</button>
-        </span>
-      </div>
+    {ordered.map((c, i) => <button key={c.id} className={"cpin" + (open === c.id ? " on" : "")} data-cpin={c.id} style={pos(c.x, c.y)} onClick={() => { setDraft(null); setEditing(null); setOpen(open === c.id ? null : c.id); }}>{i + 1}{c.replies?.length ? <i className="crn tnum">{c.replies.length}</i> : null}</button>)}
+    {draft ? <div className="cbubble" style={bub(draft.x, draft.y, 290, 140)}>
+      <CmtInput placeholder="输入你的评论…" onCancel={() => setDraft(null)} onSend={(said) => {
+        const made: CanvasComment = { id: uid("c"), x: Math.round(draft.x), y: Math.round(draft.y), text: said, createdAt: Date.now(), clientId: "local", author: me };
+        store.mutate((d) => ({ ...d, comments: [...d.comments, made] }), { history: true });
+        setDraft(null); setOpen(made.id);
+      }} />
     </div> : null}
-    {openC ? <div className="cbubble" style={{ left: pos(openC.x, openC.y).left + 30, top: pos(openC.x, openC.y).top - 30 }}>
-      <b>{openC.author || "协作者"}</b> {openC.text}
-      <small>{new Date(openC.createdAt).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", month: "numeric", day: "numeric" })} · <button style={{ color: "var(--fg2)", textDecoration: "underline" }} onClick={() => { store.mutate((d) => ({ ...d, comments: d.comments.filter((x) => x.id !== openC.id) }), { history: true }); setOpen(null); }}>删除</button></small>
+    {openC ? <div className="cbubble thread" data-thread={openC.id} style={bub(openC.x, openC.y, 300, 120 + 70 * Math.min(4, 1 + (openC.replies?.length || 0)))}>
+      <div className="cthread">
+        <Msg id={openC.id} author={openC.author} text={openC.text} at={openC.createdAt} edited={openC.editedAt}
+          onEdit={(t) => patchC(openC.id, (c) => ({ ...c, text: t, editedAt: Date.now() }))}
+          onDel={() => { patchC(openC.id, () => null); setOpen(null); }} />
+        {(openC.replies || []).map((rp) => <Msg key={rp.id} id={rp.id} author={rp.author} text={rp.text} at={rp.createdAt} edited={rp.editedAt}
+          onEdit={(t) => patchC(openC.id, (c) => ({ ...c, replies: (c.replies || []).map((x) => (x.id === rp.id ? { ...x, text: t, editedAt: Date.now() } : x)) }))}
+          onDel={() => patchC(openC.id, (c) => ({ ...c, replies: (c.replies || []).filter((x) => x.id !== rp.id) }))} />)}
+      </div>
+      <CmtInput key={openC.id} placeholder="回复…" onSend={(t) => patchC(openC.id, (c) => ({ ...c, replies: [...(c.replies || []), { id: uid("r"), text: t, createdAt: Date.now(), clientId: "local", author: me }] }))} />
     </div> : null}
   </div>;
 }
@@ -1160,7 +1219,12 @@ export function Lightbox() {
     onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") close(); if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && g.hist.length > 1) ctl.store.patchGen(node.id, { hi: (g.hi + (e.key === "ArrowLeft" ? -1 : 1) + g.hist.length) % g.hist.length }); }}
     style={out ? { animation: "fadeOut 160ms var(--e-exit) forwards" } : undefined}
     onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-    <button className="ib close" onClick={close}><Icon name="x" /></button>
+    <div className="lb-tools">
+      {node.kind !== "text" && (o?.url || o?.frame) ? <button className="pill" data-lb="apply" title="把当前这一版单独放到画布上，成为新节点" onClick={() => { const made = extractCurrentVersion(ctl.store, node.id); close(); if (made) setTimeout(() => ctl.focusNode(made.id), 170); }}><Icon name="plus" size="xs" />放到画布</button> : null}
+      <button className="pill" data-lb="locate" title="关闭预览并跳到这个节点" onClick={() => { close(); setTimeout(() => ctl.focusNode(node.id), 170); }}><Icon name="fit" size="xs" />回到画布</button>
+      {node.kind !== "text" && o?.url ? <button className="pill" data-lb="dl" onClick={() => void download(node, ctl.store)}><Icon name="download" size="xs" />下载</button> : null}
+      <button className="ib" data-lb="close" aria-label="关闭" onClick={close}><Icon name="x" /></button>
+    </div>
     {node.kind === "text" ? <div className="txt">{o?.text}</div>
       : node.kind === "audio" ? <div className="txt">音频 · {o?.dur}s</div>
       : node.kind === "video" && o?.url ? <BigVideo src={o.url} />
