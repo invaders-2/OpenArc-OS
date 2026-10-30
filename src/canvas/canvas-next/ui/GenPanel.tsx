@@ -11,7 +11,7 @@ import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
 import { buildRequest, rolesFor, ROLE_LABEL, runNode, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, STYLES, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
 import { Icon, type IconName } from "./Icon";
@@ -276,7 +276,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）
     if (m?.style) gline.push(gdot("c2"), <button key="chip-style" ref={styleRef} type="button" data-p="style" data-chip="style"
       className={"gp-chip style" + (ip.style !== "无" ? " on" : "")} title="风格仅基于图片生效" onClick={() => setStyleOpen(true)}>
-      <span className="ic">{styleTile(ip.style) ? <img className="tile" src={styleTile(ip.style)} alt="" draggable={false} /> : <StyleGlyph />}</span><span className="lbl">{ip.style === "无" ? "风格" : ip.style}</span>
+      <span className="ic"><StyleGlyph /></span><span className="lbl">{ip.style === "无" ? "风格" : ip.style}</span>
     </button>);
     if (m?.camera) gline.push(gdot("c3"), <button key="chip-camera" ref={camRef} type="button" data-p="camera" data-chip="camera"
       className={"gp-chip cam" + (ip.camera.on ? " on" : "")} title={ip.camera.on ? cameraSummary(ip.camera) : "摄影机控制"} onClick={openCamera}>
@@ -327,7 +327,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       </div>
     </div>
     {kind === "image" && camOpen ? <CamLayer node={node} anchor={camRef.current} onClose={() => setCamOpen(false)} /> : null}
-    {kind === "image" && styleOpen ? <StyleLayer node={node} current={(p as ImageParams).style} onClose={() => setStyleOpen(false)} /> : null}
+    {kind === "image" && styleOpen ? <StyleLayer node={node} onClose={() => setStyleOpen(false)} /> : null}
   </>;
 }
 
@@ -603,12 +603,6 @@ function StyleGlyph() {
   return <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M11 3.5l1.6 4.4 4.4 1.6-4.4 1.6L11 15.5 9.4 11.1 5 9.5l4.4-1.6z" /><path d="M18 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" /></svg>;
 }
 
-/** 内置风格预览图（集中一处，换图只改这里）：名称 → public/style-tiles/<file>.webp；「无」没有图 */
-const STYLE_TILES: Record<string, string> = {
-  "电影感": "cinematic", "胶片": "film", "极简棚拍": "studio", "赛博": "cyber", "水彩": "watercolor", "3D 渲染": "render-3d", "国潮": "guochao",
-};
-const styleTile = (name: string): string => (STYLE_TILES[name] ? "./style-tiles/" + STYLE_TILES[name] + ".webp" : "");
-
 /** 摄影机控制浮层：602×272、4 列轮盘、标题 + 保存（保存只关闭）；enter/exit 150ms linear */
 function CamLayer({ node, anchor, onClose }: { node: CanvasNode; anchor: HTMLElement | null; onClose: () => void }) {
   const store = useCtl().store;
@@ -680,7 +674,6 @@ const folderOfAsset = (it: AssetItem): string => {
   return "others";
 };
 const STYLE_FOLDERS: Array<{ id: string; name: string; me: boolean; team: boolean }> = [
-  { id: "builtin", name: "内置风格", me: true, team: true },
   { id: "fav", name: "收藏", me: true, team: false },
   { id: "character", name: "角色", me: true, team: true },
   { id: "scene", name: "场景", me: true, team: true },
@@ -691,10 +684,10 @@ const STYLE_FOLDERS: Array<{ id: string; name: string; me: boolean; team: boolea
 ];
 
 /** 风格缩略图位：有真实资产就显示该资产图，没有就用色块；24×24 圆角 6 + 1px 描边（选中 2px 主色） */
-function StyleDot({ src, none }: { src?: string; none?: boolean }) {
+function StyleDot({ src }: { src?: string }) {
   const url = useAssetUrl(src || "");
   const [bad, setBad] = useState(false);
-  return <span className={"dot" + (none ? " none" : "")}>{url && !bad ? <img src={url} alt="" draggable={false} onError={() => setBad(true)} /> : null}</span>;
+  return <span className="dot">{url && !bad ? <img src={url} alt="" draggable={false} onError={() => setBad(true)} /> : null}</span>;
 }
 
 function StylePeek({ src, name, top }: { src: string; name: string; top: number }) {
@@ -704,7 +697,7 @@ function StylePeek({ src, name, top }: { src: string; name: string; top: number 
 }
 
 /** 选择风格图片：360×528 居中模态（TapNow 无进出动效，这里照做）；个人/团队 + 搜索 + 可折叠文件夹 + 取消/确认 */
-function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: string; onClose: () => void }) {
+function StyleLayer({ node, onClose }: { node: CanvasNode; onClose: () => void }) {
   const ctl = useCtl(); const store = ctl.store;
   const [tab, setTab] = useState<"me" | "team">("me");
   const [q, setQ] = useState("");
@@ -712,7 +705,6 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
   const [libs, setLibs] = useState<AssetLib[] | null>(null);
   const [assets, setAssets] = useState<AssetItem[]>([]);
   const [err, setErr] = useState("");
-  const [pickStyle, setPickStyle] = useState<string>(current || "无");
   const [pickAsset, setPickAsset] = useState<AssetItem | null>(null);
   /** 悬停大图：在弹窗右侧和这一行对齐显示 160×160 预览（没有图就不显示） */
   const [peek, setPeek] = useState<{ src: string; name: string; top: number } | null>(null);
@@ -749,7 +741,6 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmd, tab, libs]);
   const kw = q.trim().toLowerCase();
-  const styles = STYLES.filter(([name]) => !kw || name.toLowerCase().includes(kw));
   const rowsOf = (folder: string): AssetItem[] => assets.filter((it) => folderOfAsset(it) === folder && (!kw || [it.title, it.prompt].join(" ").toLowerCase().includes(kw)));
   const toggle = (id: string) => setOpen((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]));
   const confirm = () => {
@@ -765,7 +756,6 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
       onClose();
       return;
     }
-    store.patchGen(node.id, (gg) => ({ params: { ...gg.params, style: pickStyle } }));
     onClose();
   };
   const host = document.querySelector(".cn-root");
@@ -785,23 +775,19 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
       <div className="style-list" data-style-list>
         {STYLE_FOLDERS.filter((f) => (tab === "team" ? f.team : f.me)).map((f) => {
           const opened = open.includes(f.id);
-          const kids = f.id === "builtin" ? [] : rowsOf(f.id);
+          const kids = rowsOf(f.id);
           return <div key={f.id} className="style-group">
             <button type="button" className={"style-folder" + (opened ? " on" : "")} data-style-folder={f.id} data-open={opened ? "1" : "0"} onClick={() => toggle(f.id)}>
               <span className="style-arrow"><Icon name="down" size="s" /></span>
               <span className="fi"><Icon name="folder" size="s" /></span>
               <span className="fn">{f.name}</span>
             </button>
-            {opened ? (f.id === "builtin"
-              ? <div className="style-kids">{styles.map(([name]) => <button key={name} type="button" className={"style-item" + (pickStyle === name && !pickAsset ? " on" : "")} data-style-item={name}
-                onClick={() => { setPickStyle(name); setPickAsset(null); }} onPointerEnter={(e) => peekAt(e.currentTarget, styleTile(name), name)} onPointerLeave={() => setPeek(null)}>
-                <StyleDot src={styleTile(name)} none={name === "无"} /><span className="t">{name}</span></button>)}</div>
-              : kids.length ? <div className="style-kids">{kids.map((it) => <button key={it.id} type="button" className={"style-item" + (pickAsset?.id === it.id ? " on" : "")} data-style-asset={it.id}
-                title={it.title || ""} onClick={() => { setPickAsset(it); setPickStyle("无"); }} onPointerEnter={(e) => peekAt(e.currentTarget, assetRefOf(it), it.title || "未命名素材")} onPointerLeave={() => setPeek(null)}><StyleDot src={assetRefOf(it)} /><span className="t">{it.title || "未命名素材"}</span></button>)}</div>
+            {opened ? (kids.length ? <div className="style-kids">{kids.map((it) => <button key={it.id} type="button" className={"style-item" + (pickAsset?.id === it.id ? " on" : "")} data-style-asset={it.id}
+                title={it.title || ""} onClick={() => setPickAsset(it)} onPointerEnter={(e) => peekAt(e.currentTarget, assetRefOf(it), it.title || "未命名素材")} onPointerLeave={() => setPeek(null)}><StyleDot src={assetRefOf(it)} /><span className="t">{it.title || "未命名素材"}</span></button>)}</div>
                 : <div className="style-empty" data-style-empty>该文件夹暂无素材</div>) : null}
           </div>;
         })}
-        {!cmd ? <div className="style-empty" style={{ paddingLeft: 4 }}>素材库只在桌面版可用；「内置风格」仍可选</div> : null}
+        {!cmd ? <div className="style-empty" style={{ paddingLeft: 4 }}>素材库只在桌面版可用</div> : null}
         {err ? <div className="style-empty" style={{ paddingLeft: 4 }}>{err}</div> : null}
       </div>
       <div className="style-ft">

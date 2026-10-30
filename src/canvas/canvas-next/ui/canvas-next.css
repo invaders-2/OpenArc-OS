@@ -1335,6 +1335,7 @@
 .cn-root .style-arrow{width:28px;height:20px;display:grid;place-items:center;flex:none;color:rgba(var(--ink),.4);transform:rotate(-90deg);transition:transform 150ms cubic-bezier(.4,0,.2,1);}
 .cn-root .style-folder.on .style-arrow{transform:none;color:var(--fg);}
 .cn-root .style-folder .fi{width:24px;height:24px;display:grid;place-items:center;flex:none;}
+.cn-root .style-folder .fi svg{width:20px;height:20px;stroke-width:1.6;}
 .cn-root .style-folder .fn{flex:1;min-width:0;font-size:14px;font-weight:500;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cn-root .style-folder.on .fn{font-weight:600;color:var(--fg);}
 .cn-root .style-kids{padding-left:72px;display:flex;flex-direction:column;}
@@ -1344,13 +1345,10 @@
 .cn-root .style-item .dot{width:24px;height:24px;border-radius:6px;flex:none;overflow:hidden;background:linear-gradient(140deg,var(--s3),var(--s0));box-shadow:inset 0 0 0 1px var(--line);}
 .cn-root[data-theme=light] .style-item .dot{background:linear-gradient(140deg,var(--s4),var(--s2));box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);}
 .cn-root .style-item .dot img{width:100%;height:100%;object-fit:cover;display:block;}
-.cn-root .style-item .dot.none{background:transparent;box-shadow:inset 0 0 0 1px var(--line);position:relative;}
-.cn-root .style-item .dot.none::after{content:"";position:absolute;left:50%;top:4px;bottom:4px;width:1.5px;border-radius:1px;background:var(--fg3,var(--fg2));transform:translateX(-50%) rotate(45deg);}
 .cn-root .style-dlg{position:relative;}
 .cn-root .style-peek{position:absolute;left:calc(100% + 12px);width:176px;padding:8px;border-radius:14px;border:1px solid var(--line);background:var(--modal);backdrop-filter:blur(24px);box-shadow:0 16px 32px rgba(0,0,0,.32);pointer-events:none;display:flex;flex-direction:column;gap:6px;}
 .cn-root .style-peek img{width:160px;height:160px;border-radius:8px;object-fit:cover;display:block;}
 .cn-root .style-peek span{font-size:12px;color:var(--fg2);padding:0 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.cn-root .gp-chip .ic img.tile{width:18px;height:18px;border-radius:5px;object-fit:cover;display:block;box-shadow:inset 0 0 0 1px var(--line);}
 .cn-root .style-item.on .dot{box-shadow:0 0 0 2px var(--solid);}
 .cn-root .style-item .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cn-root .style-empty{padding:8px 0 8px 72px;font-size:14px;color:var(--fg3);}
