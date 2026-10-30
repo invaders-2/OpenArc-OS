@@ -11,7 +11,7 @@ import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
 import { buildRequest, rolesFor, ROLE_LABEL, runNode, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, STYLES, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
 import { Icon, type IconName } from "./Icon";
@@ -327,7 +327,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       </div>
     </div>
     {kind === "image" && camOpen ? <CamLayer node={node} anchor={camRef.current} onClose={() => setCamOpen(false)} /> : null}
-    {kind === "image" && styleOpen ? <StyleLayer node={node} current={(p as ImageParams).style} onClose={() => setStyleOpen(false)} /> : null}
+    {kind === "image" && styleOpen ? <StyleLayer node={node} onClose={() => setStyleOpen(false)} /> : null}
   </>;
 }
 
@@ -674,7 +674,6 @@ const folderOfAsset = (it: AssetItem): string => {
   return "others";
 };
 const STYLE_FOLDERS: Array<{ id: string; name: string; me: boolean; team: boolean }> = [
-  { id: "builtin", name: "内置风格", me: true, team: true },
   { id: "fav", name: "收藏", me: true, team: false },
   { id: "character", name: "角色", me: true, team: true },
   { id: "scene", name: "场景", me: true, team: true },
@@ -687,11 +686,18 @@ const STYLE_FOLDERS: Array<{ id: string; name: string; me: boolean; team: boolea
 /** 风格缩略图位：有真实资产就显示该资产图，没有就用色块；24×24 圆角 6 + 1px 描边（选中 2px 主色） */
 function StyleDot({ src }: { src?: string }) {
   const url = useAssetUrl(src || "");
-  return <span className="dot">{url ? <img src={url} alt="" draggable={false} /> : null}</span>;
+  const [bad, setBad] = useState(false);
+  return <span className="dot">{url && !bad ? <img src={url} alt="" draggable={false} onError={() => setBad(true)} /> : null}</span>;
+}
+
+function StylePeek({ src, name, top }: { src: string; name: string; top: number }) {
+  const url = useAssetUrl(src);
+  if (!url) return null;
+  return <div className="style-peek" data-style-peek={name} style={{ top }} aria-hidden="true"><img src={url} alt="" draggable={false} /><span>{name}</span></div>;
 }
 
 /** 选择风格图片：360×528 居中模态（TapNow 无进出动效，这里照做）；个人/团队 + 搜索 + 可折叠文件夹 + 取消/确认 */
-function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: string; onClose: () => void }) {
+function StyleLayer({ node, onClose }: { node: CanvasNode; onClose: () => void }) {
   const ctl = useCtl(); const store = ctl.store;
   const [tab, setTab] = useState<"me" | "team">("me");
   const [q, setQ] = useState("");
@@ -699,8 +705,16 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
   const [libs, setLibs] = useState<AssetLib[] | null>(null);
   const [assets, setAssets] = useState<AssetItem[]>([]);
   const [err, setErr] = useState("");
-  const [pickStyle, setPickStyle] = useState<string>(current || "无");
   const [pickAsset, setPickAsset] = useState<AssetItem | null>(null);
+  /** 悬停大图：在弹窗右侧和这一行对齐显示 160×160 预览（没有图就不显示） */
+  const [peek, setPeek] = useState<{ src: string; name: string; top: number } | null>(null);
+  const dlgRef = useRef<HTMLDivElement>(null);
+  const peekAt = (row: HTMLElement, src: string, name: string) => {
+    const box = dlgRef.current?.getBoundingClientRect();
+    if (!src || !box) { setPeek(null); return; }
+    const r = row.getBoundingClientRect();
+    setPeek({ src, name, top: Math.max(0, Math.min(box.height - 196, r.top - box.top + r.height / 2 - 98)) });
+  };
   const cmd = assetCmd();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key !== "Escape") return; e.preventDefault(); e.stopPropagation(); onClose(); };
@@ -727,7 +741,6 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmd, tab, libs]);
   const kw = q.trim().toLowerCase();
-  const styles = STYLES.filter(([name]) => !kw || name.toLowerCase().includes(kw));
   const rowsOf = (folder: string): AssetItem[] => assets.filter((it) => folderOfAsset(it) === folder && (!kw || [it.title, it.prompt].join(" ").toLowerCase().includes(kw)));
   const toggle = (id: string) => setOpen((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]));
   const confirm = () => {
@@ -743,13 +756,13 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
       onClose();
       return;
     }
-    store.patchGen(node.id, (gg) => ({ params: { ...gg.params, style: pickStyle } }));
     onClose();
   };
   const host = document.querySelector(".cn-root");
   if (!host) return null;
   return createPortal(<div className="style-mask" data-style-mask onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div className="style-dlg" data-style-dlg role="dialog" aria-modal="true" aria-label="选择风格图片">
+    <div className="style-dlg" ref={dlgRef} data-style-dlg role="dialog" aria-modal="true" aria-label="选择风格图片">
+      {peek ? <StylePeek src={peek.src} name={peek.name} top={peek.top} /> : null}
       <div className="style-hd"><StyleGlyph /><b>选择风格图片</b><span className="sp" /><button type="button" className="style-x" data-style-x aria-label="关闭" onClick={onClose}><Icon name="x" size="s" /></button></div>
       <div className="style-tabs">
         <div className="style-tabwrap" role="tablist">
@@ -762,22 +775,19 @@ function StyleLayer({ node, current, onClose }: { node: CanvasNode; current: str
       <div className="style-list" data-style-list>
         {STYLE_FOLDERS.filter((f) => (tab === "team" ? f.team : f.me)).map((f) => {
           const opened = open.includes(f.id);
-          const kids = f.id === "builtin" ? [] : rowsOf(f.id);
+          const kids = rowsOf(f.id);
           return <div key={f.id} className="style-group">
             <button type="button" className={"style-folder" + (opened ? " on" : "")} data-style-folder={f.id} data-open={opened ? "1" : "0"} onClick={() => toggle(f.id)}>
               <span className="style-arrow"><Icon name="down" size="s" /></span>
               <span className="fi"><Icon name="folder" size="s" /></span>
               <span className="fn">{f.name}</span>
             </button>
-            {opened ? (f.id === "builtin"
-              ? <div className="style-kids">{styles.map(([name]) => <button key={name} type="button" className={"style-item" + (pickStyle === name && !pickAsset ? " on" : "")} data-style-item={name}
-                onClick={() => { setPickStyle(name); setPickAsset(null); }}><StyleDot /><span className="t">{name}</span></button>)}</div>
-              : kids.length ? <div className="style-kids">{kids.map((it) => <button key={it.id} type="button" className={"style-item" + (pickAsset?.id === it.id ? " on" : "")} data-style-asset={it.id}
-                title={it.title || ""} onClick={() => { setPickAsset(it); setPickStyle("无"); }}><StyleDot src={assetRefOf(it)} /><span className="t">{it.title || "未命名素材"}</span></button>)}</div>
+            {opened ? (kids.length ? <div className="style-kids">{kids.map((it) => <button key={it.id} type="button" className={"style-item" + (pickAsset?.id === it.id ? " on" : "")} data-style-asset={it.id}
+                title={it.title || ""} onClick={() => setPickAsset(it)} onPointerEnter={(e) => peekAt(e.currentTarget, assetRefOf(it), it.title || "未命名素材")} onPointerLeave={() => setPeek(null)}><StyleDot src={assetRefOf(it)} /><span className="t">{it.title || "未命名素材"}</span></button>)}</div>
                 : <div className="style-empty" data-style-empty>该文件夹暂无素材</div>) : null}
           </div>;
         })}
-        {!cmd ? <div className="style-empty" style={{ paddingLeft: 4 }}>素材库只在桌面版可用；「内置风格」仍可选</div> : null}
+        {!cmd ? <div className="style-empty" style={{ paddingLeft: 4 }}>素材库只在桌面版可用</div> : null}
         {err ? <div className="style-empty" style={{ paddingLeft: 4 }}>{err}</div> : null}
       </div>
       <div className="style-ft">
