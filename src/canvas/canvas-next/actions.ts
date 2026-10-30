@@ -1,6 +1,6 @@
 /** 画布上的编辑动作（连线、删除、复制粘贴、上传……），界面和 Agent 共用 */
 import type { CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { autoVideoMode, connectBlock, genOf, inputsOf, isGenKind, uid, withGen, type GenKind, type TextParams, type VideoParams } from "./model";
+import { autoVideoMode, connectBlock, genOf, inputsOf, isGenKind, NODE_DEFAULT_SIZE, uid, withGen, type GenKind, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { tableAutoSize, tableMedia, tableOf } from "./table";
 import { hiddenIds, isStack } from "./stack";
@@ -159,7 +159,7 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
       store.updateNode(t.id, (n) => withGen({ ...n, h: kind === "image" ? Math.round(Math.max(100, Math.min(520, n.w * wh[1] / wh[0]))) : n.h }, { hist: [...g.hist, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], hi: g.hist.length, uploaded: true }), { history: true });
       made.push(t.id); opts = { ...opts, target: undefined }; continue;
     }
-    const w = kind === "image" ? 240 : 320; const h = kind === "image" ? Math.round(Math.max(100, Math.min(520, w * wh[1] / wh[0]))) : kind === "video" ? (meta?.w && meta.h ? Math.round(Math.max(100, Math.min(520, w * meta.h / meta.w))) : 180) : 120;
+    const w = kind === "image" ? 240 : 320; const h = kind === "image" ? Math.round(Math.max(100, Math.min(520, w * wh[1] / wh[0]))) : kind === "video" ? (meta?.w && meta.h ? Math.round(Math.max(100, Math.min(520, w * meta.h / meta.w))) : 180) : NODE_DEFAULT_SIZE.audio.h;
     const n = store.newNode(kind, at.x + dx - w / 2, at.y - h / 2, { title: name, uploaded: true, hist: [{ url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], w, h });
     store.addNodes([n]); made.push(n.id); dx += w + 30;
     if (opts.linkTo && store.node(opts.linkTo)) connect(store, n.id, opts.linkTo, { quiet: true, select: false });
