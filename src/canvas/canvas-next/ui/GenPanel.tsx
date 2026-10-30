@@ -62,6 +62,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   </div>, "down", "left", "pop-sw")}><i className="bgdot" style={{ background: bgColor(g!.bg) || "var(--fg)" }} /></button>;
   /** TapNow「Pin」：6 种亮色标签，再点同色取消 */
   const tagBtn = () => <button key="pin" className={"ib tipT" + (g!.tag ? " on" : "")} data-tb="pin" data-tip={g!.tag ? "颜色标记" : "标记"} onClick={(e) => openPop(e.currentTarget, (close) => <div className="swatches h">
+    <button className={"sw none" + (!g!.tag ? " on" : "")} aria-label="无" data-tag="none" onClick={() => { close(); store.patchGen(node.id, { tag: undefined, pinned: false }, { history: true }); }} />
     {NODE_TAG.map(([k, c]) => <button key={k} className={"sw" + (g!.tag === k ? " on" : "")} style={{ background: c }} aria-label={k} onClick={() => { close(); store.patchGen(node.id, g!.tag === k ? { tag: undefined, pinned: false } : { tag: k, pinned: true }, { history: true }); }} />)}
   </div>, "up", "left", "pop-sw")}><Icon name="tag" />{g!.tag ? <i className="tagmini" style={{ background: tagColor(g!.tag)! }} /> : null}</button>;
   /** 存进桌面资产库（与右键「存入资产库」同一条路径）；没有桌面后端时只能在本画布收藏，提示里如实说明 */

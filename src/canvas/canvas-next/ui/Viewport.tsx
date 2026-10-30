@@ -12,6 +12,7 @@ import { addMenu, blankMenu, nodeMenu, portMenu, onNodeAct } from "./menus";
 import { NodeView } from "./NodeView";
 import { closePop } from "./overlay";
 import { addToStack, hiddenIds, isStack } from "../stack";
+import { addToTimeline, clipable } from "../playlist";
 import { bodyBox, snapToGuides, unionBox, type Box, type Guide } from "../snapGuides";
 
 type Drag =
@@ -44,6 +45,12 @@ export function Viewport() {
   const markCell = (el: HTMLElement | null) => { if (cellRef.current === el) return; cellRef.current?.classList.remove("drop"); el?.classList.add("drop"); cellRef.current = el; };
   const stackUnder = (x: number, y: number, moving: Set<string>) => {
     for (const el of document.elementsFromPoint(x, y)) { const id = (el as HTMLElement).closest?.(".node")?.getAttribute("data-id"); if (id && !moving.has(id) && isStack(store.node(id))) return id; }
+    return null;
+  };
+  /** 拖着的全是有结果的视频 / 音频时，指针下的剪辑时间线节点（TapNow：把视频拖进 Playlist） */
+  const timelineUnder = (x: number, y: number, moving: Set<string>) => {
+    if (![...moving].every((id) => clipable(store.node(id)))) return null;
+    for (const el of document.elementsFromPoint(x, y)) { const id = (el as HTMLElement).closest?.(".node")?.getAttribute("data-id"); if (id && !moving.has(id) && store.node(id)?.kind === "timeline") return id; }
     return null;
   };
   useEffect(() => { ctl.vp = vpRef.current; }, [ctl]);
@@ -136,7 +143,8 @@ export function Viewport() {
       setGuides(lines);
       const pos = new Map(d.orig.map((o) => { let x = o.x + dx + gx, y = o.y + dy + gy; if (st.ui.snap) { if (!onX) x = Math.round(x / 20) * 20; if (!onY) y = Math.round(y / 20) * 20; } return [o.id, { x: Math.round(x), y: Math.round(y) }]; }));
       store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (pos.has(n.id) ? { ...n, ...pos.get(n.id)! } : n)) }));
-      const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
+      const ids = new Set(d.orig.map((o) => o.id));
+      const over = (d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, ids)) || timelineUnder(e.clientX, e.clientY, ids);
       if (over !== dropRef.current) { dropRef.current = over; setDropStack(over); }
       markCell(cellUnder(e.clientX, e.clientY, d.orig));
     } else if (d.kind === "resize") {
@@ -177,6 +185,8 @@ export function Viewport() {
       setGuides([]); store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
       const cell = cellUnder(e.clientX, e.clientY, d.orig); markCell(null);
       if (cell && dropImageOnCell(store, cell.dataset.mcell!, d.orig[0].id, cell.dataset.multi === "1")) { const o = d.orig[0]; store.updateNode(o.id, (n) => ({ ...n, x: o.x, y: o.y })); return; }
+      const tl = timelineUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
+      if (tl && addToTimeline(store, tl, d.orig.map((o) => o.id))) { d.orig.forEach((o) => store.updateNode(o.id, (n) => ({ ...n, x: o.x, y: o.y }))); return; }
       const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
       // 拖的是普通分组：只叠分组外单独选中的节点，组里的节点跟着分组走，不拆进叠
       const dragged = new Set(d.orig.map((o) => o.id)); const inDraggedGroup = new Set(d.orig.flatMap((o) => { const g = store.node(o.id); return g && g.kind === "group" ? g.children || [] : []; }));

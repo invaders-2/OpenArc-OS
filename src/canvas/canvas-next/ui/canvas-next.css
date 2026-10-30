@@ -1663,3 +1663,42 @@
 .cn-root .rg-step{display:flex;align-items:baseline;gap:8px;font-size:12.5px;color:var(--fg2);padding:2px 4px;}
 .cn-root .rg-step .n{flex:none;width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;font-size:11px;background:rgba(var(--ink),.1);color:var(--fg);}
 .cn-root .rg-step .names{line-height:1.5;}
+
+/* 顶部颜色标记栏 */
+.cn-root #pinbar{position:absolute;left:50%;top:18px;transform:translateX(-50%);display:flex;gap:2px;padding:4px;z-index:22;}
+.cn-root #pinbar + #batchruns{top:66px;}
+.cn-root #pinbar .pin-g{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:9px;font-size:12.5px;color:var(--fg2);}
+.cn-root #pinbar .pin-g:hover{background:var(--hover);color:var(--fg);}
+.cn-root .pdot{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none;}
+.cn-root .pinlist{width:280px;max-height:360px;overflow:auto;}
+.cn-root .pinlist .mh{display:flex;align-items:center;gap:7px;}
+.cn-root .pinlist .hrow .m{display:flex;flex-direction:column;min-width:0;}
+.cn-root .pinlist .hrow small{color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cn-root .hrow.on{background:var(--hover);}
+/* 全屏预览右上角：放到画布 / 回到画布 / 下载 / 关闭 */
+.cn-root .lightbox .lb-tools{position:absolute;right:20px;top:20px;display:flex;align-items:center;gap:8px;}
+.cn-root .lightbox .lb-tools .pill{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:10px;background:rgba(255,255,255,.1);color:#fff;font-size:12.5px;border:1px solid rgba(255,255,255,.14);}
+.cn-root .lightbox .lb-tools .pill:hover{background:rgba(255,255,255,.18);}
+.cn-root .lightbox .lb-tools .ib{color:#fff;}
+/* 评论讨论串 */
+.cn-root .cbubble:has(.cin){width:280px;}
+.cn-root .cbubble.thread{width:290px;padding:8px 10px 10px;}
+.cn-root .cthread{max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:2px;margin-bottom:6px;}
+.cn-root .cmsg{padding:6px 4px;border-radius:8px;}
+.cn-root .cmsg + .cmsg{border-top:1px solid var(--line);}
+.cn-root .cmsg-h{display:flex;align-items:center;gap:6px;}
+.cn-root .cmsg-h small{margin:0;display:inline;color:var(--fg3);font-size:11px;}
+.cn-root .cmsg-h .ib{width:22px;height:22px;}
+.cn-root .cmsg-t{margin:4px 0 0 26px;white-space:pre-wrap;word-break:break-word;line-height:1.55;}
+.cn-root .cav{width:20px;height:20px;border-radius:50%;background:var(--s2);display:grid;place-items:center;font-size:10.5px;color:var(--fg2);flex:none;}
+.cn-root .cin textarea{width:100%;min-height:54px;resize:none;}
+.cn-root .cin-bar{display:flex;align-items:center;gap:6px;margin-top:4px;}
+.cn-root .cin-bar small{margin:0;display:inline;}
+.cn-root .cin-bar .btn{height:26px;padding:0 10px;white-space:nowrap;flex:none;}
+.cn-root .cin-bar small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.cn-root .cpin .crn{position:absolute;right:-6px;top:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--raised);color:var(--fg);font:600 9.5px var(--font);display:grid;place-items:center;box-shadow:0 0 0 1px var(--line);}
+.cn-root .cpin.on{outline:2px solid var(--solid);outline-offset:2px;}
+.cn-root .cmsg-h .grow,.cn-root .cin-bar .grow{flex:1}
+/* 把视频拖到剪辑时间线上 */
+.cn-root .lg-timeline.drop .nbody{outline:2px dashed var(--hi);outline-offset:2px;position:relative;}
+.cn-root .lg-timeline.drop .nbody::after{content:"松开放进剪辑";position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.35);color:#fff;font-size:14px;font-weight:600;border-radius:inherit;pointer-events:none;}

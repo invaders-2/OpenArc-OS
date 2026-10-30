@@ -149,13 +149,15 @@ test("C4 节点右键按用途分组（资产 ┃ 版本 ┃ 运行 ┃ 编辑 �
   assert.ok(idx('data-k="copy"') < idx('data-k="del"'));
 });
 
-test("C5 多选工具条：已选 N 个 / 对齐 / 批量运行 / 下载 / 删除；多选时不显示 composer", () => {
+test("C5 多选工具条：已选 N 个 / 对齐 / 一键运行 / 下载 / 删除；多选时不显示 composer", () => {
   const src = read("src/canvas/canvas-next/ui/Chrome.tsx");
   const block = src.slice(src.indexOf("function MultiBar"), src.indexOf("function Minimap"));
-  for (const label of ["已选", "对齐", "批量运行", "下载", "删除"]) assert.ok(block.includes(label), "缺 " + label);
+  for (const label of ["已选", "对齐", "一键运行", "下载", "删除"]) assert.ok(block.includes(label), "缺 " + label);
   assert.match(block, /data-mb="align"/);
   assert.match(block, /alignSelection\(store, "left"\)/);
-  assert.match(src, /\{ui\.sel\.size > 1 \? <MultiBar \/> : null\}/);
+  // 单选一个分组也显示（分组工具条），其余情况 MultiBar 自己判断少于 2 个就不显示
+  assert.match(src, /\{ui\.sel\.size \? <MultiBar \/> : null\}/);
+  assert.match(block, /if \(nodes\.length < 2 && !group\) return null;/);
   const gen = read("src/canvas/canvas-next/ui/GenPanel.tsx");
   assert.match(gen, /const id = ui\.sel\.size === 1 && !ui\.dragging && !editing \? \[\.\.\.ui\.sel\]\[0\] : null;/);
 });

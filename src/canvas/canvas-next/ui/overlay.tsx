@@ -74,7 +74,12 @@ function Popover({ st }: { st: NonNullable<PopState> }) {
 
 function ModalView({ st }: { st: NonNullable<ModalState> }) {
   useLayoutEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !pop) { e.stopPropagation(); closeModal(); } };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || pop) return;
+      // 带 data-esc-clear 的输入框：有内容时 Esc 先清空（由输入框自己处理），再按一次才关闭
+      const t = e.target as HTMLInputElement | null; if (t && t.dataset && "escClear" in t.dataset && t.value) return;
+      e.stopPropagation(); closeModal();
+    };
     document.addEventListener("keydown", onKey, true); return () => document.removeEventListener("keydown", onKey, true);
   }, []);
   return (

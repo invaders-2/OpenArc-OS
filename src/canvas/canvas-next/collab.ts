@@ -35,6 +35,9 @@ export function diffDoc(prev: CanvasDoc, next: CanvasDoc, clientId: string): Can
   const pc = new Set(prev.comments.map((c) => c.id)); const nc = new Set(next.comments.map((c) => c.id));
   prev.comments.filter((c) => !nc.has(c.id)).forEach((c) => ops.push({ type: "remove-comment", id: c.id }));
   next.comments.filter((c) => !pc.has(c.id)).forEach((comment) => ops.push({ type: "add-comment", comment }));
+  // 评论被编辑 / 有了新回复：没有单独的 update 操作，按「删掉再加回」同步（id 不变）
+  const before = new Map(prev.comments.map((c) => [c.id, c]));
+  next.comments.forEach((c) => { const o = before.get(c.id); if (o && o !== c && !same(o, c)) { ops.push({ type: "remove-comment", id: c.id }); ops.push({ type: "add-comment", comment: c }); } });
   if (!same(prev.settings, next.settings) && next.settings) ops.push({ type: "update-settings", patch: next.settings });
   return ops;
 }
