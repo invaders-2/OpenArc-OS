@@ -418,7 +418,25 @@ function resolveImageMime({ declared = null, base64 = null, fallback = "image/pn
   return fallback;
 }
 
+/**
+ * 画布面板的 Midjourney 参数（版本 / 速度 / HD / 风格化）：只收认识的形状，其余丢掉。
+ * version："8.1" 这类数字，或 "niji 7"；speed：relax | fast | turbo；stylize：0–1000 整数。
+ */
+function sanitizeMidjourney(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out = {};
+  const version = typeof value.version === "string" ? value.version.trim().toLowerCase() : "";
+  if (/^(niji\s*)?\d{1,2}(\.\d{1,2})?$/.test(version)) out.version = version.replace(/^niji\s*/, "niji ");
+  const speed = typeof value.speed === "string" ? value.speed.trim().toLowerCase() : "";
+  if (["relax", "fast", "turbo"].includes(speed)) out.speed = speed;
+  if (value.hd === true) out.hd = true;
+  const stylize = Number(value.stylize);
+  if (value.stylize !== undefined && value.stylize !== null && value.stylize !== "" && Number.isFinite(stylize)) out.stylize = Math.max(0, Math.min(1000, Math.round(stylize)));
+  return Object.keys(out).length ? out : null;
+}
+
 module.exports = {
+  sanitizeMidjourney,
   MAX_SIZE_LEN,
   IMAGE_PARAM_ALLOWLIST,
   pickImageParams,

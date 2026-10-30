@@ -298,7 +298,7 @@ export function createBridgeBackend(): CanvasBackend {
     try {
       const camera = p.camera.on ? { body: CAMERAS.body[p.camera.body], lens: CAMERAS.lens[p.camera.lens], focal: CAMERAS.focal[p.camera.focal] + "mm", aperture: CAMERAS.aperture[p.camera.aperture] } : null;
       // 主进程 canvas/modelImage 认 prompt / ratio / resolution / count(≤4) / configId；其余字段先带上，后端补齐后生效
-      const common = { canvasId: req.canvasId, runId: run.runId, nodeId: req.nodeId, prompt: req.resolvedPrompt, ratio: /自适应|auto/i.test(p.ratio) ? "auto" : p.ratio, resolution: p.size, count: Math.min(4, p.count), configId: req.model.id, style: styleForRequest(p.style), camera, webSearch: !!p.search, images: refs };
+      const common = { canvasId: req.canvasId, runId: run.runId, nodeId: req.nodeId, prompt: req.resolvedPrompt, ratio: /自适应|auto/i.test(p.ratio) ? "auto" : p.ratio, resolution: p.size, count: Math.min(4, p.count), configId: req.model.id, style: styleForRequest(p.style), camera, webSearch: !!p.search, images: refs, ...(req.model.mj && p.mj ? { mj: p.mj } : {}) };
       // 有参考图且模型支持图生图：走 canvas/modelImageEdit（目前只收 1 张参考图）；素材已在 linkInputs 换成链接
       let result: Record<string, any>;
       // 参考图生图：参考图作为附件，提示词原样（主进程把链接下载后传成服务商附件）

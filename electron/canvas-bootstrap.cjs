@@ -7,6 +7,7 @@
  *   - 身份与会话一律由主进程从已认证 session 推导；payload 里的 userId/owner 一律忽略。
  */
 "use strict";
+const { sanitizeMidjourney } = require("./image-params.cjs");
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -145,7 +146,9 @@ function imagePanelOptions(payload) {
   const style = sanitizeStyle(source.style);
   const camera = sanitizeCamera(source.camera);
   const webSearch = source.webSearch === true;
+  const mj = sanitizeMidjourney(source.mj);
   return {
+    ...(mj ? { mj } : {}),
     ...(style ? { style } : {}),
     ...(camera ? { camera } : {}),
     ...(webSearch ? { webSearch: true } : {}),
@@ -231,12 +234,14 @@ function imageEditOptions(payload) {
     const text = typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
     return text ? text.slice(0, max) : null;
   };
+  const mj = sanitizeMidjourney(source.mj);
   return {
     size: pick(source.size, 32),
     ratio: pick(source.ratio, 32),
     resolution: pick(source.resolution, 32),
     customSize: pick(source.customSize, 64),
     customRatio: pick(source.customRatio, 32),
+    ...(mj ? { mj } : {}),
   };
 }
 

@@ -10,8 +10,9 @@ import { createPortal } from "react-dom";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
 import { buildRequest, rolesFor, ROLE_LABEL, runNode, stopNode } from "../engine";
+import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
 import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, STYLES, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
-import { batchOf, batchRows, OUTPUT_MODES, rowsToRun, withBatch, type BatchSettings } from "../table";
+import { batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
 import { Icon, type IconName } from "./Icon";
 import { download } from "./menus";
@@ -235,6 +236,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       <textarea id="gpPrompt" className="vp-prompt" placeholder={ph} value={draft}
         onChange={(e) => { setDraft(e.target.value); if (e.target.value.endsWith("@")) refMenu(e.target); }} onBlur={() => commitPrompt(draft)}
         onKeyDown={(e) => { e.stopPropagation(); if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } if (e.key === "Escape") { (e.target as HTMLTextAreaElement).blur(); store.setUI({ sel: new Set(), pick: null }); } }} />
+      {tables.length ? <BatchPanel node={node} /> : null}
       {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
       <div className="vp-foot">
         <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>
@@ -270,6 +272,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
   if (kind === "image") {
     const ip = p as ImageParams;
     gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{ip.ratio} · {ip.size}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
+    if (m?.mj) gline.push(gdot("cmj"), seg("mj", <>{mjSummary(ip.mj)}</>, !!(ip.mj && (ip.mj.version || ip.mj.hd || typeof ip.mj.stylize === "number" || (ip.mj.speed && ip.mj.speed !== "fast")))));
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）
     if (m?.style) gline.push(gdot("c2"), <button key="chip-style" ref={styleRef} type="button" data-p="style" data-chip="style"
       className={"gp-chip style" + (ip.style !== "无" ? " on" : "")} title="风格仅基于图片生效" onClick={() => setStyleOpen(true)}>
@@ -359,7 +362,7 @@ function ChipImg({ src }: { src: string }) { const u = useAssetUrl(src); return 
 
 /** 请求预览：生成节点给出发给后端的请求；连着表格时给出第一行的请求和总行数 */
 function previewOf(ctl: ReturnType<typeof useCtl>, node: CanvasNode) {
-  const store = ctl.store; const rows = batchRows(store.state.doc, node.id);
+  const store = ctl.store; const rows = batchRows(store.state.doc, node.id, fillTargetOf(store.state.doc, node.id, batchOf(node).settings));
   const req = buildRequest(store, node, rows[0]); if (!req) return { error: "没有可用模型" };
   const { model, ...rest } = req;
   return { ...rest, model: { configId: model.id, name: model.name }, ...(rows.length ? { batch: { rows: rowsToRun(rows, batchOf(node).settings).length, previewRow: rows[0]?.row } } : {}) };
@@ -368,7 +371,11 @@ function previewOf(ctl: ReturnType<typeof useCtl>, node: CanvasNode) {
 /* ---------------- 批量（上游连着多维表格） ---------------- */
 function BatchPanel({ node }: { node: CanvasNode }) {
   const ctl = useCtl(); const store = ctl.store; const doc = useS((s) => s.doc);
-  const rows = batchRows(doc, node.id); const { settings: s, journal } = batchOf(node); const todo = new Set(rowsToRun(rows, s).map((r) => r.row));
+  const { settings: s, journal } = batchOf(node); const fill = fillTargetOf(doc, node.id, s);
+  const rows = batchRows(doc, node.id, fill); const todo = new Set(rowsToRun(rows, s).map((r) => r.row));
+  const m = store.modelOf(node); const g = genOf(node);
+  const cands = node.kind === "image" ? fillCandidates(doc, node.id) : [];
+  const fillName = fill ? `${tableOf(store.node(fill.table)!).columns[fill.col]}` : "";
   const setS = (patch: Partial<BatchSettings>) => store.updateNode(node.id, (n) => withBatch(n, { settings: patch }));
   const stOf = (row: number) => journal?.rows.find((r) => r.row === row);
   const first = rows.filter((r) => todo.has(r.row)).slice(0, s.concurrency).map((r) => r.row);
@@ -379,7 +386,7 @@ function BatchPanel({ node }: { node: CanvasNode }) {
         <button key={r.row} className={"brow" + (sel ? " sel" : "") + (todo.has(r.row) ? "" : " skip") + (s.manual ? "" : " dim")} onClick={() => { if (!s.manual) return; setS({ selected: s.selected.includes(r.row) ? s.selected.filter((x) => x !== r.row) : [...s.selected, r.row].sort((a, b) => a - b) }); }}>
           <span className="n tnum">{r.row}</span>
           <span className="md">{r.media.slice(0, 3).map((md) => <RowThumb key={md.nodeId} src={md.src} kind={md.kind} />)}</span>
-          <p>{r.text || "仅媒体输入"}</p>
+          <p>{(() => { const pl = planRow(node.kind as GenKind, g.params, m, r); const pp = pl.params as { mode?: string; dur?: number; ratio?: string }; const tags = [r.label, node.kind === "video" && pp.mode !== (g.params as { mode?: string }).mode ? pp.mode : null, r.dur != null && node.kind === "video" ? pp.dur + "s" : null, r.ratio ? pp.ratio : null].filter(Boolean); return <>{tags.length ? <b className="btag">{tags.join(" · ")}</b> : null}{r.text || (r.media.length ? "仅媒体输入" : "")}{pl.warnings.length ? <i className="bwarn" title={pl.warnings.join("\n")}> · {pl.warnings[0]}</i> : null}</>; })()}</p>
           <span className={"st" + (j?.status === "completed" ? " ok" : j?.status === "failed" ? " bad" : "")}>{j ? { completed: "已完成", failed: "失败", running: "生成中", pending: "待生成" }[j.status] : ""}</span>
         </button>); })}
       {!rows.length ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>上游表格还没有行</span></div> : null}
@@ -389,6 +396,13 @@ function BatchPanel({ node }: { node: CanvasNode }) {
       {!s.manual ? <label title="从第几行开始">起始行<input type="number" min={1} max={Math.max(1, rows.length)} value={s.startRow} onChange={(e) => setS({ startRow: clamp(+e.target.value || 1, 1, Math.max(1, rows.length)) })} onKeyDown={(e) => e.stopPropagation()} /><span style={{ color: "var(--fg3)" }}>/ {rows.length}</span></label> : null}
       <button className={"tg" + (s.manual ? " on" : "")} onClick={() => setS({ manual: !s.manual })}>独立运行</button>
       <button className="tg" title="某一行失败后的处理" onClick={() => setS({ failure: s.failure === "stop" ? "continue" : "stop" })}>{s.failure === "stop" ? "遇错停止" : "遇错继续"}</button>
+      {node.kind === "video" ? <button className={"tg" + (s.chain ? " on" : "")} data-act="chain" title="镜头串联：上一行视频的最后一帧作为下一行的首帧（这一行自己有首帧时不替换），按顺序逐行生成" onClick={() => setS({ chain: !s.chain })}>镜头串联</button> : null}
+      {node.kind === "image" && cands.length ? <button className={"tg" + (fill ? " on" : "")} data-act="fill" title="出图后把每行的结果填回表格的图片列，下游视频节点就能按行读到首帧" onClick={(e) => openPop(e.currentTarget, (close) => <>
+        <div className="mh">结果填回表格</div>
+        <button className={"mi" + (s.fill === undefined ? " on" : "")} onClick={() => { close(); setS({ fill: undefined }); }}><span>自动<span className="d">有空着的「首帧」列就填回去</span></span></button>
+        {cands.map((c) => <button key={c.table + c.col} className={"mi" + (s.fill && s.fill.table === c.table && s.fill.col === c.col ? " on" : "")} onClick={() => { close(); setS({ fill: { table: c.table, col: c.col } }); }}><span>填回「{c.name}」列</span></button>)}
+        <button className={"mi" + (s.fill === null ? " on" : "")} onClick={() => { close(); setS({ fill: null }); }}><span>不回填<span className="d">表格里的图都当参考图</span></span></button>
+      </>, "up")}>{fill ? `填回「${fillName}」` : "不回填"}</button> : null}
     </div>
   </div>;
 }
@@ -426,6 +440,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
     {render(close)}
   </>, "up");
   if (k === "ratio") return pop(() => <RatioPop node={node} model={mm} disabled={dis} />);
+  if (k === "mj") return pop(() => <MjPop node={node} model={mm} disabled={dis} />);
   if (k === "count") return pop((close) => <><div className="mh">一次生成几张</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + ((cur().g.params as ImageParams).count === c ? " on" : "")} disabled={dis || !mm.batch?.includes(c)} onClick={() => { close(); set({ count: c }); }}>{c}×<span className="k">{!dis && mm.batch?.includes(c) ? (c > 1 ? (store.state.ui.batchMode === "stack" ? "堆叠在本节点" : "铺开成新节点") : "") : "该模型不支持"}</span></button>)}</>);
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);
   if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{(Object.keys(VMODES) as Array<keyof typeof VMODES>).map((x) => { const ok = (mm.modes || []).includes(x); return <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={!ok || dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{ok ? (x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need) : mm.name + " 不支持"}</span></span><span className="k tnum">{VMODES[x].api}</span></button>; })}</>);
@@ -453,6 +468,35 @@ function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?:
     <div className="mh">比例</div><div className="ratio-grid">{(m.ratios || []).map((r) => <button key={r} className={p.ratio === r ? "on" : ""} disabled={disabled} onClick={() => set({ ratio: r })}>{shape(r)}{r}</button>)}</div>
     {m.search ? <><div className="mh">联网搜索</div><div className="seg"><button className={p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: true })}>开</button><button className={!p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: false })}>关</button></div></> : <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>{m.name} 不支持联网搜索</span></div>}
   </>;
+}
+/** Midjourney 参数：版本 / 速度 / HD / 风格化（只列服务商规格声明的取值） */
+const MJ_STYLIZE = [100, 250, 500, 750, 1000];
+function MjPop({ node, model, disabled = false }: { node: CanvasNode; model?: ModelSpec; disabled?: boolean }) {
+  const store = useCtl().store; const p = useNodeParams<ImageParams>(node); const m = model || store.modelOf(node)!;
+  const spec = m.mj; const cur: MjParams = p.mj || {};
+  const set = (patch: Partial<MjParams>) => store.patchGen(node.id, (g) => {
+    const prev = (g.params as ImageParams).mj || {}; const next: MjParams = { ...prev, ...patch };
+    if (next.hd && !mjHdAllowed(spec, next.version)) next.hd = false; // 换到不支持 HD 的版本就自动关掉
+    return { params: { ...(g.params as ImageParams), mj: next } };
+  });
+  if (!spec) return null;
+  const hdOk = mjHdAllowed(spec, cur.version);
+  return <div className="mjpop" data-mjpop>
+    <div className="mh">版本</div><div className="seg wrap">
+      <button className={!cur.version ? "on" : ""} disabled={disabled} onClick={() => set({ version: undefined })}>默认</button>
+      {spec.versions.map((v) => <button key={v} data-mjv={v} className={cur.version === v ? "on" : ""} disabled={disabled} onClick={() => set({ version: v })}>{/^niji/i.test(v) ? v.replace(/^niji\s*/i, "Niji ") : "v" + v}</button>)}
+    </div>
+    <div className="mh">速度</div><div className="seg">{spec.speeds.map((v) => <button key={v} data-mjs={v} className={(cur.speed || "fast") === v ? "on" : ""} disabled={disabled} onClick={() => set({ speed: v })}>{MJ_SPEED_LABEL[v] || v}</button>)}</div>
+    <div className="mh">高清 HD</div><div className="seg">
+      <button data-mjhd="on" className={cur.hd ? "on" : ""} disabled={disabled || !hdOk} onClick={() => set({ hd: true })}>开</button>
+      <button className={!cur.hd ? "on" : ""} disabled={disabled} onClick={() => set({ hd: false })}>关</button>
+      {!hdOk ? <span style={{ alignSelf: "center", marginLeft: 6, color: "var(--fg3)", fontSize: 12 }}>只支持 {spec.hd.map((v) => "v" + v).join(" / ")}</span> : null}
+    </div>
+    <div className="mh">风格化</div><div className="seg wrap">
+      <button className={typeof cur.stylize !== "number" ? "on" : ""} disabled={disabled} onClick={() => set({ stylize: undefined })}>默认</button>
+      {MJ_STYLIZE.map((v) => <button key={v} className={cur.stylize === v ? "on" : ""} disabled={disabled} onClick={() => set({ stylize: v })}>{v}</button>)}
+    </div>
+  </div>;
 }
 function SegPop({ node, groups }: { node: CanvasNode; groups: Array<[string, "ratio" | "res", string[]]> }) {
   const store = useCtl().store; const p = useNodeParams<VideoParams>(node);

@@ -13,6 +13,8 @@ import { genOf, isGenKind, newNode, uid, withGen, type GenData, type GenKind, ty
 
 export type View = { x: number; y: number; k: number };
 export type RunState = { status: "running"; progress: number; runId?: string; stream?: string; abort: AbortController; startedAt: number; batch?: { done: number; total: number } };
+/** 一键运行（分组 / 多选）：进度。key = 分组 id，多选时为 "sel:" + 节点 id */
+export type BatchRunState = { key: string; label: string; total: number; done: number; failed: number; queued: string[]; stopped: boolean; startedAt: number };
 export type RunLog = {
   id: string; node: string; title: string; type: GenKind | "table"; model: string; status: "done" | "error" | "stopped"; secs: number; time: string; thumb?: string; error?: string;
   /** 跨项目历史用：记录时间、所在画布、结果（资源库引用 / 远程地址；大的 data URL 不存）、提示词 */
@@ -66,6 +68,8 @@ export type CanvasState = {
   view: View;
   ui: UIState;
   runtime: Record<string, RunState>;
+  /** 进行中的一键运行 */
+  batches: Record<string, BatchRunState>;
   runs: RunLog[];
   models: ModelSpec[];
   toasts: Toast[];
@@ -80,6 +84,8 @@ type Listener = () => void;
 export class CanvasStore {
   state: CanvasState;
   readonly backend: CanvasBackend;
+  /** 视频截帧（批量「镜头串联」用）：CanvasApp 接上编辑器里的截帧实现；测试里换成桩 */
+  grabFrame: ((nodeId: string, at: "first" | "last") => Promise<string>) | null = null;
   private listeners = new Set<Listener>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private saveFlight: Promise<void> | null = null;
@@ -100,7 +106,7 @@ export class CanvasStore {
       canvasId, name, doc: { nodes: [], edges: [], comments: [] }, version: null, saving: "idle", loaded: false,
       view: { x: 0, y: 0, k: 1 },
       ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, guides: true, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, theme: "dark", themePref: pref, leftDrag },
-      runtime: {}, runs: [], models: [], toasts: [], undo: [], redo: [],
+      runtime: {}, batches: {}, runs: [], models: [], toasts: [], undo: [], redo: [],
       collab: { clientId: null, transport: null, peers: [] },
     };
     try { const r = localStorage.getItem("canvas-next:runs:" + canvasId); if (r) this.state.runs = JSON.parse(r); } catch { /* 忽略 */ }
@@ -259,6 +265,8 @@ export class CanvasStore {
 
   /* ---------- 运行态 ---------- */
   setRun(id: string, r: RunState | null) { const rt = { ...this.state.runtime }; if (r) rt[id] = r; else delete rt[id]; this.set({ runtime: rt }); }
+  setBatch(key: string, b: BatchRunState | null) { const m = { ...this.state.batches }; if (b) m[key] = b; else delete m[key]; this.set({ batches: m }); }
+  patchBatch(key: string, patch: Partial<BatchRunState>) { const cur = this.state.batches[key]; if (!cur) return; this.set({ batches: { ...this.state.batches, [key]: { ...cur, ...patch } } }); }
   patchRun(id: string, patch: Partial<RunState>) { const cur = this.state.runtime[id]; if (this.disposed || !cur) return; this.state = { ...this.state, runtime: { ...this.state.runtime, [id]: { ...cur, ...patch } } }; this.emit(); }
   logRun(r: Omit<RunLog, "id" | "time">) {
     const d = new Date(); const time = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");

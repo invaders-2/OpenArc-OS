@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { addFiles, commitText, connect, replaceNodeMedia } from "../actions";
 import { connectBlock, genOf, inputsOf, isGenKind, outOf, srcOf } from "../model";
-import { batchOf } from "../table";
+import { batchOf, dropImageOnCell } from "../table";
 import { useCtl, useS } from "./ctx";
 import { Edges } from "./Edges";
 import { addMenu, blankMenu, nodeMenu, portMenu, onNodeAct } from "./menus";
@@ -23,7 +23,7 @@ type Drag =
 
 export function Viewport() {
   const ctl = useCtl(); const store = ctl.store;
-  const doc = useS((s) => s.doc); const view = useS((s) => s.view); const ui = useS((s) => s.ui); const runtime = useS((s) => s.runtime);
+  const doc = useS((s) => s.doc); const view = useS((s) => s.view); const ui = useS((s) => s.ui); const runtime = useS((s) => s.runtime); const batches = useS((s) => s.batches);
   const vpRef = useRef<HTMLDivElement>(null); const drag = useRef<Drag | null>(null); const space = useRef(false);
   /** 右键菜单已在 pointerup 里弹过（Windows 的 contextmenu 在松开后才来，避免弹两次） */
   const menuAt = useRef(0);
@@ -34,6 +34,14 @@ export function Viewport() {
   const setGuides = (g: Guide[]) => { if (!g.length && !guidesRef.current) return; guidesRef.current = g.length; setGuidesState(g); };
   /** 拖动节点经过的堆叠（松开就放进去） */
   const [dropStack, setDropStack] = useState<string | null>(null); const dropRef = useRef<string | null>(null);
+  // 把一张图片节点拖到表格的图片单元格（首帧 / 尾帧 / 参考图列）上：松手后图填进单元格，节点回到原位
+  const cellRef = useRef<HTMLElement | null>(null);
+  const cellUnder = (x: number, y: number, orig: Array<{ id: string }>) => {
+    if (orig.length !== 1) return null; const n = store.node(orig[0].id);
+    if (!n || n.kind !== "image" || !outOf(n)?.url) return null;
+    return (document.elementsFromPoint(x, y).find((el) => (el as HTMLElement).dataset?.mcell) as HTMLElement | undefined) || null;
+  };
+  const markCell = (el: HTMLElement | null) => { if (cellRef.current === el) return; cellRef.current?.classList.remove("drop"); el?.classList.add("drop"); cellRef.current = el; };
   const stackUnder = (x: number, y: number, moving: Set<string>) => {
     for (const el of document.elementsFromPoint(x, y)) { const id = (el as HTMLElement).closest?.(".node")?.getAttribute("data-id"); if (id && !moving.has(id) && isStack(store.node(id))) return id; }
     return null;
@@ -130,6 +138,7 @@ export function Viewport() {
       store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (pos.has(n.id) ? { ...n, ...pos.get(n.id)! } : n)) }));
       const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
       if (over !== dropRef.current) { dropRef.current = over; setDropStack(over); }
+      markCell(cellUnder(e.clientX, e.clientY, d.orig));
     } else if (d.kind === "resize") {
       const dx = (e.clientX - d.sx) / st.view.k, dy = (e.clientY - d.sy) / st.view.k;
       const w = Math.round(Math.max(140, Math.min(900, d.w + dx))); const h = d.keepRatio ? Math.round(w * d.ar) : Math.round(Math.max(80, Math.min(900, d.h + dy)));
@@ -166,6 +175,8 @@ export function Viewport() {
     if (d.kind === "pan" && !d.moved) { if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur(); store.setUI({ sel: new Set(), edge: null, editCell: null }); }
     if (d.kind === "node" && d.moved) {
       setGuides([]); store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
+      const cell = cellUnder(e.clientX, e.clientY, d.orig); markCell(null);
+      if (cell && dropImageOnCell(store, cell.dataset.mcell!, d.orig[0].id, cell.dataset.multi === "1")) { const o = d.orig[0]; store.updateNode(o.id, (n) => ({ ...n, x: o.x, y: o.y })); return; }
       const over = d.orig.some((o) => isStack(store.node(o.id))) ? null : stackUnder(e.clientX, e.clientY, new Set(d.orig.map((o) => o.id)));
       // 拖的是普通分组：只叠分组外单独选中的节点，组里的节点跟着分组走，不拆进叠
       const dragged = new Set(d.orig.map((o) => o.id)); const inDraggedGroup = new Set(d.orig.flatMap((o) => { const g = store.node(o.id); return g && g.kind === "group" ? g.children || [] : []; }));
@@ -213,7 +224,15 @@ export function Viewport() {
     const w = ctl.toWorld(e.clientX, e.clientY); addMenu(ctl, { x: e.clientX + 4, y: e.clientY + 4 }, w);
   };
   const renameInline = (id: string, el: HTMLElement) => {
-    const n = store.node(id); if (!n || !isGenKind(n.kind)) return;
+    const n = store.node(id); if (!n) return;
+    // 分组 / 堆叠：名字存在 node.text（起名「首帧」「尾帧」后连到文本节点，出表时按组名放图）
+    if (n.kind === "group") {
+      el.contentEditable = "true"; el.classList.add("rename"); el.focus(); const rg = document.createRange(); rg.selectNodeContents(el); const sl = getSelection()!; sl.removeAllRanges(); sl.addRange(rg);
+      const fin = (save: boolean) => { el.contentEditable = "false"; el.classList.remove("rename"); const v = (el.textContent || "").trim().slice(0, 40); if (save && v && v !== n.text) { store.updateNode(id, (x) => ({ ...x, text: v }), { history: true }); store.toast(`已重命名为「${v}」`); } else el.textContent = n.text || "分组"; };
+      el.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); el.onblur = null; fin(true); } if (ev.key === "Escape") { el.onblur = null; fin(false); } };
+      el.onblur = () => fin(true); return;
+    }
+    if (!isGenKind(n.kind)) return;
     el.contentEditable = "true"; el.classList.add("rename"); el.focus(); const r = document.createRange(); r.selectNodeContents(el); const s = getSelection()!; s.removeAllRanges(); s.addRange(r);
     const done = (save: boolean) => { el.contentEditable = "false"; el.classList.remove("rename"); const v = (el.textContent || "").trim().slice(0, 40); const old = genOf(n).title; if (save && v && v !== old) { store.patchGen(id, { title: v }, { history: true }); store.toast(`已重命名为「${v}」，引用它的提示词需要同步修改`); } else el.textContent = old; };
     el.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); el.onblur = null; done(true); } if (ev.key === "Escape") { el.onblur = null; done(false); } };
@@ -230,6 +249,7 @@ export function Viewport() {
     else blankMenu(ctl, { x: e.clientX, y: e.clientY }, ctl.toWorld(e.clientX, e.clientY));
   };
 
+  const queuedIds = new Set(Object.values(batches).flatMap((b) => b.queued));
   const k = view.k; const gs = 24 * (k < .45 ? 2 : 1) * k;
   const conn = ui.conn;
   return (
@@ -239,16 +259,17 @@ export function Viewport() {
       onPointerLeave={() => { if (store.state.collab.transport) window.dispatchEvent(new CustomEvent("cn:cursor", { detail: null })); }}
       onDoubleClick={onDouble} onContextMenu={onContext}
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const files = [...(e.dataTransfer?.files || [])]; if (files.length) void addFiles(store, files, ctl.toWorld(e.clientX, e.clientY)); }}>
-      <div id="world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${k})` }}>
+      <div id="world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${k})`, ["--zinv" as string]: String(1 / k) }}>
         <Edges />
         {guides.map((g, i) => <div key={i} className={"snapguide " + g.axis} style={g.axis === "x" ? { left: g.at, top: g.from, height: g.to - g.from, width: 1 / k } : { top: g.at, left: g.from, width: g.to - g.from, height: 1 / k }} />)}
         <div id="nodes">
           {(() => { const hidden = hiddenIds(doc.nodes); return doc.nodes.filter((n) => !hidden.has(n.id)); })().sort((a, b) => (a.kind === "group" && !isStack(a) ? 0 : 1) - (b.kind === "group" && !isStack(b) ? 0 : 1)).map((n) => {
             const run = runtime[n.id];
+            const queued = queuedIds.has(n.id);
             const loadSrc = run ? srcOf(n) || inputsOf(doc, n.id).map((x) => srcOf(x.node)).find(Boolean) : undefined;
             const bj = run ? null : batchOf(n).journal;
             const batchInfo = bj && n.kind !== "table" ? `${bj.rows.filter((r) => r.status === "completed").length}/${bj.rows.length} 行` : undefined;
-            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} modelName={(store.modelOf(n) || {}).name} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id || dropStack === n.id} noconn={!!conn && conn.over !== n.id && !!connectBlock(doc, conn.rev ? n.id : conn.id, conn.rev ? conn.id : n.id)} hl={ui.hlNode === n.id} loadSrc={loadSrc} batchInfo={batchInfo}
+            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} modelName={(store.modelOf(n) || {}).name} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id || dropStack === n.id} noconn={!!conn && conn.over !== n.id && !!connectBlock(doc, conn.rev ? n.id : conn.id, conn.rev ? conn.id : n.id)} hl={ui.hlNode === n.id} loadSrc={loadSrc} batchInfo={batchInfo} queued={queued}
               onAct={(node, act, ev) => onNodeAct(ctl, node, act, ev)} onTextCommit={(id, text) => commitText(store, id, text)} />;
           })}
         </div>
