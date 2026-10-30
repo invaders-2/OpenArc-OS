@@ -75,6 +75,8 @@ async function runEdit(store: CanvasStore, id: string, op: EditOp, label: string
   }
 }
 
+/** ⌘I「指向编辑」：在图片上圈出要改的地方再写说明（标注编辑器） */
+export function openPointEdit(id: string) { setEd({ type: "mask", id, mode: "annot" }); }
 export function openEditor(ctl: Ctl, kind: string, id: string, anchor?: Element) {
   const store = ctl.store; const n = store.node(id); if (!n) return;
   if (kind === "crop") return setEd({ type: "crop", id });

@@ -13,6 +13,7 @@
 import type { CanvasNode } from "../react-canvas/reactCanvasStore";
 import type { VideoSegment } from "./backend/types";
 import { connect } from "./actions";
+import { timelineFromOrdered } from "./playlist";
 import { regenAsNew, runNode } from "./engine";
 import { clampTrim, defaultParams, genOf, outOf, resRange, trimIsFull, uid, type ModelSpec, type VideoMode, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
@@ -112,6 +113,7 @@ export const opMode = (op: VideoAiOp) => MODE_OF[op];
 export function aiPrompt(op: VideoAiOp, a: string, b = ""): string {
   if (op === "replace") return `把视频里的「${a.trim()}」替换成「${b.trim()}」，其余画面、人物动作、运镜和时长保持不变。`;
   if (op === "remove") return `从视频里移除「${a.trim()}」，用周围环境自然补全被遮挡的背景，其余画面、动作、运镜和时长保持不变。`;
+  if (op === "extend" && b === "before") return `在视频的第一帧之前补拍一段开头，结尾要自然衔接到原视频的第一帧${a.trim() ? "：" + a.trim() : ""}。人物、场景、光线和风格与原视频一致。`;
   if (op === "extend") return a.trim() ? `接着视频的最后一帧继续往后拍：${a.trim()}。人物、场景、光线和风格与原视频一致。` : "接着视频的最后一帧自然地继续往后拍，人物、场景、光线和风格与原视频一致。";
   return `按「${a.trim()}」的机位重新拍摄这一段，人物、动作、场景、光线和时长保持不变。${b.trim() ? b.trim() : ""}`;
 }
@@ -120,7 +122,7 @@ export function aiPrompt(op: VideoAiOp, a: string, b = ""): string {
  * AI 视频编辑：在源节点右侧新建视频节点（连好源视频、选好生成方式和提示词）并开始生成。
  * 重拍时若设了使用区间，先把那一段裁出来作为源。
  */
-export async function aiVideoEdit(store: CanvasStore, n: CanvasNode, op: VideoAiOp, a: string, b = ""): Promise<CanvasNode | null> {
+export async function aiVideoEdit(store: CanvasStore, n: CanvasNode, op: VideoAiOp, a: string, b = "", opts: { dur?: number; wait?: boolean } = {}): Promise<CanvasNode | null> {
   const mode = MODE_OF[op]; const m = modelFor(store, mode, store.modelOf(n));
   if (!m) { store.toast(`还没有支持「${mode}」的视频模型（如 Seedance），请在设置 › 模型里添加`, 5000); return null; }
   if ((op === "replace" && (!a.trim() || !b.trim())) || (op === "remove" && !a.trim()) || (op === "retake" && !a.trim())) { store.toast("先填好要改的内容"); return null; }
@@ -135,16 +137,16 @@ export async function aiVideoEdit(store: CanvasStore, n: CanvasNode, op: VideoAi
   }
   const sp = genOf(n).params as VideoParams;
   const base = defaultParams("video", m) as VideoParams;
-  const params: VideoParams = { ...base, model: m.id, mode, ratio: m.ratios?.includes(sp.ratio) ? sp.ratio : base.ratio, res: m.res?.includes(sp.res) ? sp.res : base.res, sound: !!(m.audio && sp.sound) };
+  const params: VideoParams = { ...base, model: m.id, mode, ratio: m.ratios?.includes(sp.ratio) ? sp.ratio : base.ratio, res: m.res?.includes(sp.res) ? sp.res : base.res, sound: !!(m.audio && sp.sound), ...(opts.dur && m.durs?.length ? { dur: nearest(m.durs, opts.dur) } : {}) };
   const pos = rowSpots(store, src, 1)[0];
-  const title = `${genOf(n).title.replace(/ · .*$/, "")} · ${LABEL[op]}`;
+  const title = `${genOf(n).title.replace(/ · .*$/, "")} · ${op === "extend" && b === "before" ? "补开头" : LABEL[op]}`;
   const node = store.newNode("video", pos.x, pos.y, { title, prompt: aiPrompt(op, a, b), params, w: n.w, h: n.h });
   store.addNodes([node], [], { select: true });
   connect(store, src.id, node.id, { quiet: true });
   // 连线后会按输入自动选生成方式，这里按工具要求的方式定回来
   store.patchGen(node.id, (g) => ({ params: { ...(g.params as VideoParams), mode } }));
   store.toast(`已新建「${title}」并开始生成（${m.name} · ${mode}）`);
-  void runNode(store, node.id);
+  if (opts.wait) await runNode(store, node.id); else void runNode(store, node.id);
   return store.node(node.id)!;
 }
 
@@ -156,4 +158,46 @@ export async function draftToFinal(store: CanvasStore, n: CanvasNode): Promise<C
   store.toast(`按 ${r ? r.high : "原清晰度"} 出成片`);
   await runNode(store, fresh.id);
   return store.node(fresh.id) || null;
+}
+
+const nearest = (list: number[], v: number) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), list[0]);
+
+/** 分段重拍的一段：keep = 保留原样，否则 cam 是新机位 */
+export type RetakeSeg = { in: number; out: number; cam: string; note?: string };
+export const KEEP = "保留原样";
+export const MIN_SEG = 1;
+
+/** 在 at 秒处把所在的段切成两段（两边都至少 MIN_SEG 秒）；切不了返回 null */
+export function splitSeg(segs: RetakeSeg[], at: number): RetakeSeg[] | null {
+  const i = segs.findIndex((s) => at > s.in + MIN_SEG - 1e-6 && at < s.out - MIN_SEG + 1e-6); if (i < 0) return null;
+  const s = segs[i]; const t = Math.round(at * 10) / 10;
+  return [...segs.slice(0, i), { ...s, out: t }, { ...s, in: t }, ...segs.slice(i + 1)];
+}
+/** 去掉第 i 段和后一段之间的切点 */
+export function mergeSeg(segs: RetakeSeg[], i: number): RetakeSeg[] {
+  if (i < 0 || i >= segs.length - 1) return segs;
+  return [...segs.slice(0, i), { ...segs[i], out: segs[i + 1].out }, ...segs.slice(i + 2)];
+}
+
+/**
+ * 分段重拍（TapNow Video Retake）：把视频按段裁开，要换机位的段各自重拍，
+ * 全部完成后按原顺序（保留原样的段 + 重拍结果）拼成一条剪辑时间线。
+ * 需要桌面版的 ffmpeg 真裁出每一段。
+ */
+export async function retakeSegments(store: CanvasStore, n: CanvasNode, segs: RetakeSeg[]): Promise<CanvasNode | null> {
+  const todo = segs.filter((s) => s.cam !== KEEP);
+  if (!todo.length) { store.toast("每一段都是「保留原样」，没有要重拍的"); return null; }
+  if (segs.length === 1) return aiVideoEdit(store, n, "retake", segs[0].cam, segs[0].note || "");
+  const m = modelFor(store, MODE_OF.retake, store.modelOf(n));
+  if (!m) { store.toast(`还没有支持「${MODE_OF.retake}」的视频模型（如 Seedance），请在设置 › 模型里添加`, 5000); return null; }
+  store.toast(`正在把视频裁成 ${segs.length} 段…`);
+  const cut = await segmentsToNodes(store, n, segs.map((s) => ({ inSec: s.in, outSec: s.out })), "分段", { realOnly: true });
+  if (cut.nodes.length !== segs.length) { store.toast(`没能裁出每一段（${cut.note || "裁剪失败"}）。分段重拍需要桌面版的 ffmpeg`, 6000); return null; }
+  store.toast(`开始重拍 ${todo.length} 段，其余 ${segs.length - todo.length} 段保留原样`);
+  const finals = await Promise.all(segs.map((s, i) => (s.cam === KEEP ? Promise.resolve(cut.nodes[i]) : aiVideoEdit(store, cut.nodes[i], "retake", s.cam, s.note || "", { wait: true }))));
+  const ok = finals.filter((f): f is CanvasNode => !!f && !!store.node(f.id) && !!outOf(store.node(f.id)!)?.url).map((f) => store.node(f.id)!);
+  if (ok.length !== segs.length) { store.toast(`有 ${segs.length - ok.length} 段没有重拍成功，没有拼成片；可以单独重试那几段`, 6000); return null; }
+  const tl = timelineFromOrdered(store, ok, `${genOf(n).title} · 分段重拍`);
+  store.toast("分段重拍完成，已按原顺序拼进剪辑时间线；点「导出到画布」得到成片", 6000);
+  return tl;
 }

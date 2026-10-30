@@ -14,7 +14,8 @@ import { CanvasStore } from "./store";
 import { Chrome, Lightbox, openSearch, showKeys, Toasts, toggleCmt } from "./ui/Chrome";
 import { Ctl, CtlCtx, useS, type HostActions } from "./ui/ctx";
 import { Editors } from "./ui/Editors";
-import { grabVideoFrame } from "./ui/editors/registry";
+import { grabVideoFrame, openPointEdit } from "./ui/editors/registry";
+import { outOf } from "./model";
 import { SelectionUI } from "./ui/GenPanel";
 import { closePop, modalOpen, OverlayHost, popOpen } from "./ui/overlay";
 import { applyTheme, watchSystemTheme } from "./ui/theme";
@@ -87,6 +88,18 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
       }
       if (mod && k === "j") { e.preventDefault(); store.setUI({ agentOpen: !st.ui.agentOpen, agentFull: false }); return; }
       if (mod && k === "f") { e.preventDefault(); openSearch(ctl); return; }
+      // ⌘I 指向编辑：选中一张有结果的图片 → 在图上圈出要改的地方；否则进入「点节点加入 Agent」
+      if (mod && k === "i" && !isTyping() && !modalOpen()) {
+        e.preventDefault(); const one = st.ui.sel.size === 1 ? store.node([...st.ui.sel][0]) : null;
+        if (one && one.kind === "image" && outOf(one)?.url) { openPointEdit(one.id); store.toast("在图上圈出要改的地方，再写改法"); return; }
+        if (st.ui.agentPick) { store.setUI({ agentPick: false }); return; }
+        store.setUI({ agentOpen: true, agentPick: true }); store.toast("点画布上的节点加入 Agent 上下文，Esc 结束"); return;
+      }
+      // 按 V 开始语音输入，再按一次 V 结束（TapNow：hold V / press V）
+      if (!mod && k === "v" && !e.repeat && !isTyping() && !modalOpen()) {
+        e.preventDefault(); const was = st.ui.agentOpen; if (!was) store.setUI({ agentOpen: true });
+        setTimeout(() => (document.getElementById("aMic") as HTMLButtonElement | null)?.click(), was ? 0 : 120); return;
+      }
       if (mod && e.shiftKey && k === "l" && !isTyping()) { e.preventDefault(); const pref = st.ui.theme === "light" ? "dark" : "light"; store.setUI({ themePref: pref }); try { localStorage.setItem("openarc-canvas-theme", pref); } catch { /* 忽略 */ } applyTheme(store); store.toast(pref === "light" ? "已切换到浅色" : "已切换到深色"); return; }
       if (isTyping() || modalOpen()) return;
       if (mod && k === "z") { e.preventDefault(); e.shiftKey ? store.redo() : store.undo(); return; }

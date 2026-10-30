@@ -406,10 +406,16 @@ function compact(ctl: Ctl, a: AgentState) {
   a.msgs = [{ id: mid(), role: "a", summary: true, text: `【对话摘要】之前 ${asks.length} 轮：${asks.map((t) => "「" + t.slice(0, 18) + "」").join("、")}${made.length ? `；新建了 ${made.join("、")}` : ""}。` }, ...keep];
   a.emit(); ctl.store.toast(`已把 ${old.length} 条早期消息压缩成 1 条摘要`);
 }
+let activeMic: { stop: () => void } | null = null;
 function micInput(ctl: Ctl, btn: HTMLElement, onText: (t: string) => void) {
   const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   if (!SR) { ctl.store.toast("当前环境没有语音识别服务，可以用系统听写输入"); return; }
-  const r = new SR(); r.lang = "zh-CN"; btn.classList.add("rec"); r.onresult = (e: any) => onText(String(e.results?.[0]?.[0]?.transcript || "")); r.onend = () => btn.classList.remove("rec"); r.onerror = () => ctl.store.toast("没有听清，可以再试一次"); r.start();
+  // 正在听：再点一次（或再按一次 V）就结束
+  if (activeMic) { try { activeMic.stop(); } catch { /* 忽略 */ } return; }
+  const r = new SR(); r.lang = "zh-CN"; activeMic = r; btn.classList.add("rec");
+  r.onresult = (e: any) => onText(String(e.results?.[0]?.[0]?.transcript || ""));
+  r.onend = () => { btn.classList.remove("rec"); if (activeMic === r) activeMic = null; };
+  r.onerror = () => ctl.store.toast("没有听清，可以再试一次"); r.start();
 }
 
 /* ---------- 记忆 / 技能 ---------- */

@@ -93,7 +93,8 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     B("dl", "download", "下载", "", () => void download(node, store)),
     B("full", "expand", "全屏播放", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id }))),
   ];
-  else if (node.kind === "audio" && out) items = [B("dl", "download", "下载", "", () => void download(node, store))];
+  // TapNow 音频结果：颜色标记 ┃ 保存素材库 / 下载
+  else if (node.kind === "audio" && out) items = [tagBtn(), <span key="s" className="vsep" />, B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store))];
   if (!items.length) return null;
   return <div id="ntb" ref={refEl} className="float enter" style={style} onPointerDown={(e) => e.stopPropagation()}>{items}</div>;
 }
@@ -172,6 +173,18 @@ function GenPanel({ node }: { node: CanvasNode }) {
       <button className="mi" onClick={() => { close(); ctl.focusNode(src.id); }}><Icon name="search" size="s" />在画布中定位</button>
       <button className="mi danger" onClick={() => { close(); store.removeEdge(edgeId); afterInputsChanged(store, node.id); }}><Icon name="x" size="s" />移除这个输入</button>
     </>);
+  };
+  /** 图片提示词里输入 /：快捷指令（TapNow Prompt shortcuts），↑↓ 选、↵ / Tab 确定、Esc 关 */
+  const slashMenu = (ta: HTMLTextAreaElement) => {
+    if (kind !== "image") return;
+    const hasRef = ins.some((x) => x.node.kind === "image");
+    const put = (sc: PromptShortcut) => {
+      const v = ta.value.replace(/\/$/, "") + sc.prompt; setDraft(v); commitPrompt(v);
+      if (sc.ratio && (!m?.ratios?.length || m.ratios.includes(sc.ratio))) set({ ratio: sc.ratio } as Partial<ImageParams>);
+      if (sc.needRef && !hasRef) store.toast("这个指令要先连一张参考图");
+      setTimeout(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = v.length; }, 0);
+    };
+    openPop(ta, (close) => <SlashList onPick={(sc) => { close(); put(sc); }} onClose={() => { close(); ta.focus(); }} />);
   };
   const refMenu = (ta: HTMLTextAreaElement) => {
     const opts: Array<[string, string]> = []; ins.forEach((x) => { if (x.node.kind === "text") Object.keys(sectionsOf(textOf(x.node))).forEach((k) => opts.push([title(x.node), k])); });
@@ -309,7 +322,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       <span className="grow" />
       <button className={"linkbtn" + (preview ? " on" : "")} data-p="preview" onClick={() => store.setUI({ preview: !preview })}><Icon name="text" size="xs" />请求预览</button>
     </div>
-    <textarea id="gpPrompt" placeholder={ph} value={draft} onChange={(e) => { setDraft(e.target.value); if (e.target.value.endsWith("@")) refMenu(e.target); }} onBlur={() => commitPrompt(draft)}
+    <textarea id="gpPrompt" placeholder={ph} value={draft} onChange={(e) => { setDraft(e.target.value); if (e.target.value.endsWith("@")) refMenu(e.target); else if (/(^|\s)\/$/.test(e.target.value)) slashMenu(e.target); }} onBlur={() => commitPrompt(draft)}
       onKeyDown={(e) => { e.stopPropagation(); if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } if (e.key === "Escape") { (e.target as HTMLTextAreaElement).blur(); store.setUI({ sel: new Set(), pick: null }); } }} />
     {tables.length ? <BatchPanel node={node} /> : null}
     {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
@@ -797,4 +810,35 @@ function StyleLayer({ node, onClose }: { node: CanvasNode; onClose: () => void }
       </div>
     </div>
   </div>, host);
+}
+
+/* ---------------- 图片提示词快捷指令（输入 /） ---------------- */
+export type PromptShortcut = { id: string; name: string; desc: string; prompt: string; ratio?: string; needRef?: boolean };
+export const PROMPT_SHORTCUTS: PromptShortcut[] = [
+  { id: "angles9", name: "多角度九宫格", desc: "用连着的参考图出 3×3 九个机位，可再「快速切分」成 9 张", ratio: "1:1", needRef: true,
+    prompt: "以参考图中的主体为准，生成一张 3×3 九宫格联系表：九格分别是正面、左前 45°、右前 45°、左侧、右侧、背面、俯拍、仰拍、面部 / 局部特写。九格里主体的外观、服装、材质、颜色和光线完全一致，背景统一，格与格之间用细白线分隔，不加文字。" },
+  { id: "story4", name: "四格分镜", desc: "2×2 四个连续镜头，适合先看节奏", ratio: "16:9",
+    prompt: "生成一张 2×2 四格分镜图，按从左到右、从上到下的顺序讲一个连续的小情节：建立镜头 → 中景动作 → 特写反应 → 收尾镜头。四格人物和场景保持一致，电影感构图，格与格之间用细白线分隔，不加文字。" },
+  { id: "turnaround", name: "角色三视图", desc: "正 / 侧 / 背三视图，白底", ratio: "16:9", needRef: true,
+    prompt: "以参考图中的角色为准，生成一张角色设定三视图：从左到右依次是正面、侧面、背面全身站姿，三张比例和高度一致，纯白背景，平光，不加文字和标注。" },
+  { id: "product", name: "白底产品图", desc: "电商主图：纯白底、柔光、居中", ratio: "1:1", needRef: true,
+    prompt: "以参考图中的产品为准，生成电商白底主图：产品居中，纯白背景，柔和的棚拍光，轻微落地阴影，产品外观、颜色和细节与参考图完全一致，不加文字。" },
+];
+function SlashList({ onPick, onClose }: { onPick: (s: PromptShortcut) => void; onClose: () => void }) {
+  const [hi, setHi] = useState(0);
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); setHi((h) => (h + (e.key === "ArrowDown" ? 1 : -1) + PROMPT_SHORTCUTS.length) % PROMPT_SHORTCUTS.length); }
+      else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); setHi((h) => { onPick(PROMPT_SHORTCUTS[h]); return h; }); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
+    };
+    document.addEventListener("keydown", on, true); return () => document.removeEventListener("keydown", on, true);
+  }, [onPick, onClose]);
+  return <div className="slash-list" data-slash>
+    <div className="mh">快捷指令 · ↑↓ 选择，↵ 确定</div>
+    {PROMPT_SHORTCUTS.map((sc, i) => <button key={sc.id} className={"mi" + (i === hi ? " hi" : "")} data-sc={sc.id} onMouseMove={() => setHi(i)} onClick={() => onPick(sc)}>
+      <Icon name={sc.id === "angles9" ? "grid" : sc.id === "story4" ? "layout" : sc.id === "turnaround" ? "cube" : "image"} size="s" />
+      <span className="sl-m"><b>{sc.name}</b><small>{sc.desc}</small></span>{sc.ratio ? <span className="k">{sc.ratio}</span> : null}
+    </button>)}
+  </div>;
 }

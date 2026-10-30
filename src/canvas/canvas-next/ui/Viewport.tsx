@@ -13,6 +13,7 @@ import { NodeView } from "./NodeView";
 import { closePop } from "./overlay";
 import { addToStack, hiddenIds, isStack } from "../stack";
 import { addToTimeline, clipable } from "../playlist";
+import { reconcileGroups } from "../groupFit";
 import { bodyBox, snapToGuides, unionBox, type Box, type Guide } from "../snapGuides";
 
 type Drag =
@@ -191,6 +192,8 @@ export function Viewport() {
       // 拖的是普通分组：只叠分组外单独选中的节点，组里的节点跟着分组走，不拆进叠
       const dragged = new Set(d.orig.map((o) => o.id)); const inDraggedGroup = new Set(d.orig.flatMap((o) => { const g = store.node(o.id); return g && g.kind === "group" ? g.children || [] : []; }));
       if (over) addToStack(store, over, [...dragged].filter((id) => !inDraggedGroup.has(id)));
+      // 普通分组：拖进框里就加入，拖出框就移出，框扩大包住组员（与拖动同一步撤销）
+      else { const next = reconcileGroups(store.state.doc, [...dragged]); if (next !== store.state.doc) store.mutate(() => next, { history: false }); }
     }
     if (d.kind === "marq") { setMarq(null); if (!d.moved) store.setUI({ sel: d.base, edge: null, editCell: null }); }
     if (d.kind === "conn") {
