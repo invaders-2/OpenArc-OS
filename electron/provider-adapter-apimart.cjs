@@ -472,6 +472,9 @@ const OFFICIAL_HEADERS = () => ({ "X-APIMart-Response-Version": "2026-07-27", "I
  * 版本从模型名取（midjourney-v7 → "7"，niji-6 → niji:true + "6"），名字里没有版本就不传、交给上游默认。
  */
 const MJ_SPEEDS = new Set(["relax", "fast", "turbo"]);
+/** 面板可选版本（文档：主线 --v；niji 只有 7 / 6；HD 只有 8.1 / 8.2） */
+const MJ_VERSIONS = ["8.2", "8.1", "7", "6.1", "6", "niji 7", "niji 6"];
+const MJ_HD_VERSIONS = ["8.1", "8.2"];
 const MJ_PASSTHROUGH = ["quality", "style", "seed", "negative_prompt", "stylize", "chaos", "weird", "tile", "iw", "cw", "sw", "cref", "sref", "raw", "draft", "hd", "extra"];
 function midjourneyBody(spec, model, prompt, { size = null, params = {}, refs = 0, keepRatio = true } = {}) {
   const body = { prompt: String(prompt || "").trim() };
@@ -484,6 +487,16 @@ function midjourneyBody(spec, model, prompt, { size = null, params = {}, refs = 
   else if (ver) body.version = ver[1];
   if (/niji/.test(name) || params.niji === true) body.niji = true;
   for (const k of MJ_PASSTHROUGH) if (params[k] !== undefined && params[k] !== null && params[k] !== "") body[k] = params[k];
+  // 画布面板（版本 / 速度 / HD / 风格化）优先于模型名推断
+  const panel = params.mj && typeof params.mj === "object" ? params.mj : null;
+  if (panel) {
+    const pv = /^(niji\s*)?(\d+(?:\.\d+)?)$/.exec(lc(panel.version));
+    if (pv) { body.version = pv[2]; if (pv[1]) body.niji = true; else delete body.niji; }
+    if (MJ_SPEEDS.has(lc(panel.speed))) body.speed = lc(panel.speed);
+    // HD 只有 v8.1 / v8.2；没选版本时上游会自动补 --v 8.1
+    if (panel.hd === true && (!body.version || MJ_HD_VERSIONS.includes(body.version)) && !body.niji) body.hd = true;
+    if (Number.isFinite(Number(panel.stylize)) && panel.stylize !== null && panel.stylize !== "") body.stylize = Math.max(0, Math.min(1000, Math.round(Number(panel.stylize))));
+  }
   return body;
 }
 const MJ_PATH = (body) => (Array.isArray(body.image_urls) && body.image_urls.length ? "/v1/midjourney/generations/edits" : "/v1/midjourney/generations");
@@ -857,6 +870,7 @@ const uiSpec = (model) => {
       i2i: img.refs > 0,
       ...(img.mask ? { mask: true } : {}),
       ...(img.secs ? { secs: img.secs } : {}),
+      ...(img.mj ? { mj: { versions: MJ_VERSIONS.slice(), speeds: [...MJ_SPEEDS], hd: MJ_HD_VERSIONS.slice() } } : {}),
       search: false,
       style: false,
       camera: false,

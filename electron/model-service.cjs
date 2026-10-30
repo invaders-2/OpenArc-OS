@@ -569,6 +569,7 @@ class ModelService {
     const promptSized = impl.SIZE_VIA_PROMPT === true;
     const sizedPrompt = promptSized ? imageParams.withSizeRequirement(prompt, { size, ratio: hints && hints.ratio }) : prompt;
     const editHints = {
+      ...(hints && hints.mj ? { params: { mj: imageParams.sanitizeMidjourney(hints.mj) } } : {}),
       ...(hints && hints.ratio && !/自适应|auto/i.test(String(hints.ratio)) ? { ratio: String(hints.ratio) } : {}),
       ...(hints && hints.resolution ? { resolution: String(hints.resolution) } : {}),
     };
@@ -702,6 +703,8 @@ class ModelService {
             ...(specAllows(modelSpec, "style") && visual.style ? { style: visual.style } : {}),
             ...(specAllows(modelSpec, "camera") && visual.camera ? { camera: visual.camera } : {}),
             ...(specAllows(modelSpec, "search") && visual.webSearch ? { web_search: true } : {}),
+            // Midjourney 面板参数：只有规格声明了 mj 的模型才转发
+            ...(modelSpec && modelSpec.mj && params && params.mj ? { mj: imageParams.sanitizeMidjourney(params.mj) } : {}),
           }
         : cleanParams;
       // 对话式：尺寸 + 风格 / 摄影机 / 联网都写进【画面要求】（没有的项不写）。

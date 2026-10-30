@@ -18,7 +18,9 @@ export const TYPE_ICON = { image: "image", video: "video", text: "text", audio: 
 
 /* ---------- 参数 ---------- */
 export type CameraParams = { on: boolean; body: number; lens: number; focal: number; aperture: number };
-export type ImageParams = { model: string; ratio: string; size: string; count: number; search: boolean; style: string; camera: CameraParams };
+/** Midjourney 专属参数（只在模型规格带 mj 时出现）：version 为空 = 交给上游默认；"niji 7" 这种带 niji 前缀 */
+export type MjParams = { version?: string; speed?: string; hd?: boolean; stylize?: number };
+export type ImageParams = { model: string; ratio: string; size: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams };
 export type VideoMode = "文生视频" | "首帧" | "首尾帧" | "参考生视频" | "视频编辑" | "视频延长" | "参考视频生视频" | "数字人";
 export type VideoParams = { model: string; mode: VideoMode; ratio: string; res: string; dur: number; sound: boolean; times: number; /** 多镜头（高级设置） */ multiShot?: boolean; /** 生成模式（4K / 标准 / 专业…，仅规格声明的模型可用） */ genMode?: string; /** 极速模式（仅规格声明的模型可用） */ turbo?: boolean; /** 草稿模式（TapNow Draft Mode）：先按最低清晰度出草稿，满意后再出成片 */ draft?: boolean };
 export type TextParams = { model: string; search: boolean; /** 输出：文本 / 多维表格 / 分镜表 */ output?: "text" | "table" | "storyboard" };
@@ -88,6 +90,8 @@ export type ModelSpec = {
   genModes?: string[];
   /** 极速模式（TapNow 的 turbo）：只有规格声明时才出现 */
   turbo?: boolean;
+  /** Midjourney：可选版本 / 速度 / 支持 HD 的版本（服务商规格声明时才有） */
+  mj?: { versions: string[]; speeds: string[]; hd: string[] };
   // text
   vision?: boolean;
   // audio
@@ -248,7 +252,7 @@ const DEFAULTS: Record<GenKind, Partial<ModelSpec>> = {
 };
 /** 后端模型行 → 前端能力表。kind 由 capabilities 决定，能力细节按名字套预设。 */
 /** 服务商适配器给的面板规格（canvas/models 的 uiSpec）里，前端认的字段 */
-const UI_KEYS = ["ratios", "sizes", "batch", "maxRefs", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo"] as const;
+const UI_KEYS = ["ratios", "sizes", "batch", "maxRefs", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj"] as const;
 function fromProvider(kind: GenKind, ui?: Record<string, unknown> | null): Partial<ModelSpec> {
   if (!ui || typeof ui !== "object" || (ui.kind && ui.kind !== kind)) return {};
   const out: Record<string, unknown> = {};
@@ -269,6 +273,16 @@ function fromProvider(kind: GenKind, ui?: Record<string, unknown> | null): Parti
  * 套过来，服务端根本不支持却显示成可用（"假可用"）。
  * 没有 uiSpec 时才用 PRESETS 兜底，并把 specSource 标成 'guess'，面板据此显示「未验证」。
  */
+/** 面板上的速度名 */
+export const MJ_SPEED_LABEL: Record<string, string> = { relax: "慢速", fast: "快速", turbo: "极速" };
+/** 底部参数行的 Midjourney 摘要：「v8.1 · 快速 · HD · S250」（S = 风格化 --s）；全默认时显示「默认版本 · 快速」 */
+export function mjSummary(p?: MjParams): string {
+  const v = p?.version ? (/^niji/i.test(p.version) ? p.version.replace(/^niji\s*/i, "Niji ") : "v" + p.version) : "默认版本";
+  return [v, MJ_SPEED_LABEL[p?.speed || "fast"] || "快速", p?.hd ? "HD" : "", typeof p?.stylize === "number" ? "S" + p.stylize : ""].filter(Boolean).join(" · ");
+}
+/** 这个版本能不能开 HD（版本留空 = 上游默认会补 8.1，也可以开） */
+export function mjHdAllowed(spec: ModelSpec["mj"], version?: string): boolean { return !!spec && (!version || spec.hd.includes(version)); }
+
 export function specFor(row: { configId: string; label: string; vendor?: string; kind: GenKind; local?: boolean; vision?: boolean; search?: boolean; ui?: Record<string, unknown> | null; specSource?: string }): ModelSpec {
   const prov = fromProvider(row.kind, row.ui);
   const hasSpec = Object.keys(prov).length > 0;

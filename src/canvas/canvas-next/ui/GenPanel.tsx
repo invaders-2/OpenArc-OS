@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
 import { buildRequest, rolesFor, ROLE_LABEL, runNode, stopNode } from "../engine";
+import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
 import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, STYLES, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchOf, batchRows, OUTPUT_MODES, rowsToRun, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
@@ -270,6 +271,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
   if (kind === "image") {
     const ip = p as ImageParams;
     gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{ip.ratio} · {ip.size}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
+    if (m?.mj) gline.push(gdot("cmj"), seg("mj", <>{mjSummary(ip.mj)}</>, !!(ip.mj && (ip.mj.version || ip.mj.hd || typeof ip.mj.stylize === "number" || (ip.mj.speed && ip.mj.speed !== "fast")))));
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）
     if (m?.style) gline.push(gdot("c2"), <button key="chip-style" ref={styleRef} type="button" data-p="style" data-chip="style"
       className={"gp-chip style" + (ip.style !== "无" ? " on" : "")} title="风格仅基于图片生效" onClick={() => setStyleOpen(true)}>
@@ -426,6 +428,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
     {render(close)}
   </>, "up");
   if (k === "ratio") return pop(() => <RatioPop node={node} model={mm} disabled={dis} />);
+  if (k === "mj") return pop(() => <MjPop node={node} model={mm} disabled={dis} />);
   if (k === "count") return pop((close) => <><div className="mh">一次生成几张</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + ((cur().g.params as ImageParams).count === c ? " on" : "")} disabled={dis || !mm.batch?.includes(c)} onClick={() => { close(); set({ count: c }); }}>{c}×<span className="k">{!dis && mm.batch?.includes(c) ? (c > 1 ? (store.state.ui.batchMode === "stack" ? "堆叠在本节点" : "铺开成新节点") : "") : "该模型不支持"}</span></button>)}</>);
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);
   if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{(Object.keys(VMODES) as Array<keyof typeof VMODES>).map((x) => { const ok = (mm.modes || []).includes(x); return <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={!ok || dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{ok ? (x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need) : mm.name + " 不支持"}</span></span><span className="k tnum">{VMODES[x].api}</span></button>; })}</>);
@@ -453,6 +456,35 @@ function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?:
     <div className="mh">比例</div><div className="ratio-grid">{(m.ratios || []).map((r) => <button key={r} className={p.ratio === r ? "on" : ""} disabled={disabled} onClick={() => set({ ratio: r })}>{shape(r)}{r}</button>)}</div>
     {m.search ? <><div className="mh">联网搜索</div><div className="seg"><button className={p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: true })}>开</button><button className={!p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: false })}>关</button></div></> : <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>{m.name} 不支持联网搜索</span></div>}
   </>;
+}
+/** Midjourney 参数：版本 / 速度 / HD / 风格化（只列服务商规格声明的取值） */
+const MJ_STYLIZE = [100, 250, 500, 750, 1000];
+function MjPop({ node, model, disabled = false }: { node: CanvasNode; model?: ModelSpec; disabled?: boolean }) {
+  const store = useCtl().store; const p = useNodeParams<ImageParams>(node); const m = model || store.modelOf(node)!;
+  const spec = m.mj; const cur: MjParams = p.mj || {};
+  const set = (patch: Partial<MjParams>) => store.patchGen(node.id, (g) => {
+    const prev = (g.params as ImageParams).mj || {}; const next: MjParams = { ...prev, ...patch };
+    if (next.hd && !mjHdAllowed(spec, next.version)) next.hd = false; // 换到不支持 HD 的版本就自动关掉
+    return { params: { ...(g.params as ImageParams), mj: next } };
+  });
+  if (!spec) return null;
+  const hdOk = mjHdAllowed(spec, cur.version);
+  return <div className="mjpop" data-mjpop>
+    <div className="mh">版本</div><div className="seg wrap">
+      <button className={!cur.version ? "on" : ""} disabled={disabled} onClick={() => set({ version: undefined })}>默认</button>
+      {spec.versions.map((v) => <button key={v} data-mjv={v} className={cur.version === v ? "on" : ""} disabled={disabled} onClick={() => set({ version: v })}>{/^niji/i.test(v) ? v.replace(/^niji\s*/i, "Niji ") : "v" + v}</button>)}
+    </div>
+    <div className="mh">速度</div><div className="seg">{spec.speeds.map((v) => <button key={v} data-mjs={v} className={(cur.speed || "fast") === v ? "on" : ""} disabled={disabled} onClick={() => set({ speed: v })}>{MJ_SPEED_LABEL[v] || v}</button>)}</div>
+    <div className="mh">高清 HD</div><div className="seg">
+      <button data-mjhd="on" className={cur.hd ? "on" : ""} disabled={disabled || !hdOk} onClick={() => set({ hd: true })}>开</button>
+      <button className={!cur.hd ? "on" : ""} disabled={disabled} onClick={() => set({ hd: false })}>关</button>
+      {!hdOk ? <span style={{ alignSelf: "center", marginLeft: 6, color: "var(--fg3)", fontSize: 12 }}>只支持 {spec.hd.map((v) => "v" + v).join(" / ")}</span> : null}
+    </div>
+    <div className="mh">风格化</div><div className="seg wrap">
+      <button className={typeof cur.stylize !== "number" ? "on" : ""} disabled={disabled} onClick={() => set({ stylize: undefined })}>默认</button>
+      {MJ_STYLIZE.map((v) => <button key={v} className={cur.stylize === v ? "on" : ""} disabled={disabled} onClick={() => set({ stylize: v })}>{v}</button>)}
+    </div>
+  </div>;
 }
 function SegPop({ node, groups }: { node: CanvasNode; groups: Array<[string, "ratio" | "res", string[]]> }) {
   const store = useCtl().store; const p = useNodeParams<VideoParams>(node);
