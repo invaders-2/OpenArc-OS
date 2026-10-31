@@ -13,6 +13,7 @@ import { ROLE_LABEL, rolesFor } from "./engine";
 import { genOf, inputsOf, outOf, srcOf, textOf, type AudioParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
 import type { ChatMessage } from "./backend/types";
 import type { CanvasStore } from "./store";
+import { plainPrompt } from "./mentions";
 
 export const OPTIMIZE_MARK = "【OpenArc 提示词优化】";
 const MAX_IMAGES = 4;
@@ -51,7 +52,7 @@ export function optimizeContext(store: CanvasStore, node: CanvasNode): OptimizeC
   const own: OptimizeSource | undefined = kind === "image" && srcOf(node) ? { title: "当前节点已有的图片", kind, image: srcOf(node)! }
     : kind === "video" && o?.frame ? { title: "当前节点已有视频的画面", kind, image: o.frame }
       : kind === "text" && textOf(node).trim() ? { title: "当前节点已有的文字", kind, text: textOf(node).slice(0, MAX_TEXT) } : undefined;
-  return { kind, model: m, params: g.params as unknown as Record<string, unknown>, prompt: g.prompt, own, upstream };
+  return { kind, model: m, params: g.params as unknown as Record<string, unknown>, prompt: plainPrompt(g.prompt, store.state.doc), own, upstream };
 }
 
 /** 选一个对话模型来改写：文本节点用它自己的模型；有图时优先能看图的；否则第一个文本模型 */

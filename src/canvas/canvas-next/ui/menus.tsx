@@ -1,4 +1,5 @@
 /** 添加节点 / 右键 / ⊕ 端口菜单，以及节点内按钮动作 */
+import { plainPrompt } from "../mentions";
 import { createElementFrom, elementRefsOf } from "./Elements";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { addFiles, alignSelection, connect, copySelection, deleteSelection, duplicate, extractCurrentVersion, hasClip, paste, spreadHistory, title } from "../actions";
@@ -115,7 +116,7 @@ export function nodeMenu(ctl: Ctl, at: { x: number; y: number }) {
         <button className="mi" data-k="unstack" onClick={act(() => unstack(store, n.id))}><Icon name="split" size="s" />取消堆叠</button></>
         : n.kind === "group" ? <button className="mi" data-k="ungroup" onClick={act(() => ungroup(store, n.id))}><Icon name="layers" size="s" />取消分组<span className="k">⇧⌘G</span></button> : null}
       <div className="msep" />
-      <button className="mi" data-k="clip" onClick={act(async () => { try { await navigator.clipboard.writeText(out?.text || g?.prompt || title(n)); store.toast("已复制到剪贴板"); } catch { store.toast("剪贴板不可用"); } })}><Icon name="copy" size="s" />复制到剪贴板</button>
+      <button className="mi" data-k="clip" onClick={act(async () => { try { await navigator.clipboard.writeText(out?.text || (g?.prompt ? plainPrompt(g.prompt, store.state.doc) : "") || title(n)); store.toast("已复制到剪贴板"); } catch { store.toast("剪贴板不可用"); } })}><Icon name="copy" size="s" />复制到剪贴板</button>
       <div className="msep" />
       <button className="mi danger" data-k="del" onClick={act(() => deleteSelection(store))}><Icon name="trash" size="s" />删除{multi ? ` ${sel.length} 个` : ""}<span className="k">⌫, del</span></button>
     </>;

@@ -20,6 +20,7 @@ import { groupName, groupsOf, membersOf, searchNodes, type SearchKind, type Sear
 import { groupLabel, runKeyOf, runnableIds, runNodes, saveAsTemplate } from "./StackNode";
 import { bounds, defaultParams, genOf, NODE_TAG, inputsOf, isGenKind, outOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, type AnyParams, type GenKind, type TextParams, type VideoMode, type VideoParams } from "../model";
 import { emptyTable, withTable } from "../table";
+import { plainPrompt } from "../mentions";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { EdgeBadge } from "./Edges";
 import { Icon, Logo } from "./Icon";
@@ -266,7 +267,7 @@ function SearchModal({ ctl, close }: { ctl: Ctl; close: () => void }) {
     {groups.length ? <div className="tabs sscope" data-search-scope={sc}><button data-scope="world" className={sc === "world" ? "on" : ""} onClick={() => setScope("world")}><Icon name="map" size="xs" />整张画布</button>{groups.map((g) => <button key={g.id} data-scope={g.id} className={sc === g.id ? "on" : ""} onClick={() => setScope(g.id)}><Icon name="layers" size="xs" />{groupName(g)}<span className="tnum">{membersOf(doc, g.id).size}</span></button>)}</div> : null}
     <div className="tabs">{([["all", "全部"], ["image", "图片"], ["video", "视频"], ["text", "文本"], ["audio", "音频"], ["table", "表格"], ["group", "分组"]] as const).map(([k, l]) => <button key={k} data-kind={k} className={f === k ? "on" : ""} onClick={() => setF(k)}>{l}</button>)}</div>
     <div className="dbody" style={{ maxHeight: 360, padding: "0 12px 12px" }}>
-      {list.length ? list.map((n, i) => <NodeRow key={n.id} n={n} i={i} on={i === cur} onHover={() => setHi(i)} onClick={() => go(n)} sub={n.kind === "group" ? `${membersOf(doc, n.id).size} 个节点` : isGenKind(n.kind) ? (textOf(n) || genOf(n).prompt || TYPE_LABEL[n.kind]).slice(0, 60) : "多维表格"} extra={stackOf(doc, n.id) ? "在堆叠里" : inputsOf(doc, n.id).length ? inputsOf(doc, n.id).length + " 个输入" : ""} />) : <div style={{ minHeight: 240, display: "grid", placeItems: "center", color: "var(--fg3)" }}>{q ? "没有匹配的节点" : sc === "world" ? "画布上还没有这类节点" : "这个分组里没有这类节点"}</div>}
+      {list.length ? list.map((n, i) => <NodeRow key={n.id} n={n} i={i} on={i === cur} onHover={() => setHi(i)} onClick={() => go(n)} sub={n.kind === "group" ? `${membersOf(doc, n.id).size} 个节点` : isGenKind(n.kind) ? (textOf(n) || plainPrompt(genOf(n).prompt, doc) || TYPE_LABEL[n.kind]).slice(0, 60) : "多维表格"} extra={stackOf(doc, n.id) ? "在堆叠里" : inputsOf(doc, n.id).length ? inputsOf(doc, n.id).length + " 个输入" : ""} />) : <div style={{ minHeight: 240, display: "grid", placeItems: "center", color: "var(--fg3)" }}>{q ? "没有匹配的节点" : sc === "world" ? "画布上还没有这类节点" : "这个分组里没有这类节点"}</div>}
     </div>
   </>;
 }
@@ -1003,7 +1004,7 @@ function PinBar() {
   if (!groups.length) return null;
   const open = (el: HTMLElement, g: (typeof groups)[number]) => openPop(el, (close) => <div className="pinlist" data-pin-list={g.k}>
     <div className="mh"><i className="pdot" style={{ background: g.c }} />{TAG_NAME[g.k] || g.k}标记 · {g.list.length} 个节点</div>
-    {g.list.map((n) => <NodeRow key={n.id} n={n} onClick={() => { close(); const s = stackOf(doc, n.id); ctl.focusNode(s ? s.id : n.id); }} sub={(textOf(n) || genOf(n).prompt || TYPE_LABEL[n.kind as GenKind] || "").slice(0, 40)} />)}
+    {g.list.map((n) => <NodeRow key={n.id} n={n} onClick={() => { close(); const s = stackOf(doc, n.id); ctl.focusNode(s ? s.id : n.id); }} sub={(textOf(n) || plainPrompt(genOf(n).prompt, doc) || TYPE_LABEL[n.kind as GenKind] || "").slice(0, 40)} />)}
   </div>, "down");
   return <div id="pinbar" className="float cap">
     {groups.map((g) => <button key={g.k} className="pin-g tipB" data-pin={g.k} data-tip={`${TAG_NAME[g.k] || g.k} · ${g.list.length} 个节点`} onClick={(e) => open(e.currentTarget, g)}><i className="pdot" style={{ background: g.c }} /><span className="tnum">{g.list.length}</span></button>)}

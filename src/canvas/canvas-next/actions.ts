@@ -2,6 +2,7 @@
 import type { CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { autoVideoMode, connectBlock, genOf, inputsOf, isGenKind, NODE_DEFAULT_SIZE, uid, withGen, type GenKind, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
+import { appendMention, mentionable } from "./mentions";
 import { tableAutoSize, tableMedia, tableOf } from "./table";
 import { hiddenIds, isStack } from "./stack";
 
@@ -10,10 +11,24 @@ export function connect(store: CanvasStore, from: string, to: string, opts: { qu
   const block = connectBlock(store.state.doc, from, to);
   if (block) { if (!opts.quiet) store.toast(block); return null; }
   const e = store.addEdge(from, to);
+  // TapNow：连上的上游自动出现在下游提示词里（@ 引用胶囊）
+  if (isGenKind(store.node(to)?.kind || "") && mentionable(store.node(from))) addMention(store, to, from);
   afterInputsChanged(store, to);
   if (opts.select !== false) store.setUI({ sel: new Set([to]), edge: null });
   if (!opts.quiet) { const a = store.node(from)!, b = store.node(to)!; store.toast(`已连接：「${title(a)}」作为「${title(b)}」的第 ${inputsOf(store.state.doc, to).length} 个输入`); }
   return e;
+}
+/**
+ * 在节点提示词里加一个 @ 引用。第一次加时切到「引用模式」：先把已经连着的上游都补成引用，
+ * 这样旧节点原本会发送的输入不会因为切换而丢掉。
+ */
+export function addMention(store: CanvasStore, id: string, ref: string, section?: string) {
+  const n = store.node(id); if (!n || !isGenKind(n.kind)) return;
+  store.patchGen(id, (g) => {
+    let prompt = g.prompt;
+    if (g.refMode !== "mention") for (const x of inputsOf(store.state.doc, id)) if (x.node.id !== ref && mentionable(x.node)) prompt = appendMention(prompt, x.node.id);
+    return { prompt: appendMention(prompt, ref, section), refMode: "mention" };
+  });
 }
 export const title = (n: CanvasNode) => (isGenKind(n.kind) ? genOf(n).title : n.kind === "table" ? tableOf(n).title : n.text || n.kind);
 

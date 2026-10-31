@@ -42,7 +42,7 @@ export class Ctl {
     requestAnimationFrame(step);
   }
   focusNode(id: string) { const n = this.store.node(id); if (!n) return; this.store.setUI({ sel: new Set([id]), edge: null }); this.fitTo([n], 160, 1); }
-  focusPrompt() { setTimeout(() => (document.getElementById("gpPrompt") as HTMLTextAreaElement | null)?.focus(), 40); }
+  focusPrompt() { setTimeout(() => { const el = document.getElementById("gpPrompt") as HTMLElement | null; if (!el) return; el.focus(); if (el.isContentEditable) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = getSelection(); s?.removeAllRanges(); s?.addRange(r); } }, 40); }
 }
 
 export const CtlCtx = createContext<Ctl | null>(null);
