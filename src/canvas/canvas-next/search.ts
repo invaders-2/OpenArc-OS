@@ -7,6 +7,7 @@
 import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { title } from "./actions";
 import { genOf, isGenKind, textOf, type GenKind } from "./model";
+import { plainPrompt } from "./mentions";
 import { groupLabel } from "./stack";
 
 export type SearchKind = "all" | GenKind | "table" | "group";
@@ -22,12 +23,12 @@ export function membersOf(doc: CanvasDoc, gid: string): Set<string> {
   return out;
 }
 
-const haystack = (n: CanvasNode) => (n.kind === "group" ? groupName(n) : title(n) + " " + (isGenKind(n.kind) ? genOf(n).prompt + " " + textOf(n) : "")).toLowerCase();
+const haystack = (doc: CanvasDoc, n: CanvasNode) => (n.kind === "group" ? groupName(n) : title(n) + " " + (isGenKind(n.kind) ? plainPrompt(genOf(n).prompt, doc) + " " + textOf(n) : "")).toLowerCase();
 
 export function searchNodes(doc: CanvasDoc, opts: { q: string; kind: SearchKind; scope: SearchScope }): CanvasNode[] {
   const inScope = opts.scope === "world" ? null : membersOf(doc, opts.scope);
   const q = opts.q.trim().toLowerCase();
   return doc.nodes.filter((n) => (inScope ? inScope.has(n.id) : true)
     && (opts.kind === "all" ? n.kind !== "group" : opts.kind === "group" ? n.kind === "group" : n.kind === opts.kind)
-    && (!q || haystack(n).includes(q)));
+    && (!q || haystack(doc, n).includes(q)));
 }

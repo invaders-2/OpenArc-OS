@@ -71,6 +71,8 @@ export type GenData = {
   err?: string;
   /** 失败时的原始错误码（如 MODEL_TIMEOUT）：只在弹层里以 12px 灰字展示，便于排查 */
   errCode?: string;
+  /** 「引用模式」：插入过 @ 引用后，只发送提示词里 @ 到的上游（见 mentions.ts） */
+  refMode?: "mention";
 };
 
 /* ---------- 模型能力 ---------- */
@@ -396,6 +398,7 @@ export function genOf(node: CanvasNode): GenData {
     ...(raw.manual ? { manual: true } : {}), ...(raw.uploaded ? { uploaded: true } : {}), ...(raw.err ? { err: String(raw.err) } : {}),
     // 原始错误码（弹层里以「代码：…」展示；旧文档没有这个字段，读出来就是 undefined）
     ...(typeof raw.errCode === "string" && raw.errCode ? { errCode: raw.errCode } : {}),
+    ...(raw.refMode === "mention" ? { refMode: "mention" as const } : {}),
   };
 }
 /** 节点背景色（TapNow 背景颜色面板：无色 + 7 种低饱和色） */

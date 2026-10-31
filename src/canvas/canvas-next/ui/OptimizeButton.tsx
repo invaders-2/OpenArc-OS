@@ -6,7 +6,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { FALLBACK_TEXT, nodeError } from "../errorText";
-import { genOf } from "../model";
+import { genOf, inputsOf } from "../model";
+import { relinkMentions } from "../mentions";
 import { buildOptimizeMessages, canOptimize, cleanOptimized, optimizeContext, pickOptimizerModel } from "../promptOptimize";
 import { useCtl } from "./ctx";
 import { Icon } from "./Icon";
@@ -29,11 +30,12 @@ export function OptimizeButton({ node, draft, setDraft, className }: { node: Can
     const tm = pickOptimizerModel(store.state.models, ctx, needVision);
     if (!tm) { store.toast("还没有可用的文本模型，请在 设置 › 模型 里添加"); return; }
     const { messages, images } = buildOptimizeMessages(ctx, !!tm.vision);
+    const ups = inputsOf(store.state.doc, id).map((x) => x.node); const relink = (t: string) => relinkMentions(t, ups);
     const before = draft; const ctrl = new AbortController(); ac.current = ctrl; setBusy(true);
     try {
-      const out = await store.backend.chat({ canvasId: store.state.canvasId, configId: tm.id, messages, images }, (full) => { if (!ctrl.signal.aborted) setDraft(cleanOptimized(full)); }, ctrl.signal);
+      const out = await store.backend.chat({ canvasId: store.state.canvasId, configId: tm.id, messages, images }, (full) => { if (!ctrl.signal.aborted) setDraft(relink(cleanOptimized(full))); }, ctrl.signal);
       if (ctrl.signal.aborted) throw new Error("STOPPED");
-      const text = cleanOptimized(out); if (!text) throw new Error("EMPTY");
+      const text = relink(cleanOptimized(out)); if (!text) throw new Error("EMPTY");
       if (!store.node(id)) return;
       store.patchGen(id, { prompt: text }, { history: true }); setDraft(text);
       store.toast(`已用 ${esc(tm.name)} 优化提示词${needVision && !tm.vision ? "（该模型看不了图，只参考了文字）" : ""}，⌘Z 可撤销`, 3600);

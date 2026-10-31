@@ -3,12 +3,12 @@
  * 生成面板：输入（可拖动排序）→ 提示词（@ 引用上游分段）→ 提示 → 请求预览 → 底栏（模型 / 参数 / 张数 / 发送）。
  * 上游连着多维表格时，面板中间出现「生成输入」逐行列表与批量设置。
  */
-import { listElements } from "../elements";
-import { ElementMenuItems } from "./Elements";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { afterInputsChanged, title } from "../actions";
+import { addMention, afterInputsChanged, title } from "../actions";
+import { mentionable, unmentionedInputs } from "../mentions";
+import { PromptEditor } from "./PromptEditor";
 import { buildRequest, rolesFor, ROLE_LABEL, runNode, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
 import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, NODE_BG, NODE_TAG, placeholderSpec, tagColor, inputsOf, isGenKind, outOf, ratioWH, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
@@ -104,7 +104,8 @@ function GenPanel({ node }: { node: CanvasNode }) {
   const ctl = useCtl(); const store = ctl.store;
   const doc = useS((s) => s.doc); const run = useS((s) => s.runtime[node.id]); const preview = useS((s) => s.ui.preview); const pick = useS((s) => s.ui.pick); useS((s) => s.models);
   const kind = node.kind as GenKind; const g = genOf(node); const m = store.modelOf(node); const p = g.params;
-  const allIns = inputsOf(doc, node.id); const ins = allIns.filter((x) => x.node.kind !== "table"); const tables = allIns.filter((x) => x.node.kind === "table");
+  const allIns = inputsOf(doc, node.id); const unm = unmentionedInputs(node, allIns);
+  const ins = allIns.filter((x) => x.node.kind !== "table" && !unm.has(x.edge.id)); const tables = allIns.filter((x) => x.node.kind === "table");
   const { roles, ignored } = rolesFor(kind, p, m, ins);
   const imgIns = ins.filter((x) => x.node.kind === "image");
   const optsRef = useRef<HTMLDivElement>(null); const [fit, setFit] = useState(true);
@@ -139,6 +140,8 @@ function GenPanel({ node }: { node: CanvasNode }) {
     return () => removeEventListener("keydown", on);
   }, [kind, node.id, store]);
   const commitPrompt = (v: string) => { if (v !== genOf(store.node(node.id)!).prompt) store.patchGen(node.id, { prompt: v }); };
+  /** 编辑器每次改动：插入 @ 引用时立刻写回并切到引用模式（其余改动失焦时写回） */
+  const onPrompt = (v: string, o?: { mention?: boolean }) => { setDraft(v); if (o?.mention) store.patchGen(node.id, { prompt: v, refMode: "mention" }); };
 
   const warns: string[] = [];
   if (!m) warns.push(`还没有可用的${TYPE_LABEL[kind]}模型，请在 设置 › 模型 里添加。`);
@@ -169,35 +172,24 @@ function GenPanel({ node }: { node: CanvasNode }) {
       <div className="mh">输入 {i + 1} · {title(src)}</div>
       <button className="mi" disabled={i === 0} onClick={() => { close(); move(-1); }}><Icon name="up" size="s" />前移一位</button>
       <button className="mi" disabled={i === allIns.length - 1} onClick={() => { close(); move(1); }}><Icon name="down" size="s" />后移一位</button>
-      {src.kind === "text" ? <button className="mi" onClick={() => { close(); const key = Object.keys(sectionsOf(textOf(src)))[0] || ""; const v = (draft ? draft + " " : "") + "@" + title(src) + (key ? "·" + key : ""); setDraft(v); commitPrompt(v); ctl.focusPrompt(); }}><Icon name="link" size="s" />在提示词里引用</button> : null}
+      {mentionable(src) ? <button className="mi" data-k="mention" onClick={() => { close(); commitPrompt(draft); addMention(store, node.id, src.id); ctl.focusPrompt(); }}><Icon name="link" size="s" />在提示词里 @ 引用</button> : null}
       <button className="mi" onClick={() => { close(); ctl.focusNode(src.id); }}><Icon name="search" size="s" />在画布中定位</button>
       <button className="mi danger" onClick={() => { close(); store.removeEdge(edgeId); afterInputsChanged(store, node.id); }}><Icon name="x" size="s" />移除这个输入</button>
     </>);
   };
   /** 图片提示词里输入 /：快捷指令（TapNow Prompt shortcuts），↑↓ 选、↵ / Tab 确定、Esc 关 */
-  const slashMenu = (ta: HTMLTextAreaElement) => {
+  const slashMenu = (ta: HTMLElement) => {
     if (kind !== "image") return;
     const hasRef = ins.some((x) => x.node.kind === "image");
     const put = (sc: PromptShortcut) => {
-      const v = ta.value.replace(/\/$/, "") + sc.prompt; setDraft(v); commitPrompt(v);
+      const v = draft.replace(/\/\s*$/, "") + sc.prompt; setDraft(v); commitPrompt(v);
       if (sc.ratio && (!m?.ratios?.length || m.ratios.includes(sc.ratio))) set({ ratio: sc.ratio } as Partial<ImageParams>);
       if (sc.needRef && !hasRef) store.toast("这个指令要先连一张参考图");
-      setTimeout(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = v.length; }, 0);
+      setTimeout(() => ta.focus(), 0);
     };
     openPop(ta, (close) => <SlashList onPick={(sc) => { close(); put(sc); }} onClose={() => { close(); ta.focus(); }} />);
   };
-  const refMenu = (ta: HTMLTextAreaElement) => {
-    const opts: Array<[string, string]> = []; ins.forEach((x) => { if (x.node.kind === "text") Object.keys(sectionsOf(textOf(x.node))).forEach((k) => opts.push([title(x.node), k])); });
-    const els = listElements();
-    if (!opts.length && !els.length) return store.toast("没有可引用的内容：连一个输出“海报1/海报2…”的文本节点，或把图片存成元素后用 @名字 引用");
-    const put = (tag: string) => { const v = ta.value.replace(/@$/, "@" + tag + " "); setDraft(v); commitPrompt(v); setTimeout(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = v.length; }, 0); };
-    openPop(ta, (close) => <>
-      {opts.length ? <><div className="mh">引用上游文本中的一段</div>{opts.map(([t, k]) => <button key={t + k} className="mi" onClick={() => { close(); put(t + "·" + k); }}><Icon name="text" size="s" />{t} › {k}</button>)}</> : null}
-      {els.length ? <><div className="mh">元素</div><ElementMenuItems onPick={(e) => { close(); put(e.name); }} /></> : null}
-    </>);
-  };
-
-  const ph = kind === "text" ? (g.manual ? "这是手写文本节点。写一条指令可以让模型改写它，或双击节点直接编辑" : (p as TextParams).output === "table" ? "描述要拆成哪些行、每行包含什么，上游文字和素材会一起发送" : (p as TextParams).output === "storyboard" ? "描述这条片子的内容，会拆成逐镜头的分镜表" : "写给模型的指令，上游连进来的文字和图片会作为上下文") : kind === "video" ? "描述镜头运动、主体动作和氛围" : kind === "audio" ? "描述想要的音乐或声音" : "描述任何你想要生成的内容，输入 @ 引用上游文本或元素";
+  const ph = kind === "text" ? (g.manual ? "这是手写文本节点。写一条指令可以让模型改写它，或双击节点直接编辑" : (p as TextParams).output === "table" ? "描述要拆成哪些行、每行包含什么，上游文字和素材会一起发送" : (p as TextParams).output === "storyboard" ? "描述这条片子的内容，会拆成逐镜头的分镜表" : "写给模型的指令，输入 @ 引用上游节点") : kind === "video" ? "描述镜头运动、主体动作和氛围，输入 @ 引用上游节点" : kind === "audio" ? "描述想要的音乐或声音，输入 @ 引用上游节点" : "描述任何你想要生成的内容，输入 @ 引用上游节点";
   // 视频编辑器：TapNow 排法 —— 顶部参考缩略图（首帧/尾帧）+ 交换 + 「+」，下面提示词；
   // 底部一行左边「模型 · 生成方式 · 比例 · 清晰度 · 时长」文字值，右边 次数 + 圆形发送；音频收成行首图标。
   if (kind === "video") {
@@ -247,11 +239,10 @@ function GenPanel({ node }: { node: CanvasNode }) {
         <button className="vp-add tipB" data-p="addin" data-tip="添加参考图" onClick={(e) => addMenu(e.currentTarget)}><Icon name="plus" size="s" /></button>
         {m?.modes?.includes("视频编辑") ? <button className="vp-object" data-p="object-replace" disabled={busy} onClick={() => { set({ mode: "视频编辑" }); const next = draft.trim() || "替换源视频中的目标对象，保持其他人物、背景、光照、镜头运动和场景连续性不变"; setDraft(next); commitPrompt(next); }}><Icon name="wand" size="xs" />对象替换</button> : null}
       </div>
-      <textarea id="gpPrompt" className="vp-prompt" placeholder={ph} value={draft}
-        onChange={(e) => { setDraft(e.target.value); if (e.target.value.endsWith("@")) refMenu(e.target); }} onBlur={() => commitPrompt(draft)}
-        onKeyDown={(e) => { e.stopPropagation(); if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } if (e.key === "Escape") { (e.target as HTMLTextAreaElement).blur(); store.setUI({ sel: new Set(), pick: null }); } }} />
+      <PromptEditor node={node} className="vp-prompt" placeholder={ph} value={draft} onChange={onPrompt} onCommit={commitPrompt} onSend={send} onEscape={() => store.setUI({ sel: new Set(), pick: null })} />
       {tables.length ? <BatchPanel node={node} /> : null}
-      {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
+      {unm.size ? <UnrefWarn node={node} ids={[...unm]} onAdd={() => commitPrompt(draft)} /> : null}
+    {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
       <div className="vp-foot">
         <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>
         <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="vp-audio opt" />
@@ -308,7 +299,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
     <div className="gp-in">
       <button className={"sq tipT" + (pick === node.id ? " on" : "")} data-p="pick" data-tip="从画布选择输入" onClick={() => { const on = pick !== node.id; store.setUI({ pick: on ? node.id : null }); if (on) store.toast("点画布上的节点，把它连成这个节点的输入；Esc 结束"); }}><Icon name="cursor" size="s" /></button>
       {allIns.map((x) => { const src = srcOf(x.node); return (
-        <button key={x.edge.id} className={"chip-in" + (src ? "" : " txt") + (ignored.has(x.edge.id) ? " ignored" : "")} data-chip={x.edge.id} title={title(x.node)} draggable={false}
+        <button key={x.edge.id} className={"chip-in" + (src ? "" : " txt") + (ignored.has(x.edge.id) || unm.has(x.edge.id) ? " ignored" : "") + (unm.has(x.edge.id) ? " unref" : "")} data-chip={x.edge.id} title={unm.has(x.edge.id) ? `「${title(x.node)}」没有在提示词里 @ 引用，这次不会发送` : title(x.node)} draggable={false}
           onPointerDown={(e) => onChipDown(e, x.edge.id)} onPointerEnter={() => store.setUI({ hlEdge: x.edge.id, hlNode: x.node.id })} onPointerLeave={() => store.setUI({ hlEdge: null, hlNode: null })}>
           {src ? <ChipImg src={src} /> : <Icon name={x.node.kind === "table" ? "grid" : TYPE_ICON[x.node.kind as GenKind] || "layers"} size="s" />}
           <span className="ord">{x.order + 1}</span>
@@ -322,9 +313,9 @@ function GenPanel({ node }: { node: CanvasNode }) {
       <span className="grow" />
       <button className={"linkbtn" + (preview ? " on" : "")} data-p="preview" onClick={() => store.setUI({ preview: !preview })}><Icon name="text" size="xs" />请求预览</button>
     </div>
-    <textarea id="gpPrompt" placeholder={ph} value={draft} onChange={(e) => { setDraft(e.target.value); if (e.target.value.endsWith("@")) refMenu(e.target); else if (/(^|\s)\/$/.test(e.target.value)) slashMenu(e.target); }} onBlur={() => commitPrompt(draft)}
-      onKeyDown={(e) => { e.stopPropagation(); if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } if (e.key === "Escape") { (e.target as HTMLTextAreaElement).blur(); store.setUI({ sel: new Set(), pick: null }); } }} />
+    <PromptEditor node={node} placeholder={ph} value={draft} onChange={onPrompt} onCommit={commitPrompt} onSend={send} onEscape={() => store.setUI({ sel: new Set(), pick: null })} onSlash={kind === "image" ? () => slashMenu(document.getElementById("gpPrompt") as HTMLElement) : undefined} />
     {tables.length ? <BatchPanel node={node} /> : null}
+    {unm.size ? <UnrefWarn node={node} ids={[...unm]} onAdd={() => commitPrompt(draft)} /> : null}
     {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
     {preview ? <div className="gp-prev"><pre>{JSON.stringify(previewOf(ctl, node), null, 2)}</pre></div> : null}
     <div className="gp-foot">
@@ -371,6 +362,15 @@ function videoMore(store: CanvasStore, node: CanvasNode, anchor: Element) {
   }, "up");
 }
 
+
+/** 引用模式下：已连接但没被 @ 的上游不会发送，给一行提示和「全部引用」 */
+function UnrefWarn({ node, ids, onAdd }: { node: CanvasNode; ids: string[]; onAdd: () => void }) {
+  const ctl = useCtl(); const store = ctl.store; const doc = useS((s) => s.doc);
+  const names = ids.map((e) => doc.edges.find((x) => x.id === e)).map((e) => e && store.node(e.from)).filter((n): n is CanvasNode => !!n);
+  if (!names.length) return null;
+  return <div className="gp-warn unref" data-warn="unref"><Icon name="link" size="s" /><span>{names.slice(0, 2).map((n) => `「${title(n)}」`).join("")}{names.length > 2 ? ` 等 ${names.length} 个` : ""}已连接但没有 @ 引用，这次不会发送</span>
+    <button className="linkbtn" data-act="ref-all" onClick={() => { onAdd(); names.forEach((n) => addMention(store, node.id, n.id)); ctl.focusPrompt(); }}>全部引用</button></div>;
+}
 
 function ChipImg({ src }: { src: string }) { const u = useAssetUrl(src); return u ? <img src={u} alt="" draggable={false} /> : <Icon name="image" size="s" />; }
 

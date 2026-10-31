@@ -83,7 +83,7 @@ test("③ 界面接线", () => {
   assert.match(read("src/canvas/tapnow/AgentPanel.tsx"), /if \(activeMic\) \{ try \{ activeMic\.stop\(\)/);
   const gp = read("src/canvas/canvas-next/ui/GenPanel.tsx");
   assert.match(gp, /node\.kind === "audio" && out\) items = \[tagBtn\(\)/);
-  assert.match(gp, /slashMenu\(e\.target\)/); assert.match(gp, /id: "angles9", name: "多角度九宫格"/);
+  assert.match(gp, /onSlash=\{kind === "image" \? \(\) => slashMenu\(/); assert.match(gp, /id: "angles9", name: "多角度九宫格"/);
   const vt = read("src/canvas/canvas-next/ui/VideoTools.tsx");
   assert.match(vt, /data-vai-dir/); assert.match(vt, /data-rt="cut"/); assert.match(vt, /retakeSegments\(store, node/);
   assert.match(read("src/canvas/canvas-next/ui/Viewport.tsx"), /reconcileGroups\(store\.state\.doc/);

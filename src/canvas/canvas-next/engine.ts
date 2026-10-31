@@ -12,6 +12,7 @@ import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { GenError, type GenInput, type GenRequest } from "./backend/types";
 import { applyElements, elementInputs } from "./elements";
 import { nodeError } from "./errorText";
+import { plainPrompt, resolveMentions, unmentionedInputs, type SentRef } from "./mentions";
 import { autoVideoMode, clamp, draftRes, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { batchOf, batchRows, ROLE_META, fillGroupColumns, groupInputs, groupNote, keepMediaCells, withStoryboardMedia, emptyRunHint, fillTargetOf, parseTableJson, planRow, repairPrompt, rowHasFirst, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableMedia, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type FillTarget, type TableData } from "./table";
@@ -39,15 +40,17 @@ export function rolesFor(kind: GenKind, p: unknown, m: ModelSpec | undefined, in
 }
 export const ROLE_LABEL: Record<GenInput["role"], string> = { reference: "参考", first_frame: "首帧", last_frame: "尾帧", source_video: "源视频", reference_video: "参考视频", driving_audio: "驱动音频", portrait: "人像", context: "上下文" };
 
-/** 把 @节点·段落 换成段落原文；没被引用的上游文本作为上下文附在后面 */
-export function resolvePrompt(doc: CanvasDoc, node: CanvasNode, extra = ""): string {
-  const ins = inputsOf(doc, node.id); const g = genOf(node);
+/** 把 @节点·段落 换成段落原文、@{节点} 换成「图1」/原文；没被引用的上游文本作为上下文附在后面 */
+export function resolvePrompt(doc: CanvasDoc, node: CanvasNode, extra = "", sent?: SentRef[]): string {
+  const all = inputsOf(doc, node.id); const g = genOf(node);
+  const skip = unmentionedInputs(node, all); const ins = all.filter((x) => !skip.has(x.edge.id));
   const refs = refsIn(g.prompt, ins);
   let p = g.prompt;
   for (const r of refs.found) p = p.replace(new RegExp("@" + escapeRe(genOf(r.node).title) + "·" + r.key), `「${r.text}」`);
-  p = applyElements(p);
+  const mm = resolveMentions(p, doc, sent || ins.filter((x) => isGenKind(x.node.kind) && x.node.kind !== "text").map((x) => ({ nodeId: x.node.id, kind: x.node.kind as GenKind })));
+  p = applyElements(mm.text);
   if (node.kind === "text") return [p, extra].filter((s) => s.trim()).join("\n\n");
-  const refNodes = new Set(refs.found.map((r) => r.node.id));
+  const refNodes = new Set([...refs.found.map((r) => r.node.id), ...mm.usedText]);
   const ctx = ins.filter((x) => x.node.kind === "text" && !refNodes.has(x.node.id) && textOf(x.node).trim()).map((x) => textOf(x.node).trim());
   return [...ctx, p, extra].filter((s) => s.trim()).join("\n");
 }
@@ -60,7 +63,8 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRo
   // 表格的一行：时长 / 比例 / 首尾帧按行定（planRow），这一行自带图时生成节点自己连的图片不再发送
   const plan = row ? planRow(node.kind, g.params, m, row) : null;
   const eff = plan ? plan.params : g.params;
-  const ins = inputsOf(doc, node.id).filter((x) => x.node.kind !== "table" && !(plan?.ownImages && x.node.kind === "image"));
+  const skip = unmentionedInputs(node, inputsOf(doc, node.id));
+  const ins = inputsOf(doc, node.id).filter((x) => x.node.kind !== "table" && !skip.has(x.edge.id) && !(plan?.ownImages && x.node.kind === "image"));
   const { roles, ignored } = rolesFor(node.kind, eff, m, ins);
   const inputs: GenInput[] = ins.filter((x) => !ignored.has(x.edge.id)).map((x) => ({ nodeId: x.node.id, title: genOf(x.node).title, kind: x.node.kind as GenKind, order: x.order + 1, role: roles.get(x.edge.id) || "context", url: outOf(x.node)?.url || (x.node.kind === "video" ? outOf(x.node)?.frame : undefined), text: x.node.kind === "text" ? textOf(x.node) : undefined }));
   if (plan) plan.inputs.forEach((ri) => { if (!inputs.some((i) => i.nodeId === ri.nodeId)) inputs.push({ ...ri, order: inputs.length + 1 }); });
@@ -69,7 +73,7 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRo
   const vm = node.kind === "video" ? (eff as VideoParams).mode : undefined;
   // 草稿模式：按模型最低清晰度出片（请求预览里看到的就是实际发出的清晰度）
   const params = node.kind === "video" && (eff as VideoParams).draft ? { ...(eff as VideoParams), res: draftRes(eff as VideoParams, m) } : eff;
-  return { canvasId: store.state.canvasId, nodeId: node.id, kind: node.kind, model: m, prompt: g.prompt, resolvedPrompt: resolvePrompt(doc, node, row?.text || ""), params, inputs, ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
+  return { canvasId: store.state.canvasId, nodeId: node.id, kind: node.kind, model: m, prompt: g.prompt, resolvedPrompt: resolvePrompt(doc, node, row?.text || "", inputs.filter((x) => x.kind !== "text").map((x) => ({ nodeId: x.nodeId, kind: x.kind, role: x.role }))), params, inputs, ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
 }
 
 /** 历史记录里留的结果（不带版本元数据） */
@@ -106,7 +110,8 @@ export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}
   // 上游有表格 → 逐行批量
   if (inputsOf(doc, id).some((x) => x.node.kind === "table") && !opts.inPlace) return runTableBatch(store, id);
   const frozen = (node.data as { frozen?: GenRequest } | undefined)?.frozen;
-  const ins = inputsOf(doc, id).filter((x) => x.node.kind !== "table");
+  const skipIns = unmentionedInputs(node, inputsOf(doc, id));
+  const ins = inputsOf(doc, id).filter((x) => x.node.kind !== "table" && !skipIns.has(x.edge.id));
   const notReady = frozen ? [] : ins.filter((x) => isGenKind(x.node.kind) && !outOf(x.node) && !store.state.runtime[x.node.id]);
   if (notReady.length && !opts.chain) { store.toast(`上游「${genOf(notReady[0].node).title}」还没有结果。右键选「运行到此（含上游）」可以一起跑`); return false; }
   if (!frozen && !g.prompt.trim() && !ins.length && !(node.kind === "text" && g.manual)) { store.toast("先写一句提示词，或者连一个上游节点"); return false; }
@@ -147,7 +152,7 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
     applyOutputs(store, id, outs);
     store.setRun(id, null);
     const cur = store.node(id)!;
-    store.logRun({ node: id, title: label || genOf(cur).title, type: cur.kind as GenKind, model: req.model.name, status: "done", secs: Math.round((performance.now() - t0) / 1000), thumb: outOf(cur)?.url && cur.kind === "image" ? outOf(cur)!.url : outOf(cur)?.frame, out: runOut(outOf(cur)), prompt: req.prompt });
+    store.logRun({ node: id, title: label || genOf(cur).title, type: cur.kind as GenKind, model: req.model.name, status: "done", secs: Math.round((performance.now() - t0) / 1000), thumb: outOf(cur)?.url && cur.kind === "image" ? outOf(cur)!.url : outOf(cur)?.frame, out: runOut(outOf(cur)), prompt: plainPrompt(req.prompt, store.state.doc) });
     return true;
   } catch (err) {
     store.setRun(id, null);
