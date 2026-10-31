@@ -83,7 +83,9 @@ export function PromptEditor(props: PromptEditorProps) {
     } else th.innerHTML = svg(n ? kindIcon(n.kind) : "x");
     const lb = document.createElement("span"); lb.className = "pm-t";
     lb.textContent = n ? title(n) + (sec ? " · " + sec : "") : "已删除";
-    span.append(th, lb);
+    // 悬停时缩略图换成 ×（TapNow）：点 × 删掉这个引用
+    const x = document.createElement("span"); x.className = "pm-x"; x.dataset.rm = "1"; x.innerHTML = svg("x"); x.title = "删除引用";
+    span.append(th, x, lb);
     if (n && linked && isGenKind(n.kind) && n.kind !== "text") { const b = document.createElement("span"); b.className = "pm-n"; b.textContent = KIND_SHORT[n.kind as GenKind] + kindIndex(ins, id); span.appendChild(b); }
     return span;
   };
@@ -238,6 +240,12 @@ export function PromptEditor(props: PromptEditorProps) {
   const onLeave = () => { if (hover) { setHover(null); store.setUI({ hlEdge: null, hlNode: null }); } };
   const onClick = (e: React.MouseEvent) => {
     const c = chipOf(e.target); if (!c) return;
+    if ((e.target as Element).closest("[data-rm]")) {
+      e.preventDefault(); const sp = c.nextSibling; const r = document.createRange(); r.setStartBefore(c); r.collapse(true);
+      if (sp && sp.nodeType === 3 && /^[\u00a0 ]/.test(sp.nodeValue || "")) sp.nodeValue = (sp.nodeValue || "").slice(1);
+      c.remove(); ref.current!.focus(); const sel = getSelection()!; sel.removeAllRanges(); sel.addRange(r);
+      setHover(null); store.setUI({ hlEdge: null, hlNode: null }); emit(); propsRef.current.onCommit(serialize(ref.current!)); return;
+    }
     if (c.classList.contains("off")) { const id = c.dataset.ref!; if (connect(store, id, node.id, { select: false, quiet: true })) store.toast(`已重新连接「${title(store.node(id)!)}」`); return; }
     c.classList.remove("pick"); void c.offsetWidth; c.classList.add("pick");
   };
@@ -379,10 +387,13 @@ function ChipPreview({ id, sec, rect, ins }: { id: string; sec?: string; rect: D
     setPos({ left: Math.max(8, Math.min(rect.left + rect.width / 2 - w / 2, innerWidth - w - 8)) - root.left, top: top - root.top });
   }, [rect]);
   if (!n) return null;
-  const inp = ins.find((x) => x.node.id === id);
+  const linked = ins.some((x) => x.node.id === id);
   const body = n.kind === "text" ? (sec ? sectionsOf(textOf(n))[sec] : textOf(n)) || "（空文本）" : "";
-  return <div ref={box} className="pm-prev" style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 }}>
-    {u ? <img src={u} alt="" draggable={false} /> : n.kind === "text" ? <p>{body.slice(0, 160)}</p> : <div className="pm-pv-ic"><Icon name={n.kind === "audio" ? "audio" : n.kind === "video" ? "video" : "image"} /></div>}
-    <div className="pm-pv-t"><b>{title(n)}{sec ? " · " + sec : ""}</b><span>{inp ? `${TYPE_LABEL[n.kind as GenKind] || ""} · 第 ${inp.order + 1} 个输入` : "未连接 · 点一下重新连上"}</span></div>
+  const st = pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 };
+  // TapNow：图片 / 视频只给一张带描边的图；文本 / 音频是一张小卡片，底部居中「@名字」
+  if (u) return <div ref={box} className={"pm-prev img" + (linked ? "" : " off")} style={st}><img src={u} alt="" draggable={false} /></div>;
+  return <div ref={box} className={"pm-prev card" + (linked ? "" : " off")} style={st}>
+    {n.kind === "text" ? <p>{body.slice(0, 80)}</p> : <div className="pm-pv-ic"><Icon name={n.kind === "audio" ? "audio" : n.kind === "video" ? "video" : "image"} /></div>}
+    <b>@{title(n)}{sec ? "·" + sec : ""}</b>
   </div>;
 }
