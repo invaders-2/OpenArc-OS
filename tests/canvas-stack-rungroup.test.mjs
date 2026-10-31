@@ -54,6 +54,22 @@ test("堆叠：收起成员、取消后回到画布；拖入、移出、少于 2
   assert.equal(M.hiddenIds(store.state.doc.nodes).size, 0);
 });
 
+test("堆叠（TapNow 样式）：和最上面一张一样大；成员 → 所属堆叠；封面指纹只随封面变化；拖出放到指定位置", () => {
+  const store = makeStore([img("a", 0, { w: 200, h: 266 }), img("b", 300), img("c", 600)]);
+  store.setUI({ sel: new Set(["a", "b", "c"]) });
+  const s = M.stackSelection(store);
+  const a = store.node("a");
+  assert.equal(store.node(s.id).w, a.w); assert.equal(store.node(s.id).h, a.h);
+  assert.deepEqual([...M.stackOwners(store.state.doc.nodes)], [["a", s.id], ["b", s.id], ["c", s.id]]);
+  const k1 = M.stackCoverKey(store.state.doc, store.node(s.id));
+  store.mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === s.id ? { ...n, x: n.x + 40 } : n)) }));
+  assert.equal(M.stackCoverKey(store.state.doc, store.node(s.id)), k1, "只挪位置时封面指纹不变（不重绘）");
+  M.takeFromStack(store, s.id, "b", { x: 1000, y: 500 });
+  assert.equal(store.node("b").x, 1000); assert.equal(store.node("b").y, 500);
+  assert.notEqual(M.stackCoverKey(store.state.doc, store.node(s.id)), k1, "移出成员后封面指纹变化");
+  assert.ok(!store.state.ui.sel.has("b"), "从展开视图拖出时不切换选中");
+});
+
 test("堆叠：少于 2 个不成叠；不能叠进分组 / 别的叠", () => {
   const store = makeStore([img("a", 0)]);
   store.setUI({ sel: new Set(["a"]) });

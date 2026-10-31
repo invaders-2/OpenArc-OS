@@ -3,7 +3,7 @@ import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
 import { inputsOf } from "../model";
 import { useCtl, useS } from "./ctx";
-import { hiddenIds } from "../stack";
+import { stackOwners } from "../stack";
 
 const portPos = (n: CanvasNode, side: "in" | "out") => ({ x: side === "out" ? n.x + n.w : n.x, y: n.y + 24 + n.h / 2 });
 function pathD(a: { x: number; y: number }, b: { x: number; y: number }) { const dx = Math.max(60, Math.abs(b.x - a.x) * .5); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; }
@@ -14,12 +14,14 @@ export function Edges() {
   const seen = useRef<Set<string> | null>(null);
   const isNew = (id: string) => { if (!seen.current) return false; return !seen.current.has(id); };
   useEffect(() => { seen.current = new Set(doc.edges.map((e) => e.id)); });
-  // 收在堆叠里的节点不显示，连到它们的线也不画（关系仍然生效）
-  const hidden = hiddenIds(doc.nodes);
-  const byId = new Map(doc.nodes.filter((n) => !hidden.has(n.id)).map((n) => [n.id, n]));
-  const items: React.ReactElement[] = [];
+  // 收在堆叠里的节点不单独显示：连到它们的线改连到堆叠上（TapNow），同一对端点只画一条
+  const owner = stackOwners(doc.nodes);
+  const byId = new Map(doc.nodes.filter((n) => !owner.has(n.id)).map((n) => [n.id, n]));
+  const items: React.ReactElement[] = []; const pairs = new Set<string>();
   for (const e of doc.edges) {
-    const a = byId.get(e.from), b = byId.get(e.to); if (!a || !b) continue;
+    const a = byId.get(owner.get(e.from) || e.from), b = byId.get(owner.get(e.to) || e.to); if (!a || !b || a === b) continue;
+    const viaStack = owner.has(e.from) || owner.has(e.to);
+    if (viaStack) { const pk = a.id + ">" + b.id; if (pairs.has(pk)) continue; pairs.add(pk); }
     const p1 = portPos(a, "out"), p2 = portPos(b, "in"); const d = pathD(p1, p2);
     const sel = ui.edge === e.id || ui.sel.has(b.id) || ui.sel.has(a.id);
     const draw = isNew(e.id);
@@ -42,6 +44,7 @@ export function Edges() {
         </g>,
       );
     }
+    if (viaStack) continue;
     const ins = inputsOf(doc, b.id); const ord = ins.findIndex((x) => x.edge.id === e.id);
     if (ins.length > 1 || sel) items.push(<g key={"b" + e.id} className={"badge" + (ui.edge === e.id || ui.sel.has(b.id) ? " sel" : "")} transform={`translate(${p2.x - 14},${p2.y})`}><circle r="8" /><text>{ord + 1}</text></g>);
   }

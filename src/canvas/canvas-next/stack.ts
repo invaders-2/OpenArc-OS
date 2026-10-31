@@ -28,6 +28,24 @@ export function hiddenIds(nodes: CanvasNode[]): Set<string> {
   return out;
 }
 
+/** 成员 id → 所在堆叠 id */
+export function stackOwners(nodes: CanvasNode[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const n of nodes) if (isStack(n)) (n.children || []).forEach((id) => out.set(id, n.id));
+  return out;
+}
+
+/* ---------- 动效交接：数据层记下「从哪飞来」，节点 / 堆叠挂载时读走并播放 ---------- */
+type Rect = { x: number; y: number; w: number; h: number };
+/** 新建的堆叠：成员原来的位置（世界坐标），堆叠出现时这些卡片从原位飞进来 */
+const flyIn = new Map<string, Array<Rect & { id: string }>>();
+/** 从堆叠里出来的节点：从堆叠的位置飞到自己的位置 */
+const flyOut = new Map<string, Rect>();
+export const takeStackFlyIn = (sid: string) => { const v = flyIn.get(sid); flyIn.delete(sid); return v; };
+export const takeFlyOut = (id: string) => { const v = flyOut.get(id); flyOut.delete(id); return v; };
+const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+const box = (n: CanvasNode): Rect => ({ x: n.x, y: n.y, w: n.w, h: n.h });
+
 /** 节点所在的叠（没有返回 undefined） */
 export const stackOf = (doc: CanvasDoc, id: string) => doc.nodes.find((n) => isStack(n) && (n.children || []).includes(id));
 
@@ -45,7 +63,10 @@ export function stackSelection(store: CanvasStore): CanvasNode | null {
   if (ids.length > STACK_MAX) { store.toast(`一叠最多 ${STACK_MAX} 个节点，当前选中 ${ids.length} 个`); return null; }
   const items = ids.map((id) => store.node(id)!).sort((a, b) => a.y - b.y || a.x - b.x);
   const first = items[0];
-  const s: CanvasNode = { id: uid("s"), kind: "group", x: first.x, y: first.y, w: STACK_SIZE.w, h: STACK_SIZE.h, text: "堆叠", children: items.map((n) => n.id), data: { stack: true } };
+  // TapNow：堆叠和最上面那张一样大（保持它的比例），叠在它原来的位置
+  const w = first.w || STACK_SIZE.w, h = first.h || STACK_SIZE.h;
+  const s: CanvasNode = { id: uid("s"), kind: "group", x: first.x, y: first.y, w, h, text: "堆叠", children: items.map((n) => n.id), data: { stack: true } };
+  if (!reduced()) flyIn.set(s.id, items.map((n) => ({ id: n.id, ...box(n) })));
   store.addNodes([s], [], { select: true, history: true });
   store.toast(`已把 ${items.length} 个节点堆叠 · 双击展开`);
   return s;
@@ -55,6 +76,7 @@ export function stackSelection(store: CanvasStore): CanvasNode | null {
 export function unstack(store: CanvasStore, sid: string) {
   const s = store.node(sid); if (!isStack(s)) return;
   const items = stackItems(store.state.doc, s!);
+  if (!reduced()) items.forEach((n) => flyOut.set(n.id, box(s!)));
   store.mutate((d) => ({ ...d, nodes: d.nodes.filter((n) => n.id !== sid) }), { history: true });
   store.setUI({ sel: new Set(items.map((n) => n.id)) });
   store.toast(`已取消堆叠：${items.length} 个节点回到画布`);
@@ -79,29 +101,39 @@ export function addToStack(store: CanvasStore, sid: string, ids: string[]) {
 /**
  * 从叠里拿出一个节点，放到叠右侧。叠里只剩 1 个时自动解散（TapNow：少于 2 个不成叠）。
  */
-export function takeFromStack(store: CanvasStore, sid: string, id: string) {
+export function takeFromStack(store: CanvasStore, sid: string, id: string, at?: { x: number; y: number }) {
   const s = store.node(sid); if (!isStack(s)) return;
   const rest = (s!.children || []).filter((x) => x !== id && store.node(x));
   const n = store.node(id); if (!n) return;
   const doc = store.state.doc;
-  // 叠右侧找一处空位
-  const x = s!.x + s!.w + 60; let y = s!.y;
+  // 指定了位置（从展开视图里拖出来）就放那里；否则在叠右侧找一处空位
+  const x = at ? Math.round(at.x) : s!.x + s!.w + 60; let y = at ? Math.round(at.y) : s!.y;
   const hidden = hiddenIds(doc.nodes);
   const hit = (yy: number) => doc.nodes.some((o) => o.id !== id && !hidden.has(o.id) && o.x < x + n.w + 20 && o.x + o.w + 20 > x && o.y < yy + n.h + 44 && o.y + o.h + 44 > yy);
-  for (let i = 0; i < 40 && hit(y); i++) y += 60;
+  if (!at) for (let i = 0; i < 40 && hit(y); i++) y += 60;
+  if (!reduced()) { if (!at) flyOut.set(id, box(s!)); if (rest.length < STACK_MIN) rest.forEach((r) => flyOut.set(r, box(s!))); }
   store.mutate((d) => {
     let nodes = d.nodes.map((o) => (o.id === id ? { ...o, x, y } : o.id === sid ? { ...o, children: rest } : o));
     if (rest.length < STACK_MIN) nodes = nodes.filter((o) => o.id !== sid);
     return { ...d, nodes };
   }, { history: true });
-  store.setUI({ sel: new Set([id]) });
+  if (!at) store.setUI({ sel: new Set([id]) }); // 从展开视图拖出来时不切换选中（收起后不弹出生成面板）
   store.toast(rest.length < STACK_MIN ? "已移出；叠里只剩 1 个节点，堆叠已解散" : "已移出堆叠");
 }
 
-/** 叠封面：前 3 个有画面的成员（图片地址 / 视频封面），没有画面的用类型占位 */
-export function stackCover(doc: CanvasDoc, s: CanvasNode) {
-  return stackItems(doc, s).slice(0, 3).map((n) => {
-    const o = isGenKind(n.kind) ? outOf(n) : null;
-    return { id: n.id, kind: n.kind, title: isGenKind(n.kind) ? genOf(n).title : n.text || n.kind, src: n.kind === "image" ? o?.url || "" : n.kind === "video" ? o?.frame || "" : "", text: n.kind === "text" ? (o?.text || "").slice(0, 120) : "" };
-  });
+export type StackCard = { id: string; kind: string; title: string; src: string; text: string; w: number; h: number };
+/** 成员的展示信息：标题、画面（图片地址 / 视频封面）、文本摘要、尺寸 */
+export function cardOf(n: CanvasNode): StackCard {
+  const o = isGenKind(n.kind) ? outOf(n) : null;
+  return { id: n.id, kind: n.kind, title: isGenKind(n.kind) ? genOf(n).title : n.text || n.kind, src: n.kind === "image" ? o?.url || "" : n.kind === "video" ? o?.frame || "" : "", text: n.kind === "text" ? (o?.text || "").slice(0, 160) : "", w: n.w, h: n.h };
+}
+/** 叠封面：最上面 3 个成员（第 1 张在最前，第 2 张露在右边，第 3 张露在左边） */
+export function stackCover(doc: CanvasDoc, s: CanvasNode): StackCard[] {
+  const byId = new Map<string, CanvasNode>(); const want = new Set((s.children || []).slice(0, 6));
+  for (const n of doc.nodes) if (want.has(n.id)) byId.set(n.id, n);
+  return (s.children || []).map((id) => byId.get(id)).filter((n): n is CanvasNode => !!n).slice(0, 3).map(cardOf);
+}
+/** 封面的指纹：只有封面真的变了（换图 / 换顺序 / 数量变化）堆叠才重绘，拖动别的节点时不重绘 */
+export function stackCoverKey(doc: CanvasDoc, s: CanvasNode): string {
+  return stackCover(doc, s).map((c) => c.id + "\u0001" + c.src.length + c.src.slice(-48) + "\u0001" + c.text.length + "\u0001" + c.title).join("\u0002") + "#" + (s.children || []).length;
 }
