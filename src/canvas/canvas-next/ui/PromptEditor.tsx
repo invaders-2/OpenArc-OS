@@ -238,7 +238,7 @@ export function PromptEditor(props: PromptEditorProps) {
   const onLeave = () => { if (hover) { setHover(null); store.setUI({ hlEdge: null, hlNode: null }); } };
   const onClick = (e: React.MouseEvent) => {
     const c = chipOf(e.target); if (!c) return;
-    if (c.classList.contains("off")) { const id = c.dataset.ref!; if (connect(store, id, node.id, { select: false })) store.toast(`已重新连接「${title(store.node(id)!)}」`); return; }
+    if (c.classList.contains("off")) { const id = c.dataset.ref!; if (connect(store, id, node.id, { select: false, quiet: true })) store.toast(`已重新连接「${title(store.node(id)!)}」`); return; }
     c.classList.remove("pick"); void c.offsetWidth; c.classList.add("pick");
   };
   const onDbl = (e: React.MouseEvent) => { const c = chipOf(e.target); if (c && store.node(c.dataset.ref!)) { e.preventDefault(); ctl.focusNode(c.dataset.ref!); } };

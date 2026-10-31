@@ -1729,15 +1729,16 @@
 .cn-root #gpPrompt.pm-ed{min-height:64px;max-height:180px;}
 .cn-root .vp-prompt.pm-ed{min-height:92px;max-height:220px;}
 .cn-root .pm-ed.empty::before{content:attr(data-placeholder);color:var(--fg3);pointer-events:none;position:absolute;}
-.cn-root .pm-chip{display:inline-flex;align-items:center;gap:4px;vertical-align:-3px;height:20px;max-width:180px;margin:0 2px;padding:0 6px 0 2px;border-radius:6px;
-  background:rgba(var(--ink),.09);color:var(--fg);font-size:12px;line-height:20px;cursor:default;user-select:all;-webkit-user-select:all;
+.cn-root .pm-chip{display:inline-flex;align-items:center;gap:.25em;box-sizing:border-box;height:1.4em;max-width:14em;margin:0 .1em;padding:0 .35em 0 .15em;border-radius:.35em;
+  vertical-align:-.2em;font:inherit;line-height:1;background:rgba(var(--ink),.09);color:var(--fg);cursor:default;user-select:all;-webkit-user-select:all;
   box-shadow:inset 0 0 0 1px rgba(var(--ink),.08);transition:background-color var(--d-feedback) var(--e-std),box-shadow var(--d-feedback) var(--e-std),transform var(--d-feedback) var(--e-std);}
 .cn-root .pm-chip:hover{background:rgba(var(--ink),.16);box-shadow:inset 0 0 0 1px rgba(var(--ink),.22);}
-.cn-root .pm-chip .pm-th{flex:none;width:16px;height:16px;border-radius:4px;overflow:hidden;display:grid;place-items:center;background:rgba(var(--ink),.1);color:var(--fg2);}
+.cn-root .pm-chip .pm-th{flex:none;width:1em;height:1em;border-radius:.25em;overflow:hidden;display:grid;place-items:center;background:rgba(var(--ink),.1);color:var(--fg2);}
+.cn-root .pm-chip .pm-th svg{width:.85em;height:.85em;}
 .cn-root .pm-chip .pm-th img{width:100%;height:100%;object-fit:cover;display:block;}
 .cn-root .pm-chip[data-kind="text"] .pm-th,.cn-root .pm-chip[data-kind="audio"] .pm-th{background:transparent;}
 .cn-root .pm-chip .pm-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.cn-root .pm-chip .pm-n{flex:none;font-size:10px;color:var(--fg3);font-variant-numeric:tabular-nums;}
+.cn-root .pm-chip .pm-n{flex:none;font-size:.75em;color:var(--fg3);font-variant-numeric:tabular-nums;}
 .cn-root .pm-chip.off{background:transparent;box-shadow:inset 0 0 0 1px rgba(var(--ink),.28);color:var(--fg3);border-style:dashed;cursor:pointer;
   background-image:repeating-linear-gradient(135deg,transparent 0 4px,rgba(var(--ink),.05) 4px 8px);}
 .cn-root .pm-chip.off .pm-th{opacity:.5;}
