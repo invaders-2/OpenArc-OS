@@ -1,86 +1,200 @@
 /**
- * 堆叠节点（卡片叠在一起的封面）、堆叠画廊（双击展开）、分组运行确认框。
+ * 堆叠（TapNow Stack）：画布上的叠放封面 + 悬停工具条、双击后的展开视图，以及分组运行确认框。
+ *
+ * 性能：封面和展开视图都用缩略图（ui/thumb.ts），不解码原图；封面只在封面内容变化时重绘。
+ * 动效：堆叠时成员从原位飞进叠里；悬停时后面两张向两边扇开；双击时成员从叠里飞出排成一排，
+ * 画布其它内容淡出；Esc / 点空白处飞回叠里。系统开启「减少动态效果」时不播放。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CanvasDoc, CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { renderCanvasThumb } from "../../react-canvas/exportCanvas";
 import { savePersonalTemplate } from "../personalTemplates";
 import { title } from "../actions";
 import { planGroup, runGroup, type GroupPlan } from "../engine";
 import { isGenKind, outOf, TYPE_ICON, TYPE_LABEL, type GenKind } from "../model";
-import { groupLabel, isStack, stackCover, stackItems, takeFromStack, unstack } from "../stack";
+import { cardOf, groupLabel, isStack, stackCover, stackCoverKey, stackItems, takeFromStack, takeStackFlyIn, unstack, type StackCard } from "../stack";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { Icon } from "./Icon";
 import { saveNodesToLibrary } from "./Library";
 import { downloadMany } from "./menus";
 import { closeModal, ModalHead, openModal } from "./overlay";
-import { useAssetUrl } from "./useAsset";
+import { ThumbImage } from "./thumb";
 
 const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+const EASE = "cubic-bezier(.2,0,0,1)";
+const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** 封面缩略图长边（节点 ~220 宽 × 2 倍屏） / 展开视图缩略图长边 */
+const COVER_PX = 480, FOCUS_PX = 640;
 
-function Thumb({ src, kind, text, className }: { src: string; kind: string; text?: string; className?: string }) {
-  const url = useAssetUrl(src);
-  if (url) return <img className={className} src={url} alt="" draggable={false} />;
-  if (text) return <div className={(className || "") + " st-text"}>{text}</div>;
-  return <div className={(className || "") + " st-ph"}><Icon name={isGenKind(kind) ? TYPE_ICON[kind] : "layers"} /></div>;
+/** 一张卡片的画面：图片 / 视频封面用缩略图，文本显示摘要，其它显示类型图标 */
+function CardFace({ c, px }: { c: StackCard; px: number }) {
+  if (c.src) return <ThumbImage src={c.src} px={px} aspect={c.w && c.h ? c.w / c.h : 1} />;
+  if (c.text) return <div className="st-text">{c.text}</div>;
+  return <div className="st-ph"><Icon name={isGenKind(c.kind) ? TYPE_ICON[c.kind] : "layers"} /></div>;
 }
 
-/** 画布上的堆叠：最多 3 张错开叠放，右上角数量 */
+const toAgent = (ctl: Ctl, items: CanvasNode[]) => { items.forEach((n) => window.dispatchEvent(new CustomEvent("cn:agent-pick", { detail: n.id }))); ctl.store.setUI({ agentOpen: true }); ctl.store.toast(`已把 ${items.length} 个节点加入对话`); };
+
+/**
+ * 画布上的堆叠：最上面一张完整显示，第 2、3 张缩小一点从右、左两边露出来（TapNow）。
+ * 悬停时两边的卡片扇开，上方出现工具条：取消堆叠 / 加入对话 / 存素材库 / 下载。
+ */
 export function StackBody({ node }: { node: CanvasNode }) {
-  const doc = useS((s) => s.doc); const cover = stackCover(doc, node); const count = stackItems(doc, node).length;
-  return <div className="stack-body">
-    <div className="stack-cards">
-      {cover.slice().reverse().map((c, i, arr) => <div key={c.id} className="stack-card" style={{ transform: `translate(${(arr.length - 1 - i) * 8}px,${(arr.length - 1 - i) * -8}px) rotate(${(arr.length - 1 - i) * 2.5}deg)`, zIndex: i }}>
-        <Thumb src={c.src} kind={c.kind} text={c.text} />
-      </div>)}
+  const ctl = useCtl(); const store = ctl.store;
+  // 只订阅封面指纹（字符串）：拖动 / 生成别的节点时堆叠不重绘
+  const key = useS((s) => stackCoverKey(s.doc, node));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cover = useMemo(() => stackCover(store.state.doc, node), [key]);
+  const ref = useRef<HTMLDivElement>(null);
+  // 刚堆叠：卡片从各自原来的位置飞进叠里，其余成员化成浅色卡片一起收拢
+  useLayoutEffect(() => {
+    const from = takeStackFlyIn(node.id); const root = ref.current; if (!from || !root) return;
+    const cx = node.x + node.w / 2, cy = node.y + node.h / 2;
+    const fly = (el: HTMLElement, r: { x: number; y: number; w: number; h: number }, i: number, extra?: Keyframe) =>
+      el.animate([{ transform: `translate(${r.x + r.w / 2 - cx}px,${r.y + r.h / 2 - cy}px) scale(${Math.max(.2, r.w / Math.max(1, node.w))})`, ...(extra || {}) }], { duration: 420, delay: Math.min(i * 24, 160), easing: EASE, fill: "backwards" });
+    const cards = [...root.querySelectorAll<HTMLElement>(".stack-card")];
+    cover.forEach((c, i) => { const r = from.find((f) => f.id === c.id); const el = cards.find((x) => x.dataset.card === c.id); if (r && el) fly(el, r, i); });
+    const rest = from.filter((f) => !cover.some((c) => c.id === f.id)).slice(0, 12);
+    rest.forEach((r, i) => {
+      const g = document.createElement("div"); g.className = "stack-ghost"; root.appendChild(g);
+      const a = fly(g, r, i + cover.length, { opacity: 1 }); a.onfinish = a.oncancel = () => g.remove();
+      g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 420, delay: Math.min((i + cover.length) * 24, 160), easing: EASE, fill: "both" });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node.id]);
+  const items = () => stackItems(store.state.doc, store.node(node.id) || node);
+  const front = cover[0];
+  return <div className="stack-body" ref={ref}>
+    {cover.slice().reverse().map((c) => { const i = cover.indexOf(c); return (
+      <div key={c.id} data-card={c.id} className={"stack-card b" + i + (i ? "" : " front") + (c.src ? "" : c.text ? " is-text" : " is-ph")} style={i && front && c.w && c.h ? { aspectRatio: `${c.w} / ${c.h}` } : undefined}>
+        <CardFace c={c} px={COVER_PX} />
+      </div>); })}
+    <div className="stack-tools" data-act="stack-tools" onPointerDown={stop} onDoubleClick={stop}>
+      <button data-tip="取消堆叠" data-st="unstack" onClick={(e) => { stop(e); unstack(store, node.id); }}><Icon name="layers" size="s" /></button>
+      <button data-tip="加入对话" data-st="agent" onClick={(e) => { stop(e); toAgent(ctl, items()); }}><Icon name="msg" size="s" /></button>
+      <button data-tip="存素材库" data-st="lib" onClick={(e) => { stop(e); void saveNodesToLibrary(ctl, items(), e.currentTarget); }}><Icon name="libadd" size="s" /></button>
+      <button data-tip="全部下载" data-st="dl" onClick={(e) => { stop(e); void downloadMany(items(), store, store.state.name + "-堆叠"); }}><Icon name="download" size="s" /></button>
     </div>
-    <span className="stack-count tnum">{count}</span>
-    <button className="stack-open" data-act="stack-open" onPointerDown={stop} onClick={(e) => { stop(e); window.dispatchEvent(new CustomEvent("cn:stack", { detail: node.id })); }}>展开</button>
   </div>;
 }
 
-/** 双击堆叠 / 点「展开」：画廊里看全部成员，可移出、下载、存素材库、加入对话、取消堆叠 */
-export function StackGalleryHost() {
+/* ---------- 展开视图（双击堆叠） ---------- */
+
+/** 监听「展开堆叠」，在画布上方打开展开视图；打开时画布上的工具栏淡出 */
+export function StackFocusHost() {
   const ctl = useCtl();
+  const [st, setSt] = useState<{ id: string; closing: boolean } | null>(null);
   useEffect(() => {
-    const on = (e: Event) => { const id = (e as CustomEvent).detail as string; if (isStack(ctl.store.node(id))) openModal(() => <StackGallery ctl={ctl} id={id} />, "stack-gallery"); };
+    const on = (e: Event) => { const id = (e as CustomEvent).detail as string; if (isStack(ctl.store.node(id))) setSt({ id, closing: false }); };
     addEventListener("cn:stack", on); return () => removeEventListener("cn:stack", on);
   }, [ctl]);
-  return null;
+  useEffect(() => { document.getElementById("stage")?.classList.toggle("sfocus", !!st && !st.closing); }, [st]);
+  useEffect(() => () => document.getElementById("stage")?.classList.remove("sfocus"), []);
+  if (!st) return null;
+  return <StackFocus key={st.id} ctl={ctl} id={st.id} closing={st.closing} onClose={() => setSt((s) => (s ? { ...s, closing: true } : s))} onGone={() => setSt(null)} />;
 }
 
-function StackGallery({ ctl, id }: { ctl: Ctl; id: string }) {
-  const store = ctl.store; const doc = useS((s) => s.doc); const s = doc.nodes.find((n) => n.id === id);
-  useEffect(() => { if (!isStack(s)) closeModal(); }, [s]);
-  if (!s || !isStack(s)) return null;
-  const items = stackItems(doc, s);
-  const toAgent = () => { items.forEach((n) => window.dispatchEvent(new CustomEvent("cn:agent-pick", { detail: n.id }))); store.setUI({ agentOpen: true }); store.toast(`已把 ${items.length} 个节点加入对话`); };
-  return <>
-    <ModalHead title={<>堆叠 · {items.length} 个节点</>} icon="layers" />
-    <div className="mbd">
-      <div className="stack-actions">
-        <button className="btn" data-stack="agent" onClick={toAgent}><Icon name="msg" size="s" />加入对话</button>
-        <button className="btn" data-stack="lib" onClick={(e) => void saveNodesToLibrary(ctl, items, e.currentTarget)}><Icon name="libadd" size="s" />存素材库</button>
-        <button className="btn" data-stack="dl" onClick={() => void downloadMany(items, store, store.state.name + "-堆叠")}><Icon name="download" size="s" />全部下载</button>
-        <span className="sp" />
-        <button className="btn" data-stack="unstack" onClick={() => { closeModal(); unstack(store, id); }}><Icon name="split" size="s" />取消堆叠</button>
-      </div>
-      <div className="stack-grid">
-        {items.map((n) => <StackItem key={n.id} n={n} onTake={() => takeFromStack(store, id, n.id)} />)}
-      </div>
-      <p className="stack-tip">把画布上的节点拖到堆叠上就能放进来；移出的节点放在堆叠右侧。</p>
+/** 卡片在展开视图里的高度：一排放得下就大一点，多了就换行、可滚动 */
+function cardHeight(n: number, vw: number, vh: number) {
+  const base = Math.min(300, Math.max(150, vh * .4));
+  return n <= 4 ? base : n <= 8 ? Math.min(base, Math.max(150, (vw - 160) / (n * .8))) : Math.max(140, Math.min(200, base * .7));
+}
+
+function StackFocus({ ctl, id, closing, onClose, onGone }: { ctl: Ctl; id: string; closing: boolean; onClose: () => void; onGone: () => void }) {
+  const store = ctl.store; const doc = useS((s) => s.doc);
+  const s = doc.nodes.find((n) => n.id === id);
+  const items = s && isStack(s) ? stackItems(doc, s) : [];
+  const cards = items.map(cardOf);
+  const rowRef = useRef<HTMLDivElement>(null); const rootRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState(() => { const r = ctl.rect(); return { w: r.width, h: r.height }; });
+  const H = cardHeight(cards.length, size.w, size.h);
+  // 叠在屏幕上的位置（相对展开视图）：卡片从这里飞出、关闭时飞回这里
+  const stackRect = () => {
+    const n = store.node(id); const r = ctl.rect(); if (!n) return null; const k = store.state.view.k;
+    const p = ctl.toScreen(n.x, n.y + 24); return { x: p.x - r.left, y: p.y - r.top, w: n.w * k, h: n.h * k };
+  };
+  const flyAll = (dir: "in" | "out") => {
+    const row = rowRef.current; const root = rootRef.current; const sr = stackRect(); if (!row || !root || !sr || reduced()) return 0;
+    const base = root.getBoundingClientRect();
+    const els = [...row.querySelectorAll<HTMLElement>(".sf-card")];
+    // 先一次读完所有位置，再统一开始动画（边读边写会让每张卡片都强制重新布局一次）
+    const rects = els.map((el) => el.querySelector(".sf-face")!.getBoundingClientRect());
+    els.forEach((el, i) => {
+      const r = rects[i];
+      // 看不见的卡片、第 9 张以后的卡片只做淡入淡出：几十张卡片同时飞会掉帧
+      if (i >= 8 || r.bottom < base.top || r.top > base.bottom) { el.animate(dir === "out" ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: 200, delay: dir === "out" ? 200 : 0, easing: EASE, fill: "both" }); return; }
+      el.style.zIndex = String(20 - i); // 飞的途中第 1 张在最上面，和画布上的叠一致
+      const dx = sr.x + sr.w / 2 - (r.left - base.left + r.width / 2), dy = sr.y + sr.h / 2 - (r.top - base.top + r.height / 2);
+      const sc = Math.max(.1, sr.w / Math.max(1, r.width));
+      const at: Keyframe = { transform: `translate(${dx}px,${dy}px) scale(${sc})`, opacity: i < 3 ? 1 : 0 };
+      const kf = dir === "out" ? [at, { transform: "none", opacity: 1 }] : [{ transform: "none", opacity: 1 }, at];
+      el.animate(kf, { duration: dir === "out" ? 420 : 300, delay: dir === "out" ? Math.min(i * 22, 220) : Math.min((els.length - 1 - i) * 12, 120), easing: dir === "out" ? EASE : "cubic-bezier(.4,0,.2,1)", fill: "both" });
+    });
+    return dir === "out" ? 420 : 300 + Math.min(els.length * 12, 120);
+  };
+  useLayoutEffect(() => { flyAll("out"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!closing) return; const t = setTimeout(onGone, flyAll("in") + 20); return () => clearTimeout(t); }, [closing]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 叠没了（取消堆叠 / 只剩一个自动解散）：直接收起
+  useEffect(() => { if (!s || !isStack(s)) onGone(); }, [s, onGone]);
+  useEffect(() => { const on = () => { const r = ctl.rect(); setSize({ w: r.width, h: r.height }); }; addEventListener("resize", on); return () => removeEventListener("resize", on); }, [ctl]);
+  // Esc 收起；展开时画布快捷键不生效（Delete 不会误删整个叠）
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (document.querySelector(".lightbox,.modal")) return;
+      const t = e.target as HTMLElement | null; if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) && !t.closest(".sf")) return;
+      if (e.key === "Escape") { e.preventDefault(); onClose(); }
+      e.stopImmediatePropagation();
+    };
+    addEventListener("keydown", on, true); return () => removeEventListener("keydown", on, true);
+  }, [onClose]);
+
+  // 拖卡片：拖出一段距离松手 = 放回画布（放在松手的位置）；没拖动 = 打开预览
+  const drag = useRef<{ id: string; el: HTMLElement; sx: number; sy: number; moved: boolean } | null>(null);
+  const down = (e: React.PointerEvent, cid: string) => {
+    if (e.button !== 0) return; e.stopPropagation();
+    const el = e.currentTarget as HTMLElement; el.setPointerCapture(e.pointerId);
+    drag.current = { id: cid, el, sx: e.clientX, sy: e.clientY, moved: false };
+  };
+  const move = (e: React.PointerEvent) => {
+    const d = drag.current; if (!d) return; const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+    if (!d.moved && Math.hypot(dx, dy) < 5) return;
+    if (!d.moved) { d.moved = true; d.el.getAnimations().forEach((a) => a.cancel()); d.el.classList.add("dragging"); }
+    d.el.style.transform = `translate(${dx}px,${dy}px) rotate(${Math.max(-4, Math.min(4, dx / 60))}deg)`;
+  };
+  const up = (e: React.PointerEvent) => {
+    const d = drag.current; drag.current = null; if (!d) return;
+    const n = store.node(d.id);
+    if (!d.moved) { if (n && n.kind === "text") window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: d.id })); else if (n && outOf(n)) window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: d.id })); return; }
+    const dist = Math.hypot(e.clientX - d.sx, e.clientY - d.sy);
+    if (dist < 48 || !n) { d.el.classList.remove("dragging"); d.el.animate([{ transform: d.el.style.transform }, { transform: "none" }], { duration: 220, easing: EASE }); d.el.style.transform = ""; return; }
+    const face = d.el.querySelector(".sf-face")!.getBoundingClientRect();
+    const c = ctl.toWorld(face.left + face.width / 2, face.top + face.height / 2);
+    d.el.style.visibility = "hidden";
+    takeFromStack(store, id, d.id, { x: c.x - n.w / 2, y: c.y - n.h / 2 - 12 });
+  };
+
+  const label = s ? groupLabel(s) : "堆叠";
+  return <div className={"sf" + (closing ? " closing" : "")} ref={rootRef} data-stack-focus={id}>
+    <div className="sf-bg" onPointerDown={(e) => { if (e.button === 0) onClose(); }} />
+    <div className="sf-top" onPointerDown={stop}>
+      <span className="sf-title"><Icon name="layers" size="s" />{label}<b className="tnum">{items.length}</b></span>
+      <span className="vsep" />
+      <button className="sf-btn" data-sf="agent" onClick={() => toAgent(ctl, items)}><Icon name="msg" size="s" />加入对话</button>
+      <button className="sf-btn" data-sf="lib" onClick={(e) => void saveNodesToLibrary(ctl, items, e.currentTarget)}><Icon name="libadd" size="s" />存素材库</button>
+      <button className="sf-btn" data-sf="dl" onClick={() => void downloadMany(items, store, store.state.name + "-堆叠")}><Icon name="download" size="s" />全部下载</button>
+      <button className="sf-btn" data-sf="unstack" onClick={() => { unstack(store, id); }}><Icon name="split" size="s" />取消堆叠</button>
+      <span className="vsep" />
+      <button className="sf-btn solid" data-sf="close" onClick={onClose}>完成<kbd>Esc</kbd></button>
     </div>
-  </>;
-}
-
-function StackItem({ n, onTake }: { n: CanvasNode; onTake: () => void }) {
-  const o = isGenKind(n.kind) ? outOf(n) : null;
-  const src = n.kind === "image" ? o?.url || "" : n.kind === "video" ? o?.frame || "" : "";
-  return <div className="stack-item" data-stack-item={n.id}>
-    <button className="stack-thumb" title="在画布上查看" onClick={() => { closeModal(); if (o) window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: n.id })); }}>
-      <Thumb src={src} kind={n.kind} text={n.kind === "text" ? (o?.text || "").slice(0, 160) : ""} />
-    </button>
-    <div className="stack-meta"><span className="t">{title(n)}</span><button className="linkbtn" data-stack-take onClick={onTake}>移出</button></div>
+    <div className="sf-scroll" onPointerDown={(e) => { if (e.target === e.currentTarget && e.button === 0) onClose(); }}>
+      <div className="sf-row" ref={rowRef} onPointerDown={(e) => { if (e.target === e.currentTarget && e.button === 0) onClose(); }}>
+        {cards.map((c) => <div key={c.id} className="sf-card" data-sf-card={c.id} onPointerDown={(e) => down(e, c.id)} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
+          <div className="sf-head"><Icon name={isGenKind(c.kind) ? TYPE_ICON[c.kind] : "layers"} size="xs" /><span>{c.title}</span></div>
+          <div className={"sf-face" + (c.src ? "" : c.text ? " is-text" : " is-ph")} style={{ height: H, width: Math.round(H * Math.max(.5, Math.min(2, (c.w || 1) / (c.h || 1)))) }}><CardFace c={c} px={cards.length > 8 ? 400 : FOCUS_PX} /></div>
+        </div>)}
+      </div>
+    </div>
+    <div className="sf-hint"><Icon name="cursor" size="s" />拖动节点即可将它放回原画布 · 点一下预览</div>
   </div>;
 }
 

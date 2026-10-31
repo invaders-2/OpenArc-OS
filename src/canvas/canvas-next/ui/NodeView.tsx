@@ -11,7 +11,7 @@ import type { RunState } from "../store";
 import { Icon } from "./Icon";
 import { TableNodeBody } from "./TableNode";
 import { StackBody } from "./StackNode";
-import { isStack } from "../stack";
+import { isStack, takeFlyOut } from "../stack";
 import { useAssetUrl } from "./useAsset";
 import { AudioBody } from "./AudioBody";
 import { useMediaUrl } from "./useMedia";
@@ -47,21 +47,22 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
   useEffect(() => { const t = setTimeout(() => { enterRef.current = false; setEntering(false); }, 200); return () => clearTimeout(t); }, []);
   const cls = ["node", entering ? "enter" : "", p.sel ? "sel" : "", run ? "running" : "", p.drop ? "drop" : "", p.noconn ? "noconn" : "", p.hl ? "hl" : "", p.queued && !run ? "queued" : ""].filter(Boolean).join(" ");
   const style = { left: node.x, top: node.y, width: node.w };
+  const ref = useFlyOut(node.id, node.x, node.y, node.w, node.h);
   if (node.kind === "table") return (
-    <div className={cls + " tnode-wrap"} data-id={node.id} style={style}>
+    <div ref={ref} className={cls + " tnode-wrap"} data-id={node.id} style={style}>
       <TableNodeBody node={node} sel={p.sel} />
       <Ports h={node.h} />
     </div>
   );
   if (isStack(node)) return (
-    <div className={cls + " snode"} data-id={node.id} style={style}>
-      <div className="nhead"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "堆叠" ? node.text : "堆叠"}</span></div>
+    <div className={cls + " snode" + (node.text && node.text !== "堆叠" ? " named" : "")} data-id={node.id} style={style}>
+      <div className="nhead"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "堆叠" ? node.text : "堆叠"}</span><span className="st tnum" data-stack-count>{(node.children || []).length}</span></div>
       <div className="nbody sbody" style={{ height: node.h }}><StackBody node={node} /></div>
       <Ports h={node.h} only="out" />
     </div>
   );
   if (node.kind === "group") return (
-    <div className={cls + " gnode"} data-id={node.id} style={style}>
+    <div ref={ref} className={cls + " gnode"} data-id={node.id} style={style}>
       <div className="nhead"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "分组" ? node.text : "分组"}</span></div>
       <GroupRunTool node={node} />
       <div className="nbody gbody" style={{ height: node.h }}><GroupBody node={node} /></div>
@@ -73,7 +74,7 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
     const body = node.kind === "note" ? <NoteBody node={node} /> : node.kind === "timeline" ? <TimelineBody node={node} /> : node.kind === "model3d" ? <Model3DBody node={node} /> : node.kind === "scene3d" ? <Scene3DBody node={node} />
       : <div className="ph"><Icon name="layers" /><span>旧版「{legacyLabel[node.kind] || node.kind}」节点，新画布里只显示</span></div>;
     return (
-      <div className={cls + " lgnode lg-" + node.kind} data-id={node.id} style={style}>
+      <div ref={ref} className={cls + " lgnode lg-" + node.kind} data-id={node.id} style={style}>
         <div className="nhead"><Icon name={node.kind === "model3d" || node.kind === "scene3d" ? "cube" : node.kind === "timeline" ? "video" : node.kind === "note" ? "pencil" : "layers"} size="xs" /><span className="t">{legacyLabel[node.kind] || node.kind}</span></div>
         <div className="nbody" style={{ height: node.h }}>{body}</div>
         <div className="rz" data-rz title="拖动调整大小" />
@@ -83,7 +84,7 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
   }
   const g = genOf(node); const out = outOf(node); const running = !!run;
   return (
-    <div className={cls} data-id={node.id} style={style}>
+    <div ref={ref} className={cls} data-id={node.id} style={style}>
       <div className="nhead">
         <Icon name={TYPE_ICON[node.kind]} size="xs" /><span className="t">{g.title}</span>
         {node.kind === "video" ? <span className="kindtag" data-kindtag>视频</span> : null}
@@ -122,6 +123,22 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
     </div>
   );
 });
+
+/**
+ * 从堆叠里出来的节点（取消堆叠 / 移出）：挂载时从堆叠的位置飞到自己的位置（TapNow）。
+ * 只在第一次挂上 DOM 时读一次，之后的重绘不受影响。
+ */
+function useFlyOut(id: string, x: number, y: number, w: number, h: number) {
+  const done = useRef(false);
+  return (el: HTMLDivElement | null) => {
+    if (!el || done.current) return; done.current = true;
+    const f = takeFlyOut(id); if (!f) return;
+    const s = Math.max(.2, Math.min(1.5, f.w / Math.max(1, w)));
+    const dx = f.x + f.w / 2 - (x + w / 2), dy = f.y + f.h / 2 - (y + h / 2);
+    el.classList.remove("enter");
+    el.animate([{ transform: `translate(${dx}px,${dy}px) scale(${s})`, opacity: .4 }, { transform: "none", opacity: 1 }], { duration: 340, easing: "cubic-bezier(.2,0,0,1)" });
+  };
+}
 
 /** 连线端口；分组 / 堆叠只有输出端（连到文本节点按组出表） */
 function Ports({ h, only }: { h: number; only?: "out" }) {

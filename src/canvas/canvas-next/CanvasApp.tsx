@@ -23,7 +23,7 @@ import { isTyping, Viewport } from "./ui/Viewport";
 import "./ui/canvas-next.css";
 import { attachCollab } from "./collab";
 import { groupSelection, ungroup } from "./ui/LegacyNodes";
-import { runNodes, StackGalleryHost } from "./ui/StackNode";
+import { runNodes, StackFocusHost } from "./ui/StackNode";
 import { hiddenIds, isStack, stackSelection } from "./stack";
 
 /** 作用域根：所有样式都在 .cn-root 之下，主题写在它的 data-theme 上，不影响外壳 */
@@ -136,13 +136,13 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
         <div id="stage">
           <Viewport />
           <div id="layer"><Chrome /><SelectionUI /><Editors /></div>
+          <StackFocusHost />
         </div>
         <AgentPanel draft={agentDraft} />
       </div>
       <input type="file" ref={fileRef} accept={"image/*,video/*,audio/*," + DOC_ACCEPT} multiple hidden onChange={(e) => { const files = [...(e.target.files || [])]; e.target.value = ""; const o = uploadOpts.current; void addFiles(store, files, o.at || ctl.center(), { target: o.target, linkTo: o.linkTo, replace: o.replace }); }} />
       <Toasts />
       <Lightbox />
-      <StackGalleryHost />
       <TextDocLayer />
       <OverlayHost />
       </Root>

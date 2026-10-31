@@ -44,8 +44,10 @@ export function Viewport() {
     return (document.elementsFromPoint(x, y).find((el) => (el as HTMLElement).dataset?.mcell) as HTMLElement | undefined) || null;
   };
   const markCell = (el: HTMLElement | null) => { if (cellRef.current === el) return; cellRef.current?.classList.remove("drop"); el?.classList.add("drop"); cellRef.current = el; };
+  // 按几何位置找指针下的堆叠：拖动时每一帧都要查，不用 elementsFromPoint（会强制重新布局）
   const stackUnder = (x: number, y: number, moving: Set<string>) => {
-    for (const el of document.elementsFromPoint(x, y)) { const id = (el as HTMLElement).closest?.(".node")?.getAttribute("data-id"); if (id && !moving.has(id) && isStack(store.node(id))) return id; }
+    const p = ctl.toWorld(x, y); const nodes = store.state.doc.nodes;
+    for (let i = nodes.length - 1; i >= 0; i--) { const n = nodes[i]; if (!moving.has(n.id) && isStack(n) && p.x >= n.x && p.x <= n.x + n.w && p.y >= n.y && p.y <= n.y + 24 + n.h) return n.id; }
     return null;
   };
   /** 拖着的全是有结果的视频 / 音频时，指针下的剪辑时间线节点（TapNow：把视频拖进 Playlist） */
